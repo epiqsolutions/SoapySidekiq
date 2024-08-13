@@ -175,7 +175,6 @@ void SoapySidekiq::rx_receive_operation(void)
                                         "Detected timestamp overflow in RX Sidekiq Thread");
                             SoapySDR_logf(SOAPY_SDR_DEBUG, "expected timestamp %lu, actual %lu",
                                             expected_timestamp, tmp_p_rx_block->rf_timestamp);
-                            exit(1);
                             // restart the timestamp checking
                             first = true;
                         }
