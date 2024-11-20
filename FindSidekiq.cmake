@@ -33,11 +33,16 @@ if(NOT Sidekiq_FOUND)
     message(STATUS "library is ${libname} ")
     message(STATUS "otherlib is ${otherlib} ")
 
+    #    find_library(Sidekiq_LIBRARY
+    #    NAMES ${libname}
+    #    HINTS ${Sidekiq_PKG_LIBRARY_DIRS} $ENV{Sidekiq_DIR}/include
+    #    PATHS ~/sidekiq_sdk_current/lib/)
+
+
     find_library(Sidekiq_LIBRARY
         NAMES ${libname}
         HINTS ${Sidekiq_PKG_LIBRARY_DIRS} $ENV{Sidekiq_DIR}/include
-        PATHS ~/sidekiq_sdk_current/lib/)
-
+        PATHS ~/sidekiq_sw)
     set(Sidekiq_LIBRARIES ${Sidekiq_LIBRARY})
     set(Sidekiq_INCLUDE_DIRS ${Sidekiq_INCLUDE_DIR})
 

@@ -56,25 +56,20 @@ def do_frontend(sdr, handle):
 def do_gain(sdr, handle):
     #  *** Gain API
     gain_mode = sdr.hasGainMode(SOAPY_SDR_RX, handle)
-    print(f"\t gain mode is: {gain_mode}")
+    print(f"\t has gain mode is: {gain_mode}")
 
     sdr.setGainMode(SOAPY_SDR_RX, handle, True)
 
     gain_mode = sdr.getGainMode(SOAPY_SDR_RX, handle)
     print(f"\t gain mode is: {gain_mode}")
 
-    sdr.setGainMode(SOAPY_SDR_RX, handle, False)
-
-    gain_mode = sdr.getGainMode(SOAPY_SDR_RX, handle)
-    print(f"\t gain mode is: {gain_mode}")
-
-    # set the gain to 10db
+    # set the gain to 0 db
     sdr.setGainMode(SOAPY_SDR_RX, handle, False)
     sdr.setGain(SOAPY_SDR_RX, handle, 0)
     
     # read_rx_gain() is failing on the x4 so remove it for now.
-#    gain = sdr.getGain(SOAPY_SDR_RX, handle)
-#    print(f"\tgain value is: {gain}");
+    gain = sdr.getGain(SOAPY_SDR_RX, handle)
+    print(f"\tgain value is: {gain}");
 
     # set invalid gain, should get a warning
     sdr.setGain(SOAPY_SDR_RX, handle, 100)
@@ -342,10 +337,10 @@ def main(cardno, serial, handle, rate, bw, freq, gain, num_blocks, file_name):
     else:
         args = dict(serial = '8N55')
 
-    sdr = SoapySDR.Device(args)
-
     SoapySDR.setLogLevel(SOAPY_SDR_TRACE)
 #    SoapySDR.setLogLevel(SOAPY_SDR_ERROR)
+    sdr = SoapySDR.Device(args)
+
 
     # *** identification API
     do_identification(sdr, handle)
@@ -362,21 +357,18 @@ def main(cardno, serial, handle, rate, bw, freq, gain, num_blocks, file_name):
     # invalid test passed so comment out for now.
 #    num_tx_channels = sdr.getNumChannels(5)
 
-    user_input = input("Press any key to continue")
-    #  *** Frontend Corrections API
-    do_frontend(sdr, handle)
-
-    user_input = input("Press any key to continue")
-    #  *** Gain API
-    do_gain(sdr, handle)
-
-    user_input = input("Press any key to continue")
-    #  *** Frequency API
-    do_frequency(sdr, handle)
 
     user_input = input("Press any key to continue")
     #  *** Sample Rate API
     do_sample_rate_bw(sdr, handle)
+    user_input = input("Press any key to continue")
+   
+    #  *** Frequency API
+    do_frequency(sdr, handle)
+    user_input = input("Press any key to continue")
+
+    #  *** Frontend Corrections API
+    do_frontend(sdr, handle)
 
     user_input = input("Press any key to continue")
     #  *** settings API
@@ -393,6 +385,9 @@ def main(cardno, serial, handle, rate, bw, freq, gain, num_blocks, file_name):
     user_input = input("Press any key to continue")
     do_sensors(sdr, handle)
 
+    #  *** Gain API
+    do_gain(sdr, handle)
+    user_input = input("Press any key to continue")
 
 
 def parse_command_line_arguments():

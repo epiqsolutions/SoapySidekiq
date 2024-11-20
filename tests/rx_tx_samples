@@ -47,10 +47,9 @@ def transmit(sdr, tx_stream, buff_len, tx_buff, rate):
         except KeyboardInterrupt:
             break
 
-        underruns = sdr.readStreamStatus(tx_stream)
-        if last_underruns != underruns.ret:
-            SoapySDR.log(SoapySDR.SOAPY_SDR_INFO, f"underruns: {underruns.ret}")
-            last_underruns = underruns.ret
+        underrun_happened = sdr.readStreamStatus(tx_stream)
+        if underrun_happened.ret == SoapySDR.SOAPY_SDR_UNDERFLOW:
+            SoapySDR.log(SoapySDR.SOAPY_SDR_INFO, "underrun happened")
 
     sdr.deactivateStream(tx_stream)
     sdr.closeStream(tx_stream)
