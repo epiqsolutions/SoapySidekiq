@@ -95,8 +95,6 @@ def main(cardno, serial, handle,
 
     total_samps = 0
 
-    last_underruns = 0
-
     loop_ctr = 0
 
     while running:
@@ -116,10 +114,9 @@ def main(cardno, serial, handle,
             print(". ", end='', flush=True)
             total_samps = 0
 
-            underruns = sdr.readStreamStatus(tx_stream)
-            if underruns.ret != last_underruns:
-                print(f"\nunderruns: {underruns.ret}")
-                last_underruns = underruns.ret
+            status = sdr.readStreamStatus(tx_stream)
+            if status.ret:
+                print(f"\nunderruns occurred");
 
     sdr.deactivateStream(tx_stream)
     sdr.closeStream(tx_stream)
