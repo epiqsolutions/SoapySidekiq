@@ -144,7 +144,16 @@ class SoapySidekiq : public SoapySDR::Device
 
         void setGain(const int direction,
                 const size_t channel,
+                const std::string &name,
                 const double value);
+
+        void setGain(const int direction,
+                const size_t channel,
+                const double value) override;
+ 
+        double getGain(const int direction,
+                const size_t channel,
+                const std::string &name) const override;
 
         double getGain(const int direction,
                 const size_t channel) const;
@@ -182,6 +191,8 @@ class SoapySidekiq : public SoapySDR::Device
 
         SoapySDR::RangeList getSampleRateRange(const int    direction,
                 const size_t channel) const;
+
+        std::vector<double> listSampleRates(const int direction, const size_t channel) const override;
 
         void setBandwidth(const int direction,
                 const size_t channel,
@@ -307,6 +318,10 @@ class SoapySidekiq : public SoapySDR::Device
         skiq_rx_block_t *p_rx_block[DEFAULT_NUM_BUFFERS];
         uint32_t rxReadIndex{};
         uint32_t rxWriteIndex{};
+
+        // Buffer for leftover RX samples to allow readStream() to return arbitrary numElems
+        std::vector<int16_t> rx_fifo_buffer;
+        size_t rx_fifo_offset = 0;
 
         // TX buffer
         skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS];
