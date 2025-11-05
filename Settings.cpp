@@ -10,7 +10,7 @@
 #include <chrono>
 #include <cstdio>
 
-#define ENABLE_TIMING
+//#define ENABLE_TIMING
 
 #ifdef ENABLE_TIMING
 class Timer {
