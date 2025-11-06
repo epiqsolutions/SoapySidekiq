@@ -479,7 +479,7 @@ std::vector<std::string> SoapySidekiq::listAntennas(const int direction, const s
             if (this->param.rx_param[channel].num_trx_rf_ports > 0)
             {
                 antennas.push_back("TRX");
-
+                antennas.push_back("RX");
             }
             else if (this->param.rx_param[channel].num_fixed_rf_ports > 0)
             {
@@ -502,7 +502,7 @@ std::vector<std::string> SoapySidekiq::listAntennas(const int direction, const s
             if (this->param.tx_param[channel].num_trx_rf_ports > 0)
             {
                 antennas.push_back("TRX");
-
+                antennas.push_back("TX");
             }
             else if (this->param.tx_param[channel].num_fixed_rf_ports > 0)
             {
