@@ -391,6 +391,10 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
         {
             p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
+            if (i < 15) 
+            {
+                SoapySDR_logf(SOAPY_SDR_DEBUG, "block %d, ptr %p", i, p_tx_block[i]);
+            }
         }
         currTXBuffIndex = 0;
 
@@ -935,17 +939,17 @@ int SoapySidekiq::transmitBlock(const uint8_t* inbuff_ptr, size_t tx_block_bytes
         // float
         float *  float_inbuff = (float *)inbuff_ptr;
         uint32_t words_left = current_tx_block_size;
-        uint16_t * new_outbuff = (uint16_t *)outbuff_ptr;
+        int16_t *new_outbuff = (int16_t *)outbuff_ptr;
 
         SoapySDR_logf(SOAPY_SDR_DEBUG, "words_left %u", words_left);
 
         int short_ctr = 0;
         for (uint32_t i = 0; i < words_left; i++)
         {
-            new_outbuff[short_ctr + 1] = (uint16_t)(float_inbuff[short_ctr + 1] *
+            new_outbuff[short_ctr + 1] = (int16_t)(float_inbuff[short_ctr + 1] *
                     this->maxValue);
 
-            new_outbuff[short_ctr] = (uint16_t)(float_inbuff[short_ctr] *
+            new_outbuff[short_ctr] = (int16_t)(float_inbuff[short_ctr] *
                     this->maxValue);
             short_ctr += 2;
         }
@@ -953,6 +957,7 @@ int SoapySidekiq::transmitBlock(const uint8_t* inbuff_ptr, size_t tx_block_bytes
     }
 
 tryagain:
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "tryagain ");
     // need to make sure that we don't transmit a block that is already in use
     tx_buf_mutex.lock();
     if (p_tx_status[currTXBuffIndex] == 0)
@@ -981,10 +986,13 @@ tryagain:
     passedStructInstance->txIndex = currTXBuffIndex;
 
     // transmit the buffer
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "skiq_transmit, currTXBuffIndex %u block ptr %p ",
+                            currTXBuffIndex, this->p_tx_block[currTXBuffIndex]);
     status = skiq_transmit(this->card,
                            this->tx_hdl,
                            this->p_tx_block[currTXBuffIndex],
                            passedStructInstance);
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "skiq_transmit status %d ", status);
     if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
     {
         // update the in use status since we didn't actually send it yet
@@ -1018,6 +1026,7 @@ tryagain:
         currTXBuffIndex = (currTXBuffIndex + 1) % DEFAULT_NUM_BUFFERS;
     }
 
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "leaving transmitBlock");
     return 0;
 }
 
@@ -1068,6 +1077,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
                     &input[input_offset],
                     chunk);
 
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "here 2 ");
         tx_staging_fill += chunk;
         input_offset += chunk;
         bytes_to_copy -= chunk;
@@ -1088,6 +1098,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
         }
     }
 
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "here 3 ");
     // Return number of elements processed (not bytes)
     return numElems;
 }
