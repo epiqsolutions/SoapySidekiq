@@ -89,6 +89,8 @@ class SoapySidekiq : public SoapySDR::Device
                 long long &timeNs,
                 const long timeoutUs = 100000);
 
+        int transmitBlock(const uint8_t* data, size_t tx_block_bytes);
+
         int writeStream(SoapySDR::Stream *stream,
                 const void *const *buffs,
                 const size_t numElems,
@@ -328,6 +330,9 @@ class SoapySidekiq : public SoapySDR::Device
         skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS];
         uint32_t currTXBuffIndex{};
         uint32_t p_tx_block_index{};
+        std::vector<uint8_t> tx_staging_buffer;
+        size_t tx_staging_fill = 0;
+        size_t bytes_per_sample = 0;
 
 
         // TX callback static function

@@ -210,6 +210,9 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     {
         current_tx_block_size = DEFAULT_TX_BUFFER_LENGTH;
     }
+    tx_staging_buffer.resize(current_tx_block_size * 4); // number of bytes for the block
+    tx_staging_fill = 0;
+
     SoapySDR_logf(SOAPY_SDR_INFO, "TX block size set to %u", current_tx_block_size);
 
     /* set the source to what is passed in */

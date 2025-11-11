@@ -85,7 +85,8 @@ def main(cardno, serial, handle,
         tx_stream = sdr.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, [handle])
 
     # make the buffer the size of the MTU * The number of MTU we want in one go
-    buff_len=(sdr.getStreamMTU(tx_stream) * NUM_MTU)
+    #buff_len=(sdr.getStreamMTU(tx_stream) * NUM_MTU)
+    buff_len=(32768)
 
     tx_buff = make_tone(buff_len, make_float, offset, rate, fullscale)
 
@@ -144,6 +145,8 @@ def parse_command_line_arguments():
                         default=None, help='Offset from LO')
     parser.add_argument('-a', type=int, required=False, dest='attenuation',
                         default=35, help='TX gain in dB')
+    parser.add_argument('--float', type=bool, required=False, dest='make_float',
+                        default=False, help='use CF32 (float)')
     
     return parser.parse_args(sys.argv[1:])
 
@@ -152,8 +155,6 @@ if __name__ == '__main__':
     pars = parse_command_line_arguments()
     signal.signal(signal.SIGINT, signal_handler)
 
-    make_float = False
-
     main(pars.card, 
         pars.serial, 
         pars.handle, 
@@ -161,5 +162,5 @@ if __name__ == '__main__':
         pars.bw, 
         pars.freq, 
         pars.attenuation, 
-        make_float,
+        pars.make_float,
         pars.offset)

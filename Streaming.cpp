@@ -385,6 +385,8 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
                 "' -- Only CS16 is supported by SoapySidekiq TX module.");
         }
 
+        bytes_per_sample = txUseShort ? sizeof(int16_t) * 2 : sizeof(float) * 2;
+
         // Allocate buffers
         for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
         {
@@ -912,6 +914,186 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
     return samples_done;
 }
 
+int SoapySidekiq::transmitBlock(const uint8_t* inbuff_ptr, size_t tx_block_bytes)
+{
+
+    int status = 0;
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "transmitBlock block_bytes %zu", tx_block_bytes);
+
+    // get a pointer to the next transmit block.
+    uint8_t *outbuff_ptr =
+        (uint8_t *)p_tx_block[currTXBuffIndex]->data;
+
+    // determine if we received short or float
+    if (txUseShort == true)
+    {
+        // CS16
+        memcpy(outbuff_ptr, inbuff_ptr, tx_block_bytes);
+    }
+    else
+    {
+        // float
+        float *  float_inbuff = (float *)inbuff_ptr;
+        uint32_t words_left = current_tx_block_size;
+        uint16_t * new_outbuff = (uint16_t *)outbuff_ptr;
+
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "words_left %u", words_left);
+
+        int short_ctr = 0;
+        for (uint32_t i = 0; i < words_left; i++)
+        {
+            new_outbuff[short_ctr + 1] = (uint16_t)(float_inbuff[short_ctr + 1] *
+                    this->maxValue);
+
+            new_outbuff[short_ctr] = (uint16_t)(float_inbuff[short_ctr] *
+                    this->maxValue);
+            short_ctr += 2;
+        }
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "here ");
+    }
+
+tryagain:
+    // need to make sure that we don't transmit a block that is already in use
+    tx_buf_mutex.lock();
+    if (p_tx_status[currTXBuffIndex] == 0)
+    {
+        p_tx_status[currTXBuffIndex] = 1;
+    }
+    else
+    {
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "busy 1");
+        // in use so wait for a free block.
+        tx_buf_mutex.unlock();
+        pthread_mutex_lock(&space_avail_mutex);
+        // wait for a packet to complete
+        space_avail = false;
+        pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
+        pthread_mutex_unlock(&space_avail_mutex);
+
+        // space available so try again
+        goto tryagain;
+    }
+    tx_buf_mutex.unlock();
+
+    // Create the structure that is passed in p_user
+    passedStructInstance = new passedStruct;
+    passedStructInstance->classAddr = this;
+    passedStructInstance->txIndex = currTXBuffIndex;
+
+    // transmit the buffer
+    status = skiq_transmit(this->card,
+                           this->tx_hdl,
+                           this->p_tx_block[currTXBuffIndex],
+                           passedStructInstance);
+    if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
+    {
+        // update the in use status since we didn't actually send it yet
+        tx_buf_mutex.lock();
+        p_tx_status[currTXBuffIndex] = 0;
+        tx_buf_mutex.unlock();
+
+        // if there's no space left to send, wait until there should be space available
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "busy 2");
+        pthread_mutex_lock(&space_avail_mutex);
+
+        space_avail = false;
+
+        // wait for a packet to complete
+        while (!space_avail)
+        {
+            pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
+        }
+        pthread_mutex_unlock(&space_avail_mutex);
+
+        // space is available now try transmitting it again
+        goto tryagain;
+    }
+    else if (status != 0)
+    {
+        return status;
+    }
+    else
+    {
+        // move the index into the transmit block array
+        currTXBuffIndex = (currTXBuffIndex + 1) % DEFAULT_NUM_BUFFERS;
+    }
+
+    return 0;
+}
+
+
+int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
+                              const void *const *buffs,
+                              const size_t numElems,
+                              int &flags,
+                              const long long timeNs,
+                              const long timeoutUs)
+{
+    if (stream != TX_STREAM)
+        return SOAPY_SDR_NOT_SUPPORTED;
+
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream numElems %zu, bytes_per_sample %zu", 
+            numElems, bytes_per_sample);
+
+    if (first_transmit == true)
+    {
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting on enabled");
+
+        pthread_mutex_lock(&tx_enabled_mutex);
+        pthread_cond_wait(&tx_enabled_cond, &tx_enabled_mutex);
+        pthread_mutex_unlock(&tx_enabled_mutex);
+        first_transmit = false;
+    }
+
+    // Initialize staging buffer on first call
+    if (tx_staging_buffer.empty())
+    {
+        tx_staging_buffer.resize(current_tx_block_size * bytes_per_sample);
+        tx_staging_fill = 0;
+    }
+
+    const uint8_t* input = reinterpret_cast<const uint8_t*>(buffs[0]);
+    size_t bytes_to_copy = numElems * bytes_per_sample;
+    size_t input_offset = 0;
+
+    while (bytes_to_copy > 0)
+    {
+        size_t space_left = (current_tx_block_size * bytes_per_sample) - tx_staging_fill;
+        size_t chunk = std::min(space_left, bytes_to_copy);
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "bytes_to_copy %zu, chunk %zu, space_left %zu, tx_staging_fill %zu", 
+                                        bytes_to_copy, chunk, space_left, tx_staging_fill);
+
+        // Copy data into staging buffer
+        std::memcpy(&tx_staging_buffer[tx_staging_fill],
+                    &input[input_offset],
+                    chunk);
+
+        tx_staging_fill += chunk;
+        input_offset += chunk;
+        bytes_to_copy -= chunk;
+
+        // When we fill a full hardware block, transmit it
+        if (tx_staging_fill == current_tx_block_size * bytes_per_sample)
+        {
+            int status = transmitBlock(tx_staging_buffer.data(), tx_staging_fill);
+            if (status != 0)
+            {
+                SoapySDR_logf(SOAPY_SDR_ERROR,
+                              "skiq_transmit failed, status %d", status);
+                return SOAPY_SDR_STREAM_ERROR;
+            }
+
+            // Reset staging buffer fill counter for next accumulation
+            tx_staging_fill = 0;
+        }
+    }
+
+    // Return number of elements processed (not bytes)
+    return numElems;
+}
+
+
+#ifdef POO
 int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                               const void *const *buffs, const size_t numElems,
                               int &flags, const long long timeNs,
@@ -1055,6 +1237,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     return numElems;
 }
+#endif
 
 int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream,
                                   size_t &chanMask,
