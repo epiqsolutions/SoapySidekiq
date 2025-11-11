@@ -391,10 +391,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
         {
             p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
-            if (i < 15) 
-            {
-                SoapySDR_logf(SOAPY_SDR_DEBUG, "block %d, ptr %p", i, p_tx_block[i]);
-            }
         }
         currTXBuffIndex = 0;
 
@@ -920,113 +916,106 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
 
 int SoapySidekiq::transmitBlock(const uint8_t* inbuff_ptr, size_t tx_block_bytes)
 {
-
     int status = 0;
-    SoapySDR_logf(SOAPY_SDR_DEBUG, "transmitBlock block_bytes %zu", tx_block_bytes);
 
-    // get a pointer to the next transmit block.
-    uint8_t *outbuff_ptr =
-        (uint8_t *)p_tx_block[currTXBuffIndex]->data;
+    //SoapySDR_logf(SOAPY_SDR_DEBUG,
+    //              "transmitBlock: tx_block_bytes=%zu txUseShort=%d",
+    //              tx_block_bytes, txUseShort);
 
-    // determine if we received short or float
-    if (txUseShort == true)
+    // Get pointer to Sidekiq transmit block memory
+    uint8_t* outbuff_ptr = (uint8_t*)p_tx_block[currTXBuffIndex]->data;
+    if (!outbuff_ptr)
     {
-        // CS16
-        memcpy(outbuff_ptr, inbuff_ptr, tx_block_bytes);
+        SoapySDR_logf(SOAPY_SDR_ERROR, "Null TX buffer pointer!");
+        return SOAPY_SDR_STREAM_ERROR;
+    }
+
+    const size_t numComplex = current_tx_block_size; // # of complex samples per block
+    size_t out_bytes = numComplex * sizeof(int16_t) * 2; // always CS16 output
+
+    // -------------------------------
+    // 1️⃣ Copy or convert into CS16
+    // -------------------------------
+    if (txUseShort)
+    {
+        // CS16 input: straight copy
+        //SoapySDR_logf(SOAPY_SDR_DEBUG, "Copying CS16 block (%zu bytes)", out_bytes);
+        memcpy(outbuff_ptr, inbuff_ptr, out_bytes);
     }
     else
     {
-        // float
-        float *  float_inbuff = (float *)inbuff_ptr;
-        uint32_t words_left = current_tx_block_size;
-        int16_t *new_outbuff = (int16_t *)outbuff_ptr;
+        // CF32 input: convert float32 → int16
+        const float* float_inbuff = reinterpret_cast<const float*>(inbuff_ptr);
+        int16_t* short_outbuff = reinterpret_cast<int16_t*>(outbuff_ptr);
+        const float scale = static_cast<float>(this->maxValue);
 
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "words_left %u", words_left);
-
-        int short_ctr = 0;
-        for (uint32_t i = 0; i < words_left; i++)
+        // Each complex sample has 2 floats (I,Q)
+        for (size_t i = 0; i < numComplex * 2; ++i)
         {
-            new_outbuff[short_ctr + 1] = (int16_t)(float_inbuff[short_ctr + 1] *
-                    this->maxValue);
-
-            new_outbuff[short_ctr] = (int16_t)(float_inbuff[short_ctr] *
-                    this->maxValue);
-            short_ctr += 2;
+            float v = float_inbuff[i] * scale;
+            if (v > 32767.0f) v = 32767.0f;
+            if (v < -32768.0f) v = -32768.0f;
+            short_outbuff[i] = static_cast<int16_t>(v);
         }
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "here ");
     }
 
-tryagain:
-    SoapySDR_logf(SOAPY_SDR_DEBUG, "tryagain ");
-    // need to make sure that we don't transmit a block that is already in use
+    // -------------------------------
+    // 2️⃣ Queue management
+    // -------------------------------
+try_again:
     tx_buf_mutex.lock();
     if (p_tx_status[currTXBuffIndex] == 0)
     {
         p_tx_status[currTXBuffIndex] = 1;
+        tx_buf_mutex.unlock();
     }
     else
     {
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "busy 1");
-        // in use so wait for a free block.
         tx_buf_mutex.unlock();
         pthread_mutex_lock(&space_avail_mutex);
-        // wait for a packet to complete
         space_avail = false;
         pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
         pthread_mutex_unlock(&space_avail_mutex);
-
-        // space available so try again
-        goto tryagain;
+        goto try_again;
     }
-    tx_buf_mutex.unlock();
 
-    // Create the structure that is passed in p_user
+    // -------------------------------
+    // 3️⃣ Prepare callback + transmit
+    // -------------------------------
     passedStructInstance = new passedStruct;
     passedStructInstance->classAddr = this;
-    passedStructInstance->txIndex = currTXBuffIndex;
+    passedStructInstance->txIndex   = currTXBuffIndex;
 
-    // transmit the buffer
-    SoapySDR_logf(SOAPY_SDR_DEBUG, "skiq_transmit, currTXBuffIndex %u block ptr %p ",
-                            currTXBuffIndex, this->p_tx_block[currTXBuffIndex]);
     status = skiq_transmit(this->card,
                            this->tx_hdl,
                            this->p_tx_block[currTXBuffIndex],
                            passedStructInstance);
-    SoapySDR_logf(SOAPY_SDR_DEBUG, "skiq_transmit status %d ", status);
+
     if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
     {
-        // update the in use status since we didn't actually send it yet
         tx_buf_mutex.lock();
         p_tx_status[currTXBuffIndex] = 0;
         tx_buf_mutex.unlock();
 
-        // if there's no space left to send, wait until there should be space available
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "busy 2");
         pthread_mutex_lock(&space_avail_mutex);
-
         space_avail = false;
-
-        // wait for a packet to complete
         while (!space_avail)
-        {
             pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
-        }
         pthread_mutex_unlock(&space_avail_mutex);
 
-        // space is available now try transmitting it again
-        goto tryagain;
+        goto try_again;
     }
     else if (status != 0)
     {
+        SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_transmit failed, status=%d", status);
         return status;
     }
-    else
-    {
-        // move the index into the transmit block array
-        currTXBuffIndex = (currTXBuffIndex + 1) % DEFAULT_NUM_BUFFERS;
-    }
 
-    SoapySDR_logf(SOAPY_SDR_DEBUG, "leaving transmitBlock");
+    // -------------------------------
+    // 4️⃣ Advance index and finish
+    // -------------------------------
+    currTXBuffIndex = (currTXBuffIndex + 1) % DEFAULT_NUM_BUFFERS;
+
     return 0;
 }
 
@@ -1041,8 +1030,8 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
     if (stream != TX_STREAM)
         return SOAPY_SDR_NOT_SUPPORTED;
 
-    SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream numElems %zu, bytes_per_sample %zu", 
-            numElems, bytes_per_sample);
+    //SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream numElems %zu, bytes_per_sample %zu", 
+    //        numElems, bytes_per_sample);
 
     if (first_transmit == true)
     {
@@ -1069,15 +1058,14 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
     {
         size_t space_left = (current_tx_block_size * bytes_per_sample) - tx_staging_fill;
         size_t chunk = std::min(space_left, bytes_to_copy);
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "bytes_to_copy %zu, chunk %zu, space_left %zu, tx_staging_fill %zu", 
-                                        bytes_to_copy, chunk, space_left, tx_staging_fill);
+        //SoapySDR_logf(SOAPY_SDR_DEBUG, "bytes_to_copy %zu, chunk %zu, space_left %zu, tx_staging_fill %zu", 
+         //                               bytes_to_copy, chunk, space_left, tx_staging_fill);
 
         // Copy data into staging buffer
         std::memcpy(&tx_staging_buffer[tx_staging_fill],
                     &input[input_offset],
                     chunk);
 
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "here 2 ");
         tx_staging_fill += chunk;
         input_offset += chunk;
         bytes_to_copy -= chunk;
@@ -1098,7 +1086,6 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
         }
     }
 
-    SoapySDR_logf(SOAPY_SDR_DEBUG, "here 3 ");
     // Return number of elements processed (not bytes)
     return numElems;
 }
