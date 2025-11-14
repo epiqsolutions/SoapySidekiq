@@ -368,6 +368,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
                       card, status);
         throw std::runtime_error("");
     }
+    SoapySDR_logf(SOAPY_SDR_TRACE, "registering tx_complete");
     pthread_mutex_init(&space_avail_mutex, nullptr);
     pthread_cond_init(&space_avail_cond, nullptr);
 

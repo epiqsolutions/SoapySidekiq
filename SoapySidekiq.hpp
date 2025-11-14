@@ -26,6 +26,14 @@
 #define SLEEP_1SEC (1 * 1000000)
 #define NANOS_IN_SEC (1000000000ULL)
 
+// Forward declaration so the compiler knows this type exists.
+class SoapySidekiq;
+
+struct passedStruct
+{
+    SoapySidekiq *classAddr;
+    uint32_t txIndex;
+};
 
 class SoapySidekiq : public SoapySDR::Device
 {
@@ -333,6 +341,7 @@ class SoapySidekiq : public SoapySDR::Device
         std::vector<uint8_t> tx_staging_buffer;
         size_t tx_staging_fill = 0;
         size_t bytes_per_sample = 0;
+        passedStruct tx_contexts[DEFAULT_NUM_BUFFERS];  // persistent callback data
 
 
         // TX callback static function
@@ -354,7 +363,6 @@ class SoapySidekiq : public SoapySDR::Device
             // Call the member function
             self->tx_complete(status, p_data, txIndex);
 
-            delete instance;
         }
 
         // TX enabled callback static function
@@ -374,13 +382,6 @@ class SoapySidekiq : public SoapySDR::Device
         static SoapySidekiq *thisClassAddr;
 
     public:
-        struct passedStruct
-        {
-            SoapySidekiq *classAddr;
-            uint32_t txIndex;
-        };
-
-        passedStruct *passedStructInstance;
 
         //  receive thread
         std::thread _rx_receive_thread;
