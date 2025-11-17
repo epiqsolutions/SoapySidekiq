@@ -1029,6 +1029,9 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
     if (stream != TX_STREAM)
         return SOAPY_SDR_NOT_SUPPORTED;
 
+//    SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream, numElems %zu, curr block size %zu, bytes_per_sample %zu, tot bytes %zu",
+//                numElems, current_tx_block_size, bytes_per_sample, numElems * bytes_per_sample);
+
     if (first_transmit == true)
     {
         SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting on enabled");
@@ -1039,13 +1042,6 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
         first_transmit = false;
     }
 
-    // Initialize staging buffer on first call
-    if (tx_staging_buffer.empty())
-    {
-        tx_staging_buffer.resize(current_tx_block_size * bytes_per_sample);
-        tx_staging_fill = 0;
-    }
-
     const uint8_t* input = reinterpret_cast<const uint8_t*>(buffs[0]);
     size_t bytes_to_copy = numElems * bytes_per_sample;
     size_t input_offset = 0;
@@ -1054,6 +1050,9 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
     {
         size_t space_left = (current_tx_block_size * bytes_per_sample) - tx_staging_fill;
         size_t chunk = std::min(space_left, bytes_to_copy);
+
+//        SoapySDR_logf(SOAPY_SDR_DEBUG, "space_left %zu, tx_staging_fill %zu, chunk %zu, bytes_to_copy %zu",
+//                space_left, tx_staging_fill, chunk, bytes_to_copy);
 
         // Copy data into staging buffer
         std::memcpy(&tx_staging_buffer[tx_staging_fill],
@@ -1067,6 +1066,8 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream,
         // When we fill a full hardware block, transmit it
         if (tx_staging_fill == current_tx_block_size * bytes_per_sample)
         {
+//            SoapySDR_logf(SOAPY_SDR_DEBUG, "transmitBlock tx_staging_fill %zu", 
+//                    tx_staging_fill);
             int status = transmitBlock(tx_staging_buffer.data(), tx_staging_fill);
             if (status != 0)
             {

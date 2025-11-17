@@ -86,8 +86,8 @@ def main(cardno, serial, handle,
 
     # make the buffer the size of the MTU * The number of MTU we want in one go
     #buff_len=(sdr.getStreamMTU(tx_stream) * NUM_MTU)
-    #buff_len=(32768)
-    buff_len=(sdr.getStreamMTU(tx_stream))
+    buff_len=(64000)
+    #buff_len=(sdr.getStreamMTU(tx_stream))
     SoapySDR.log(SoapySDR.SOAPY_SDR_INFO, f"buff_len {buff_len}")
 
     tx_buff = make_tone(buff_len, make_float, offset, rate, fullscale)
