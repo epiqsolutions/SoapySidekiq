@@ -33,6 +33,16 @@ sudo cmake --install build
 sudo ldconfig
 ```
 
+## Streaming limitations
+
+The current streaming implementation supports:
+
+- at most one active RX stream per device
+- at most one active TX stream per device
+- one requested channel per stream
+
+Simultaneous RX and TX are supported. Multi-channel Soapy streams are not currently implemented.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
