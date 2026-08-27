@@ -262,6 +262,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     uint8_t channels = 0;
     skiq_iq_order_t iq_order;
     int i;
+    uint8_t topology = 0;
 
     /* Register our own logging function before initializing the library */
     skiq_register_logging( logging_handler );
@@ -303,6 +304,15 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("");
     }
 
+    if (args.count("topology") != 0)
+    {
+        topology = std::stoi(args.at("topology"));
+    }
+    else
+    {
+        topology = DEFAULT_TOPOLOGY_ID;
+    }
+
     if (args.count("tx_block_size") != 0)
     {
         current_tx_block_size = std::stoi(args.at("tx_block_size"));
@@ -336,6 +346,26 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_init failed (card %u), status %d",
                       card, status);
         throw std::runtime_error("");
+    }
+
+    if (topology != DEFAULT_TOPOLOGY_ID)
+    {
+        if (skiq_is_topology_supported(card))
+        {
+            status = skiq_apply_topology(card, topology);
+            if (status != 0)
+            {
+                SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_apply_topology failed (card %u), status %d",
+                              card, status);
+                throw std::runtime_error("");
+            }
+        }
+	else
+        {
+            SoapySDR_logf(SOAPY_SDR_ERROR, "Topology not supported on card %u",
+                          card, status);
+            throw std::runtime_error("");
+        }
     }
 
     status = skiq_read_parameters(card, &this->param);
@@ -989,6 +1019,8 @@ void SoapySidekiq::setGain(const int direction,
                 break;
             case skiq_nv100:
             case skiq_nvm2:
+            case skiq_z4:
+            case skiq_z4_mp:
                 gain_index = (uint8_t)(187 + std::round(value * 2.0)); // 0.5dB/step, starts at 187
                 break;
             default:
@@ -1047,6 +1079,8 @@ void SoapySidekiq::setGain(const int direction,
             case skiq_x2:
             case skiq_nv100:
             case skiq_nvm2:
+            case skiq_z4:
+            case skiq_z4_mp:
                 if ((value < 0) || (value > 41.75))
                 {
                     SoapySDR_logf(SOAPY_SDR_WARNING,
@@ -1117,6 +1151,8 @@ double SoapySidekiq::getGain(const int direction, const size_t channel) const
                 return static_cast<double>(gain_index - 195) / 2.0; // 0.5dB/step
             case skiq_nv100:
             case skiq_nvm2:
+            case skiq_z4:
+            case skiq_z4_mp:
                 return static_cast<double>(gain_index - 187) / 2.0;
             default:
                 SoapySDR_logf(SOAPY_SDR_WARNING,
@@ -1198,6 +1234,8 @@ SoapySDR::Range SoapySidekiq::getGainRange(const int    direction,
             // 187 to 255 [0 to 34 dB, 0.5 dB/step]
             case skiq_nv100:
             case skiq_nvm2:
+            case skiq_z4:
+            case skiq_z4_mp:
                 gain_min = 0;
                 gain_max = 34;
                 step = 0.5;
@@ -1235,6 +1273,8 @@ SoapySDR::Range SoapySidekiq::getGainRange(const int    direction,
             case skiq_x40:
             case skiq_nv100:
             case skiq_nvm2:
+	    case skiq_z4:
+	    case skiq_z4_mp:
                 attenuation_max = 41.75;
                 attenuation_step = 0.25;
                 break;
