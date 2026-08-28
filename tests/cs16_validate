@@ -102,7 +102,7 @@ def main(cardno, topology, rx_handle, rate, bw, freq):
     sdr = SoapySDR.Device(args)
 
     # get the full scale value for this card
-    fullscale = np.iinfo(np.int16).max
+    fullscale = int(sdr.readSetting("full_scale"))
     SoapySDR.log(SoapySDR.SOAPY_SDR_INFO, f"RX fullscale value: {fullscale:,}")
 
     # set the radio to use FPGA counter mode

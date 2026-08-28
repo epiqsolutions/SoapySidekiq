@@ -152,7 +152,7 @@ def main(cardno, serial, topology,
     SoapySDR.setLogLevel(SOAPY_SDR_TRACE)
 
     # get the full scale value for making the tone.
-    fullscale = np.iinfo(np.int16).max
+    fullscale = int(sdr.readSetting("full_scale"))
     SoapySDR.log(SoapySDR.SOAPY_SDR_INFO, f"TX fullscale value on this card {fullscale:,}")
 
     rx_stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [rx_handle])

@@ -55,7 +55,7 @@ def main(cardno, topology, rx_chan, fs, bw, freq):
     print("Stream MTU",  N)
 
     # get the full scale value for this card
-    max_data = np.iinfo(np.int16).max
+    max_data = int(sdr.readSetting("full_scale"))
     SoapySDR.log(SoapySDR.SOAPY_SDR_INFO, f"RX fullscale value: {max_data:,}")
 
     buff = np.empty([NUM_BUFF, N], dtype=np.csingle)
