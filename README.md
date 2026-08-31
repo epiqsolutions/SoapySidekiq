@@ -1,54 +1,48 @@
-# Soapy SDR module for Epiq Solutions Sidekiq
+# SoapySidekiq
 
-# need to set the LD_LIBRARY_PATH to point to the epiq solutions library
-$ export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/epiq:/usr/lib/epiq:$LD_LIBRARY_PATH"
+SoapySDR support module for Epiq Solutions Sidekiq SDR devices.
 
-# Building using the install.sh script
-$ ./install.sh
+## Minimum dependencies
 
-or if a platform 
+- CMake 3.8 or newer
+- A C++17-capable compiler
+- SoapySDR development files, version 0.4.0 or newer
+- Sidekiq SDK version 4.26.0 or newer
 
-$ ./install.sh PLATFORM="msiq-g20g40"  or "msiq-x40", "msiq-z3u"
+## Sidekiq SDK discovery
 
-# More detailed make and install info:
+The build locates the Sidekiq SDK in this order:
 
-# Building 
-Use the normal build process for cmake projects:
+1. `-DSIDEKIQ_SDK_DIR=/path/to/sdk`
+2. `SIDEKIQ_SDK_DIR` from the environment
+3. `$HOME/sidekiq_sdk_current`
 
-$ mkdir build
+## Build
 
-$ cd build
+Configure and build with CMake:
 
-$ cmake ../ -DPLATFORM="<platform_name>"
-
-$ make -j8
-
-$ sudo make install
-
-$ sudo ldconfig 
-
-# Building for the X40:
-**SoapySDR** must be installed from source if using it with the X40.
-
-## Building SoapySDR
-The x40 has two different versions of python, python3.8 is default and python3.9.
-
-So when building the **SoapySDR** repo we need to explicitly call out the paths to the python3.8 libraries.
-
-So we need to run:
-
-```
-$ cmake .. -DPython3_EXECUTABLE=/usr/bin/python3.8 -DPython3_INCLUDE_DIR=/usr/include/python3.8 -DPython3_LIBRARY=/usr/lib/aarch64-linux-gnu/libpython3.8.so
-
-We also need to make sure PYTHONPATH is set correctly:
-
+```bash
+cmake -S . -B build
+cmake --build build
 ```
 
+Install the module with:
+
+```bash
+sudo cmake --install build
+sudo ldconfig
 ```
-$ export PYTHONPATH="/usr/local/lib/python3.8/site-packages$PYTHONPATH"
-```
 
+## Streaming limitations
 
+The current streaming implementation supports:
 
-# Licensing information
-* https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
+- at most one active RX stream per device
+- at most one active TX stream per device
+- one requested channel per stream
+
+Simultaneous RX and TX are supported. Multi-channel Soapy streams are not currently implemented.
+
+## License
+
+- https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

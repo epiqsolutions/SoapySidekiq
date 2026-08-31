@@ -46,7 +46,7 @@ static std::vector<SoapySDR::Kwargs> findSidekiq(const SoapySDR::Kwargs &args)
 
         deviceAvailable =
             (card_owner == getpid());   // owner must be this process(pid)
-                                        
+
         if (!deviceAvailable)
         {
             SoapySDR_logf(SOAPY_SDR_WARNING,
