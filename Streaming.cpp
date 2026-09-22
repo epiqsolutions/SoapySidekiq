@@ -1,6 +1,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <iostream>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 #include <string>
@@ -1058,9 +1059,40 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     while (curr_block < num_blocks)
     {
+        const uint32_t tx_index = currTXBuffIndex;
+        auto callback_context = std::make_unique<passedStruct>();
+        callback_context->classAddr = this;
+        callback_context->txIndex = tx_index;
+
+        // Reserve the block before writing into it. The completion callback
+        // owns the block until it clears this status.
+        bool block_reserved = false;
+        while (!block_reserved)
+        {
+            {
+                std::lock_guard<std::mutex> lock(tx_buf_mutex);
+                if (p_tx_status[tx_index] == 0)
+                {
+                    p_tx_status[tx_index] = 1;
+                    block_reserved = true;
+                }
+            }
+
+            if (!block_reserved)
+            {
+                pthread_mutex_lock(&space_avail_mutex);
+                while (!space_avail)
+                {
+                    pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
+                }
+                space_avail = false;
+                pthread_mutex_unlock(&space_avail_mutex);
+            }
+        }
+
         // Pointer to the location in the output buffer to copy to.
         char *outbuff_ptr =
-                    (char *)p_tx_block[currTXBuffIndex]->data;
+                    (char *)p_tx_block[tx_index]->data;
 
         // determine if we received short or float
         if (txUseShort == true)
@@ -1088,63 +1120,16 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         }
 
 
-        // need to make sure that we don't update the timestamp of a packet
-        // that is already in use
-        tx_buf_mutex.lock();
-        if (p_tx_status[currTXBuffIndex] == 0)
-        {
-            p_tx_status[currTXBuffIndex] = 1;
-        }
-        else
-        {
-            tx_buf_mutex.unlock();
-            pthread_mutex_lock(&space_avail_mutex);
-            // wait for a packet to complete
-            space_avail = false;
-            pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
-            pthread_mutex_unlock(&space_avail_mutex);
-
-            // space available so try again
-            continue;
-        }
-        tx_buf_mutex.unlock();
-
-        // Create the structure that is passed in p_user
-        passedStructInstance = new passedStruct;
-        passedStructInstance->classAddr = this;
-        passedStructInstance->txIndex = currTXBuffIndex;
-
         // transmit the buffer
         status = skiq_transmit(this->card,
                                stream_handle->tx_handle,
-                               this->p_tx_block[currTXBuffIndex],
-                               passedStructInstance);
-        if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
+                               this->p_tx_block[tx_index],
+                               callback_context.get());
+        if (status == 0)
         {
-            // update the in use status since we didn't actually send it yet
-            tx_buf_mutex.lock();
-            p_tx_status[currTXBuffIndex] = 0;
-            tx_buf_mutex.unlock();
+            // The SDK returns this pointer through the completion callback.
+            callback_context.release();
 
-            // if there's no space left to send, wait until there should be space available
-            pthread_mutex_lock(&space_avail_mutex);
-
-            // wait for a packet to complete
-            while (!space_avail)
-            {
-                pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
-            }
-            space_avail = false;
-            pthread_mutex_unlock(&space_avail_mutex);
-        }
-        else if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_transmit failed, (card %u) status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-        else
-        {
             curr_block++;
 
             // move the index into the transmit block array
@@ -1152,9 +1137,37 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
             // move the pointer to the next block in the writeStream buffer
             inbuff_ptr += (current_tx_block_size * 4);
-
         }
+        else
+        {
+            // The SDK did not accept the transfer, so it does not own either
+            // the block or callback context.
+            {
+                std::lock_guard<std::mutex> lock(tx_buf_mutex);
+                p_tx_status[tx_index] = 0;
+            }
 
+            if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
+            {
+                // If there's no SDK queue space, wait for an accepted transfer
+                // to complete before retrying this same input block.
+                pthread_mutex_lock(&space_avail_mutex);
+
+                while (!space_avail)
+                {
+                    pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
+                }
+                space_avail = false;
+                pthread_mutex_unlock(&space_avail_mutex);
+            }
+            else
+            {
+                SoapySDR_logf(SOAPY_SDR_ERROR,
+                              "skiq_transmit failed, (card %u) status %d",
+                              card, status);
+                throw std::runtime_error("");
+            }
+        }
     }
 
     return numElems;

@@ -366,8 +366,6 @@ class SoapySidekiq : public SoapySDR::Device
             uint32_t txIndex;
         };
 
-        passedStruct *passedStructInstance;
-
         //  receive thread
         std::thread _rx_receive_thread;
         void rx_receive_operation(skiq_rx_hdl_t rx_handle);
