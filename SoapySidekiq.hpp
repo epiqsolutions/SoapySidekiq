@@ -372,8 +372,6 @@ class SoapySidekiq : public SoapySDR::Device
         std::thread _rx_receive_thread;
         void rx_receive_operation(skiq_rx_hdl_t rx_handle);
         void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle);
-        static std::vector<SoapySDR::Kwargs> sidekiq_devices;
-
         // tx thread
         std::thread _tx_streaming_thread;
         void tx_streaming_start(skiq_tx_hdl_t tx_handle);

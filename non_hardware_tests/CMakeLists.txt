@@ -47,8 +47,10 @@ set_tests_properties(unit.all PROPERTIES LABELS "unit;non-hardware")
 
 add_executable(component_tests
     support/TestMain.cpp
+    component/DeviceDiscoveryTests.cpp
     component/FakeAsyncTransmitterTests.cpp
-    component/FakeSidekiqDeviceTests.cpp)
+    component/FakeSidekiqDeviceTests.cpp
+    ../DeviceDiscovery.cpp)
 target_include_directories(component_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
     "${CMAKE_CURRENT_SOURCE_DIR}/fakes"

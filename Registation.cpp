@@ -1,94 +1,117 @@
 //  Copyright [2018] <Alexander Hurd>"
 
 #include "SoapySidekiq.hpp"
+#include <SoapySidekiq/DeviceDiscovery.hpp>
 #include <SoapySDR/Registry.hpp>
-#include <iostream>
+#include <cerrno>
+#include <cstdint>
+#include <stdexcept>
 #include <string>
+#include <vector>
 #include <unistd.h>
+
+namespace
+{
+
+class SidekiqDiscoveryBackend final : public soapy_sidekiq::DiscoveryBackend
+{
+public:
+    std::vector<std::uint8_t> cardIds() override
+    {
+        std::uint8_t count = 0;
+        std::uint8_t cards[SKIQ_MAX_NUM_CARDS]{};
+        const int status = skiq_get_cards(skiq_xport_type_auto, &count, cards);
+        if (status != 0)
+        {
+            throw std::runtime_error("skiq_get_cards failed with status " +
+                                     std::to_string(status));
+        }
+        return std::vector<std::uint8_t>(cards, cards + count);
+    }
+
+    std::string serial(const std::uint8_t card) override
+    {
+        char *serial_string = nullptr;
+        const int status = skiq_read_serial_string(card, &serial_string);
+        if (status != 0 || serial_string == nullptr)
+        {
+            throw std::runtime_error("skiq_read_serial_string failed with status " +
+                                     std::to_string(status));
+        }
+        return serial_string;
+    }
+
+    bool isAvailable(const std::uint8_t card) override
+    {
+        pid_t owner = 0;
+        const int status = skiq_is_card_avail(card, &owner);
+        if (status == 0)
+        {
+            return true;
+        }
+        if (status == EBUSY)
+        {
+            return owner == getpid();
+        }
+        throw std::runtime_error("skiq_is_card_avail failed with status " +
+                                 std::to_string(status));
+    }
+};
+
+soapy_sidekiq::DiscoveryQuery makeQuery(const SoapySDR::Kwargs &args)
+{
+    soapy_sidekiq::DiscoveryQuery query;
+    const auto card = args.find("card");
+    if (card != args.end())
+    {
+        query.card = card->second;
+    }
+    const auto serial = args.find("serial");
+    if (serial != args.end())
+    {
+        query.serial = serial->second;
+    }
+    return query;
+}
 
 static std::vector<SoapySDR::Kwargs> findSidekiq(const SoapySDR::Kwargs &args)
 {
-    int                           status = 0;
-    std::vector<SoapySDR::Kwargs> results;
-
     SoapySDR_logf(SOAPY_SDR_TRACE, "findSidekiq");
 
-    uint8_t           number_of_cards = 0;
-    uint8_t           card_list[SKIQ_MAX_NUM_CARDS];
-    char *            serial_str;
-    pid_t             card_owner;
-    skiq_xport_type_t type = skiq_xport_type_auto;
+    SidekiqDiscoveryBackend backend;
+    const auto discovery = soapy_sidekiq::discoverDevices(backend, makeQuery(args));
 
-    /* query the list of all Sidekiq cards on the PCIe interface */
-    status = skiq_get_cards(type, &number_of_cards, card_list);
-    if (status != 0)
+    for (const auto &error : discovery.errors)
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "Failure: skiq_get_cards, status %d",
-                      status);
-    }
-
-    for (int i = 0; i < number_of_cards; i++)
-    {
-        SoapySDR::Kwargs devInfo;
-        bool             deviceAvailable = false;
-
-        /* determine the serial number based on the card number */
-        status = skiq_read_serial_string(card_list[i], &serial_str);
-        if (status != 0)
+        if (error.card.has_value())
         {
             SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "Failure: skiq_read_serial_string, status %d",
-                          status);
+                          "Sidekiq discovery failed for card %u during %s: %s",
+                          *error.card,
+                          error.operation.c_str(),
+                          error.message.c_str());
         }
-
-        /* get card availability */
-        skiq_is_card_avail(card_list[i], &card_owner);
-
-        deviceAvailable =
-            (card_owner == getpid());   // owner must be this process(pid)
-
-        if (!deviceAvailable)
+        else
         {
-            SoapySDR_logf(SOAPY_SDR_WARNING,
-                          "Unable to access card #%d, owner pid (%d)", card_list[i],
-                          card_owner);
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                          "Sidekiq discovery failed during %s: %s",
+                          error.operation.c_str(),
+                          error.message.c_str());
         }
-
-        std::string deviceLabel = "Epiq Solutions - Sidekiq :: ";
-
-        devInfo["card"]         = std::to_string(card_list[i]);
-        devInfo["label"]        = deviceLabel;
-        devInfo["available"]    = deviceAvailable ? "Yes" : "No";
-        devInfo["product"]      = "Sidekiq";
-        devInfo["serial"]       = std::string(serial_str);
-        devInfo["manufacturer"] = "Epiq Solutions";
-        SoapySidekiq::sidekiq_devices.push_back(devInfo);
     }
 
-    //  filtering
-    for (int i = 0; i < number_of_cards; i++)
+    std::vector<SoapySDR::Kwargs> results;
+    results.reserve(discovery.devices.size());
+    for (const auto &device : discovery.devices)
     {
-        SoapySDR::Kwargs devInfo = SoapySidekiq::sidekiq_devices[i];
-        if (args.count("card") != 0)
-        {
-            if (args.at("card") != devInfo.at("card"))
-            {
-                continue;
-            }
-            SoapySDR_logf(SOAPY_SDR_INFO, "Found device by card %s",
-                          devInfo.at("card").c_str());
-        }
-        else if (args.count("serial") != 0)
-        {
-            if (devInfo.at("serial") != args.at("serial"))
-            {
-                continue;
-            }
-            SoapySDR_logf(SOAPY_SDR_INFO, "Found device by serial %s",
-                          args.at("serial").c_str());
-        }
-
-        results.push_back(SoapySidekiq::sidekiq_devices[i]);
+        SoapySDR::Kwargs info;
+        info["card"] = std::to_string(device.card);
+        info["label"] = "Epiq Solutions - Sidekiq :: ";
+        info["available"] = device.available ? "Yes" : "No";
+        info["product"] = "Sidekiq";
+        info["serial"] = device.serial;
+        info["manufacturer"] = "Epiq Solutions";
+        results.push_back(std::move(info));
     }
 
     return results;
@@ -101,3 +124,5 @@ static SoapySDR::Device *makeSidekiq(const SoapySDR::Kwargs &args)
 
 static SoapySDR::Registry registerSidekiq("sidekiq", &findSidekiq, &makeSidekiq,
                                           SOAPY_SDR_ABI_VERSION);
+
+} // namespace

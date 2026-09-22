@@ -38,6 +38,7 @@ message(STATUS "Sidekiq_BUILD_CONFIG - ${Sidekiq_BUILD_CONFIG}")
 message(STATUS "Sidekiq_PKG_LIBRARY_DIRS - ${Sidekiq_PKG_LIBRARY_DIRS}")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${Sidekiq_INCLUDE_DIRS})
 
 #enable c++11 features
@@ -54,6 +55,7 @@ SOAPY_SDR_MODULE_UTIL(
     TARGET SidekiqSupport
     SOURCES
         SoapySidekiq.hpp
+        DeviceDiscovery.cpp
         Registation.cpp
         Settings.cpp
         Streaming.cpp

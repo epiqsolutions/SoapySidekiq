@@ -113,9 +113,6 @@ void SoapySidekiq::tx_enabled(uint8_t card, int32_t status)
 
 }
 
-std::vector<SoapySDR::Kwargs> SoapySidekiq::sidekiq_devices;
-
-
 // compares two strings and if equal range and equal values per character
 // returns true.
 bool equalsIgnoreCase(const std::string& a, const std::string& b)
