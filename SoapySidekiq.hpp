@@ -18,7 +18,7 @@
 #include <SoapySDR/Types.hpp>
 #include <SoapySidekiq/ChannelMap.hpp>
 #include <SoapySidekiq/RfConfiguration.hpp>
-#include <SoapySidekiq/RxSampleQueue.hpp>
+#include <SoapySidekiq/RxStreamSession.hpp>
 
 
 #define DEFAULT_SAMPLE_RATE (20000000)
@@ -285,8 +285,8 @@ class SoapySidekiq : public SoapySDR::Device
 
         //  rx
         std::basic_string<char> timetype{};
-        std::atomic<bool> rx_running{};
-        soapy_sidekiq::RxSampleQueue rx_sample_queue{64};
+        std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
+        std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
         StreamHandle *active_rx_stream{};
 
         uint8_t num_rx_channels{};
@@ -361,10 +361,6 @@ class SoapySidekiq : public SoapySDR::Device
 
         passedStruct *passedStructInstance;
 
-        //  receive thread
-        std::thread _rx_receive_thread;
-        void rx_receive_operation(skiq_rx_hdl_t rx_handle, size_t channel);
-        void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle, size_t channel);
         // tx thread
         std::thread _tx_streaming_thread;
         void tx_streaming_start(skiq_tx_hdl_t tx_handle);

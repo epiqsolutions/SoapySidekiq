@@ -1,0 +1,226 @@
+#include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/TimestampConversion.hpp>
+
+#include <stdexcept>
+#include <limits>
+#include <utility>
+
+namespace soapy_sidekiq
+{
+
+RxStreamSession::RxStreamSession(
+    RxStreamBackend &backend,
+    const std::size_t queue_capacity_blocks)
+    : backend_(backend), queue_(queue_capacity_blocks)
+{
+}
+
+RxStreamSession::~RxStreamSession()
+{
+    shutdown();
+}
+
+int RxStreamSession::activate(const RxSessionConfiguration &configuration)
+{
+    if (configuration.block_samples == 0 ||
+        configuration.block_samples > std::numeric_limits<std::size_t>::max() / 2)
+    {
+        throw std::invalid_argument("RX block sample count must be positive");
+    }
+    if (configuration.sample_rate == 0)
+    {
+        throw std::invalid_argument("RX sample rate must be positive");
+    }
+    if (!configuration.use_rf_timestamp &&
+        configuration.system_timestamp_frequency == 0)
+    {
+        throw std::invalid_argument("system timestamp frequency must be positive");
+    }
+
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    if (active_ || receive_thread_.joinable())
+    {
+        throw std::logic_error("RX stream session is already active");
+    }
+
+    const int start_status = backend_.start(configuration.handle, configuration.on_pps);
+    if (start_status != 0)
+    {
+        return start_status;
+    }
+
+    active_configuration_ = configuration;
+    hardware_overruns_.store(0);
+    timestamp_discontinuities_.store(0);
+    receive_error_.store(0);
+    failed_.store(false);
+    queue_.start();
+    running_.store(true);
+    active_ = true;
+    try
+    {
+        receive_thread_ = std::thread(
+            &RxStreamSession::receiveLoop, this, configuration);
+    }
+    catch (...)
+    {
+        active_ = false;
+        running_.store(false);
+        queue_.reset();
+        backend_.stop(configuration.handle, configuration.on_pps);
+        throw;
+    }
+    return 0;
+}
+
+int RxStreamSession::deactivate()
+{
+    std::unique_lock<std::mutex> lock(lifecycle_mutex_);
+    if (!active_ && !receive_thread_.joinable())
+    {
+        return 0;
+    }
+
+    running_.store(false);
+    queue_.stop();
+    const int stop_status = active_
+        ? backend_.stop(active_configuration_.handle, active_configuration_.on_pps)
+        : 0;
+    active_ = false;
+    std::thread thread = std::move(receive_thread_);
+    lock.unlock();
+    if (thread.joinable())
+    {
+        thread.join();
+    }
+    return stop_status;
+}
+
+void RxStreamSession::shutdown() noexcept
+{
+    try
+    {
+        (void)deactivate();
+    }
+    catch (...)
+    {
+        running_.store(false);
+        queue_.stop();
+        if (receive_thread_.joinable())
+        {
+            receive_thread_.join();
+        }
+    }
+}
+
+RxReadResult RxStreamSession::read(
+    std::int16_t *output,
+    const std::size_t requested_samples,
+    const std::chrono::microseconds timeout)
+{
+    return queue_.read(output, requested_samples, timeout);
+}
+
+bool RxStreamSession::running() const
+{
+    return running_.load();
+}
+
+bool RxStreamSession::failed() const
+{
+    return failed_.load();
+}
+
+std::size_t RxStreamSession::hardwareOverruns() const
+{
+    return hardware_overruns_.load();
+}
+
+std::size_t RxStreamSession::timestampDiscontinuities() const
+{
+    return timestamp_discontinuities_.load();
+}
+
+int RxStreamSession::receiveError() const
+{
+    return receive_error_.load();
+}
+
+void RxStreamSession::receiveLoop(RxSessionConfiguration configuration) noexcept
+{
+    bool have_last_timestamp = false;
+    std::uint64_t last_timestamp = 0;
+
+    try
+    {
+        while (running_.load())
+        {
+            auto result = backend_.receive();
+            if (!running_.load())
+            {
+                break;
+            }
+            if (result.status == RxReceiveStatus::no_data)
+            {
+                std::this_thread::yield();
+                continue;
+            }
+            if (result.status == RxReceiveStatus::overrun)
+            {
+                hardware_overruns_.fetch_add(1);
+                continue;
+            }
+            if (result.status == RxReceiveStatus::error)
+            {
+                receive_error_.store(result.error_code);
+                failed_.store(true);
+                running_.store(false);
+                queue_.fail();
+                break;
+            }
+            if (result.handle != configuration.handle)
+            {
+                continue;
+            }
+            if (result.samples.size() != configuration.block_samples * 2)
+            {
+                receive_error_.store(-1);
+                failed_.store(true);
+                running_.store(false);
+                queue_.fail();
+                break;
+            }
+
+            if (have_last_timestamp)
+            {
+                const std::uint64_t expected =
+                    last_timestamp + configuration.block_samples;
+                if (result.rf_timestamp != expected)
+                {
+                    timestamp_discontinuities_.fetch_add(1);
+                }
+            }
+            have_last_timestamp = true;
+            last_timestamp = result.rf_timestamp;
+
+            const std::uint64_t timestamp = configuration.use_rf_timestamp
+                ? result.rf_timestamp
+                : result.system_timestamp;
+            const std::uint64_t frequency = configuration.use_rf_timestamp
+                ? configuration.sample_rate
+                : configuration.system_timestamp_frequency;
+            const auto time_ns = ticksToNanoseconds(timestamp, frequency);
+            queue_.push(
+                std::move(result.samples), time_ns, configuration.sample_rate);
+        }
+    }
+    catch (...)
+    {
+        receive_error_.store(-1);
+        failed_.store(true);
+        running_.store(false);
+        queue_.fail();
+    }
+}
+
+} // namespace soapy_sidekiq

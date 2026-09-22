@@ -49,6 +49,10 @@ public:
         std::size_t complex_samples,
         std::int64_t time_ns,
         std::uint64_t sample_rate);
+    RxPushStatus push(
+        std::vector<std::int16_t> samples,
+        std::int64_t time_ns,
+        std::uint64_t sample_rate);
 
     RxReadResult read(
         std::int16_t *output,

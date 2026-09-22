@@ -1,6 +1,7 @@
 #include "SoapySidekiq.hpp"
 #include "SidekiqRfBackend.hpp"
 #include <SoapySidekiq/DeviceOptions.hpp>
+#include <SoapySidekiq/SidekiqRxBackend.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
 #include <cinttypes>
@@ -306,8 +307,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     timetype = "rf_timestamp";
     complete_count = 0;
 
-    rx_running = false;
-
     card = options.card;
     current_tx_block_size = options.tx_block_size;
     SoapySDR_logf(SOAPY_SDR_INFO, "TX block size set to %u", current_tx_block_size);
@@ -325,6 +324,8 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
                       card, status);
         throw std::runtime_error("");
     }
+    rx_backend = std::make_unique<soapy_sidekiq::SidekiqRxBackend>(card);
+    rx_session = std::make_unique<soapy_sidekiq::RxStreamSession>(*rx_backend);
 
     if (options.topology.has_value())
     {
@@ -606,26 +607,12 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 SoapySidekiq::~SoapySidekiq(void)
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "In destructor", card);
-    const bool rx_was_running = rx_running.exchange(false);
-    rx_sample_queue.stop();
-    if (rx_was_running && active_rx_stream != nullptr)
+    if (rx_session != nullptr)
     {
-        const int stop_status = skiq_stop_rx_streaming(
-            card, active_rx_stream->rx_handle);
-        if (stop_status != 0 && stop_status != -ENODEV)
-        {
-            SoapySDR_logf(SOAPY_SDR_WARNING,
-                "failed to stop RX stream during destruction (card %u), status %d",
-                card, stop_status);
-        }
-    }
-    if (_rx_receive_thread.joinable())
-    {
-        _rx_receive_thread.join();
+        rx_session->shutdown();
     }
     delete active_rx_stream;
     active_rx_stream = nullptr;
-    rx_sample_queue.reset();
 
     unregisterInstance(card, this);
     skiq_register_tx_enabled_callback(card, nullptr);

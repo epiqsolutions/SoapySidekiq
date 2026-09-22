@@ -59,6 +59,8 @@ SOAPY_SDR_MODULE_UTIL(
         DeviceOptions.cpp
         RfConfiguration.cpp
         RxSampleQueue.cpp
+        RxStreamSession.cpp
+        SidekiqRxBackend.cpp
         SidekiqRfBackend.cpp
         StreamConfiguration.cpp
         Registation.cpp
