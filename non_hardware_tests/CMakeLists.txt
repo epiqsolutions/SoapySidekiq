@@ -39,9 +39,11 @@ add_executable(unit_tests
     unit/DeviceConfigurationTests.cpp
     unit/RfConfigurationTests.cpp
     unit/SampleConversionTests.cpp
+    unit/StreamConfigurationTests.cpp
     unit/TimestampConversionTests.cpp
     ../DeviceOptions.cpp
-    ../RfConfiguration.cpp)
+    ../RfConfiguration.cpp
+    ../StreamConfiguration.cpp)
 target_include_directories(unit_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
     "${CMAKE_CURRENT_SOURCE_DIR}/fakes"

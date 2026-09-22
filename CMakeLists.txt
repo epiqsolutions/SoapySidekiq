@@ -59,6 +59,7 @@ SOAPY_SDR_MODULE_UTIL(
         DeviceOptions.cpp
         RfConfiguration.cpp
         SidekiqRfBackend.cpp
+        StreamConfiguration.cpp
         Registation.cpp
         Settings.cpp
         Streaming.cpp
