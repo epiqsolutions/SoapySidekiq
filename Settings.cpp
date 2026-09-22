@@ -606,6 +606,27 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 SoapySidekiq::~SoapySidekiq(void)
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "In destructor", card);
+    const bool rx_was_running = rx_running.exchange(false);
+    rx_sample_queue.stop();
+    if (rx_was_running && active_rx_stream != nullptr)
+    {
+        const int stop_status = skiq_stop_rx_streaming(
+            card, active_rx_stream->rx_handle);
+        if (stop_status != 0 && stop_status != -ENODEV)
+        {
+            SoapySDR_logf(SOAPY_SDR_WARNING,
+                "failed to stop RX stream during destruction (card %u), status %d",
+                card, stop_status);
+        }
+    }
+    if (_rx_receive_thread.joinable())
+    {
+        _rx_receive_thread.join();
+    }
+    delete active_rx_stream;
+    active_rx_stream = nullptr;
+    rx_sample_queue.reset();
+
     unregisterInstance(card, this);
     skiq_register_tx_enabled_callback(card, nullptr);
     skiq_register_tx_complete_callback(card, nullptr);

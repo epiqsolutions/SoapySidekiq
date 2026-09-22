@@ -18,12 +18,23 @@ cmake --build build/non_hardware --parallel
 ctest --test-dir build/non_hardware --output-on-failure
 ```
 
-To save verbose output while watching it in another terminal:
+To watch a run, start this command in another terminal before launching the
+suite:
 
 ```sh
-ctest --test-dir build/non_hardware --verbose 2>&1 | tee out.txt
-tail -f out.txt
+tail -F out.txt
 ```
+
+Then launch the repository runner:
+
+```sh
+non_hardware_tests/run_suite.sh
+```
+
+The runner writes verbose output to `out.txt` and appends an aggregate summary
+in the form `Non-hardware test cases: <total> total, <passed> passed, <failed>
+failed`. This counts the individual cases inside both executables; CTest's own
+summary counts the two aggregate executables instead.
 
 Run only one layer with CTest labels:
 

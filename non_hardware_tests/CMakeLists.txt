@@ -38,11 +38,13 @@ add_executable(unit_tests
     unit/AsyncBufferPoolTests.cpp
     unit/DeviceConfigurationTests.cpp
     unit/RfConfigurationTests.cpp
+    unit/RxSampleQueueTests.cpp
     unit/SampleConversionTests.cpp
     unit/StreamConfigurationTests.cpp
     unit/TimestampConversionTests.cpp
     ../DeviceOptions.cpp
     ../RfConfiguration.cpp
+    ../RxSampleQueue.cpp
     ../StreamConfiguration.cpp)
 target_include_directories(unit_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
