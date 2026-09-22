@@ -1,7 +1,9 @@
 # Non-hardware tests
 
 These tests are separate from the hardware validation programs in `tests/`.
-They do not open a Sidekiq card or link to the Sidekiq SDK.
+They do not open a Sidekiq card or link to the Sidekiq SDK. Test output from
+the repository workflow is written to `out.txt`, which is intentionally
+ignored by Git.
 
 The suite has two layers:
 
@@ -14,6 +16,13 @@ Configure and run the normal suite:
 cmake -S non_hardware_tests -B build/non_hardware
 cmake --build build/non_hardware --parallel
 ctest --test-dir build/non_hardware --output-on-failure
+```
+
+To save verbose output while watching it in another terminal:
+
+```sh
+ctest --test-dir build/non_hardware --verbose 2>&1 | tee out.txt
+tail -f out.txt
 ```
 
 Run only one layer with CTest labels:

@@ -35,24 +35,27 @@ endif()
 
 add_executable(unit_tests
     support/TestMain.cpp
-    unit/AsyncBufferPoolTests.cpp)
+    unit/AsyncBufferPoolTests.cpp
+    unit/SampleConversionTests.cpp
+    unit/TimestampConversionTests.cpp)
 target_include_directories(unit_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 target_link_libraries(unit_tests PRIVATE non_hardware_test_options Threads::Threads)
-add_test(NAME unit.async_buffer_pool COMMAND unit_tests)
-set_tests_properties(unit.async_buffer_pool PROPERTIES LABELS "unit;non-hardware")
+add_test(NAME unit.all COMMAND unit_tests)
+set_tests_properties(unit.all PROPERTIES LABELS "unit;non-hardware")
 
 add_executable(component_tests
     support/TestMain.cpp
-    component/FakeAsyncTransmitterTests.cpp)
+    component/FakeAsyncTransmitterTests.cpp
+    component/FakeSidekiqDeviceTests.cpp)
 target_include_directories(component_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
     "${CMAKE_CURRENT_SOURCE_DIR}/fakes"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 target_link_libraries(component_tests PRIVATE non_hardware_test_options Threads::Threads)
-add_test(NAME component.fake_async_transmitter COMMAND component_tests)
-set_tests_properties(component.fake_async_transmitter PROPERTIES LABELS "component;non-hardware")
+add_test(NAME component.all COMMAND component_tests)
+set_tests_properties(component.all PROPERTIES LABELS "component;non-hardware")
 
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure

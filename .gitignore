@@ -56,4 +56,4 @@ dkms.conf
 .cache/*
 build/*
 *.json
-
+/out.txt
