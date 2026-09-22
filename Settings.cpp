@@ -2,9 +2,11 @@
 #include "SidekiqRfBackend.hpp"
 #include <SoapySidekiq/DeviceOptions.hpp>
 #include <SoapySidekiq/SidekiqRxBackend.hpp>
+#include <SoapySidekiq/SidekiqTxBackend.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
 #include <cinttypes>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -98,41 +100,16 @@ void logging_handler( int32_t priority, const char *message )
       @param p_user reference to the user data
       @return void
  */
-void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex)
-{
-    this->complete_count++;
-
-    // update the in use status of the packet just completed
-    tx_buf_mutex.lock();
-    if (p_tx_status[txIndex] != 1)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "status isn't 1");
-    }
-    p_tx_status[txIndex] = 0;
-    tx_buf_mutex.unlock();
-
-    // signal to the other thread that there may be space available now that a
-    // packet send has completed
-    {
-        // Signal the condition variable
-        pthread_mutex_lock(&space_avail_mutex);
-        space_avail = true;
-        pthread_cond_signal(&space_avail_cond);
-        pthread_mutex_unlock(&space_avail_mutex);
-    }
-//    SoapySDR_logf(SOAPY_SDR_TRACE, "leaving tx_complete");
-
-}
-
 void SoapySidekiq::tx_enabled(uint8_t card, int32_t status)
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "tx enable received");
 
-    // Signal the condition variable
-    pthread_mutex_lock(&tx_enabled_mutex);
-    pthread_cond_signal(&tx_enabled_cond);
-    pthread_mutex_unlock(&tx_enabled_mutex);
-
+    {
+        std::lock_guard<std::mutex> lock(tx_enabled_mutex);
+        tx_enabled_status = status;
+        tx_enabled_signal = true;
+    }
+    tx_enabled_cv.notify_all();
 }
 
 // compares two strings and if equal range and equal values per character
@@ -284,7 +261,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     int status = 0;
     uint8_t channels = 0;
     skiq_iq_order_t iq_order;
-    int i;
     const auto options = soapy_sidekiq::parseDeviceOptions(args);
 
     /* Register our own logging function before initializing the library */
@@ -305,7 +281,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     rx_payload_size_in_bytes = 0;
     rfTimeSource = true;
     timetype = "rf_timestamp";
-    complete_count = 0;
 
     card = options.card;
     current_tx_block_size = options.tx_block_size;
@@ -326,6 +301,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     }
     rx_backend = std::make_unique<soapy_sidekiq::SidekiqRxBackend>(card);
     rx_session = std::make_unique<soapy_sidekiq::RxStreamSession>(*rx_backend);
+    tx_backend = std::make_unique<soapy_sidekiq::SidekiqTxBackend>(card);
 
     if (options.topology.has_value())
     {
@@ -548,52 +524,14 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         setTimeSource(*options.time_source);
     }
 
-    // allocate for # blocks
-    p_tx_status = static_cast<int32_t*>(calloc(DEFAULT_NUM_BUFFERS, sizeof(*p_tx_status)));
-    if (p_tx_status == NULL)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "failed to allocate memory for TX status");
-        throw std::runtime_error("");
-    }
-
-    for (i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-    {
-        p_tx_status[i] = 0;
-    }
-
-    // register the transmit complete callback
-    pthread_mutex_init(&space_avail_mutex, nullptr);
-    pthread_cond_init(&space_avail_cond, nullptr);
-    pthread_mutex_init(&tx_enabled_mutex, nullptr);
-    pthread_cond_init(&tx_enabled_cond, nullptr);
     registerInstance(card, this);
-
-    status = skiq_register_tx_complete_callback(card,
-                                        &SoapySidekiq::tx_complete_callback);
-    if (status != 0)
-    {
-        unregisterInstance(card, this);
-        pthread_cond_destroy(&tx_enabled_cond);
-        pthread_mutex_destroy(&tx_enabled_mutex);
-        pthread_cond_destroy(&space_avail_cond);
-        pthread_mutex_destroy(&space_avail_mutex);
-        SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_register_tx_complete_callback failed, "
-                      "card: %u status: %d",
-                      card, status);
-        throw std::runtime_error("");
-    }
 
     // register the transmit enabled callback
     status = skiq_register_tx_enabled_callback(card,
                                         &SoapySidekiq::tx_enabled_callback);
     if (status != 0)
     {
-        skiq_register_tx_complete_callback(card, nullptr);
         unregisterInstance(card, this);
-        pthread_cond_destroy(&tx_enabled_cond);
-        pthread_mutex_destroy(&tx_enabled_mutex);
-        pthread_cond_destroy(&space_avail_cond);
-        pthread_mutex_destroy(&space_avail_mutex);
         SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_register_tx_enabled_callback failed, "
                       "card: %u status: %d",
                       card, status);
@@ -613,22 +551,28 @@ SoapySidekiq::~SoapySidekiq(void)
     }
     delete active_rx_stream;
     active_rx_stream = nullptr;
+    if (tx_writer != nullptr)
+    {
+        (void)tx_writer->stop(std::chrono::seconds(1));
+    }
+    if (tx_stream_active && active_tx_stream != nullptr)
+    {
+        (void)skiq_stop_tx_streaming(card, active_tx_stream->tx_handle);
+        tx_stream_active = false;
+    }
+    if (_tx_streaming_thread.joinable())
+    {
+        _tx_streaming_thread.join();
+    }
+    delete active_tx_stream;
+    active_tx_stream = nullptr;
+    if (auto *sidekiq_tx = dynamic_cast<soapy_sidekiq::SidekiqTxBackend *>(tx_backend.get()))
+    {
+        sidekiq_tx->shutdown();
+    }
 
     unregisterInstance(card, this);
     skiq_register_tx_enabled_callback(card, nullptr);
-    skiq_register_tx_complete_callback(card, nullptr);
-
-    pthread_cond_destroy(&tx_enabled_cond);
-    pthread_mutex_destroy(&tx_enabled_mutex);
-    pthread_cond_destroy(&space_avail_cond);
-    pthread_mutex_destroy(&space_avail_mutex);
-
-    if (NULL != p_tx_status)
-    {
-        free(p_tx_status);
-        p_tx_status = NULL;
-    }
-
     skiq_exit();
 }
 

@@ -11,7 +11,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <pthread.h>
 
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
@@ -19,14 +18,12 @@
 #include <SoapySidekiq/ChannelMap.hpp>
 #include <SoapySidekiq/RfConfiguration.hpp>
 #include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/TxStreamWriter.hpp>
 
 
 #define DEFAULT_SAMPLE_RATE (20000000)
 #define DEFAULT_BANDWIDTH (18000000)
 #define DEFAULT_FREQUENCY (1000000000)
-#define DEFAULT_NUM_BUFFERS (30000)
-#define DEFAULT_SLEEP_US (1)
-#define SLEEP_1SEC (1 * 1000000)
 #define NANOS_IN_SEC (1000000000ULL)
 
 
@@ -303,23 +300,21 @@ class SoapySidekiq : public SoapySDR::Device
         //  tx
         std::mutex tx_mutex;
         std::condition_variable tx_cv;
-        std::mutex tx_buf_mutex;
-        pthread_mutex_t tx_enabled_mutex;
-        pthread_cond_t tx_enabled_cond;
-        pthread_mutex_t space_avail_mutex;
-        pthread_cond_t space_avail_cond;
-        bool space_avail{};
+        std::mutex tx_enabled_mutex;
+        std::condition_variable tx_enabled_cv;
         bool tx_start_signal{};
         bool tx_stream_active{};
-        int32_t *p_tx_status{};
         bool first_transmit{};
+        bool tx_enabled_signal{};
+        int32_t tx_enabled_status{};
         StreamHandle *active_tx_stream{};
+        std::unique_ptr<soapy_sidekiq::TxStreamBackend> tx_backend;
+        std::unique_ptr<soapy_sidekiq::TxStreamWriter> tx_writer;
 
         uint8_t  num_tx_channels{};
         std::vector<uint32_t> tx_sample_rates;
         std::vector<uint32_t> tx_bandwidths;
         uint32_t tx_underruns{};
-        uint32_t complete_count{};
         uint32_t current_tx_block_size{};
 
         //  setting
@@ -328,20 +323,6 @@ class SoapySidekiq : public SoapySDR::Device
         bool log{};
         bool rfTimeSource{};
         uint64_t sys_freq{};
-
-        // TX buffer
-        skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
-        uint32_t currTXBuffIndex{};
-        uint32_t p_tx_block_index{};
-
-
-        // TX callback static function
-        // The registration requires a static function instead of a method so
-        // this must be created to be able to register it.
-        // This function calls the tx_complete method.
-        static void tx_complete_callback(int32_t status,
-                                                skiq_tx_block_t *p_data,
-                                                void *p_user);
 
         // TX enabled callback static function
         // The registration requires a static function instead of a method so
@@ -353,20 +334,9 @@ class SoapySidekiq : public SoapySDR::Device
         static SoapySidekiq *getInstanceForCard(uint8_t card);
 
     public:
-        struct passedStruct
-        {
-            SoapySidekiq *classAddr;
-            uint32_t txIndex;
-        };
-
-        passedStruct *passedStructInstance;
-
         // tx thread
         std::thread _tx_streaming_thread;
         void tx_streaming_start(skiq_tx_hdl_t tx_handle);
-
-        // tx callback method
-        void tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex);
 
         // tx enabled callback
         void tx_enabled(uint8_t card, int32_t status);

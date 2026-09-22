@@ -61,8 +61,10 @@ SOAPY_SDR_MODULE_UTIL(
         RxSampleQueue.cpp
         RxStreamSession.cpp
         SidekiqRxBackend.cpp
+        SidekiqTxBackend.cpp
         SidekiqRfBackend.cpp
         StreamConfiguration.cpp
+        TxStreamWriter.cpp
         Registation.cpp
         Settings.cpp
         Streaming.cpp

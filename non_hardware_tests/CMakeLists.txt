@@ -59,10 +59,12 @@ add_executable(component_tests
     component/DeviceDiscoveryTests.cpp
     component/FakeAsyncTransmitterTests.cpp
     component/RxStreamSessionTests.cpp
+    component/TxStreamWriterTests.cpp
     component/FakeSidekiqDeviceTests.cpp
     ../DeviceDiscovery.cpp
     ../RxSampleQueue.cpp
-    ../RxStreamSession.cpp)
+    ../RxStreamSession.cpp
+    ../TxStreamWriter.cpp)
 target_include_directories(component_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
     "${CMAKE_CURRENT_SOURCE_DIR}/fakes"
