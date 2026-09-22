@@ -1,4 +1,5 @@
 #include "SoapySidekiq.hpp"
+#include <SoapySidekiq/DeviceOptions.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
 #include <cinttypes>
@@ -6,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 #include <string>
 #include <sidekiq_types.h>
@@ -222,24 +224,28 @@ bool writeKernel1PpsSource(const skiq_1pps_source_t source)
 
 skiq_rx_hdl_t SoapySidekiq::getRxHandle(const size_t channel) const
 {
-    if (channel >= num_rx_channels)
+    try
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid RX channel %zu", channel);
-        throw std::runtime_error("");
+        return channel_map.rxHandle(channel);
     }
-
-    return this->param.rx_param[channel].handle;
+    catch (const std::out_of_range &error)
+    {
+        SoapySDR_log(SOAPY_SDR_ERROR, error.what());
+        throw;
+    }
 }
 
 skiq_tx_hdl_t SoapySidekiq::getTxHandle(const size_t channel) const
 {
-    if (channel >= num_tx_channels)
+    try
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid TX channel %zu", channel);
-        throw std::runtime_error("");
+        return channel_map.txHandle(channel);
     }
-
-    return this->param.tx_param[channel].handle;
+    catch (const std::out_of_range &error)
+    {
+        SoapySDR_log(SOAPY_SDR_ERROR, error.what());
+        throw;
+    }
 }
 
 skiq_rx_hdl_t SoapySidekiq::getFirstRxHandle(void) const
@@ -259,8 +265,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     uint8_t channels = 0;
     skiq_iq_order_t iq_order;
     int i;
-    bool topology_requested = false;
-    uint8_t topology = DEFAULT_TOPOLOGY_ID;
+    const auto options = soapy_sidekiq::parseDeviceOptions(args);
 
     /* Register our own logging function before initializing the library */
     skiq_register_logging( logging_handler );
@@ -284,50 +289,9 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
     rx_running = false;
 
-    if (args.count("card") != 0)
-    {
-        try
-        {
-            card = std::stoi(args.at("card"));
-        }
-        catch (const std::invalid_argument &)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "Requested card not found");
-            throw std::runtime_error("");
-        }
-    }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "No cards found");
-        throw std::runtime_error("");
-    }
-
-    if (args.count("topology") != 0)
-    {
-        topology_requested = true;
-        topology = std::stoi(args.at("topology"));
-    }
-
-    if (args.count("tx_block_size") != 0)
-    {
-        current_tx_block_size = std::stoi(args.at("tx_block_size"));
-    }
-    else
-    {
-        current_tx_block_size = DEFAULT_TX_BUFFER_LENGTH;
-    }
+    card = options.card;
+    current_tx_block_size = options.tx_block_size;
     SoapySDR_logf(SOAPY_SDR_INFO, "TX block size set to %u", current_tx_block_size);
-
-    /* set the source to what is passed in */
-    if (args.count("clock_source") > 0)
-    {
-        setClockSource(args.at("clock_source"));
-    }
-
-    if (args.count("time_source") > 0)
-    {
-        setTimeSource(args.at("time_source"));
-    }
 
     skiq_xport_type_t type  = skiq_xport_type_auto;
     skiq_xport_init_level_t level = skiq_xport_init_level_full;
@@ -343,11 +307,11 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("");
     }
 
-    if (topology_requested)
+    if (options.topology.has_value())
     {
         if (skiq_is_topology_supported(card))
         {
-            status = skiq_apply_topology(card, topology);
+            status = skiq_apply_topology(card, *options.topology);
             if (status != 0)
             {
                 SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_apply_topology failed (card %u), status %d",
@@ -404,12 +368,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     }
     num_rx_channels = channels;
 
-    for (size_t chan = 0; chan < num_rx_channels; chan++)
-    {
-        SoapySDR_logf(SOAPY_SDR_INFO, "Soapy RX channel %zu maps to Sidekiq rx handle %u",
-                      chan, getRxHandle(chan));
-    }
-
     status = skiq_read_num_tx_chans(card, &channels);
     if (status != 0)
     {
@@ -418,6 +376,26 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("");
     }
     num_tx_channels = channels;
+
+    std::vector<skiq_rx_hdl_t> rx_handles;
+    rx_handles.reserve(num_rx_channels);
+    for (size_t chan = 0; chan < num_rx_channels; ++chan)
+    {
+        rx_handles.push_back(param.rx_param[chan].handle);
+    }
+    std::vector<skiq_tx_hdl_t> tx_handles;
+    tx_handles.reserve(num_tx_channels);
+    for (size_t chan = 0; chan < num_tx_channels; ++chan)
+    {
+        tx_handles.push_back(param.tx_param[chan].handle);
+    }
+    channel_map = {std::move(rx_handles), std::move(tx_handles)};
+
+    for (size_t chan = 0; chan < num_rx_channels; chan++)
+    {
+        SoapySDR_logf(SOAPY_SDR_INFO, "Soapy RX channel %zu maps to Sidekiq rx handle %u",
+                      chan, getRxHandle(chan));
+    }
     for (size_t chan = 0; chan < num_tx_channels; chan++)
     {
         SoapySDR_logf(SOAPY_SDR_INFO, "Soapy TX channel %zu maps to Sidekiq tx handle %u",
@@ -506,14 +484,14 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         tx_bandwidths[chan] = actual_bandwidth;
     }
 
-    if (args.count("clock_source") > 0)
+    if (options.clock_source.has_value())
     {
-        setClockSource(args.at("clock_source"));
+        setClockSource(*options.clock_source);
     }
 
-    if (args.count("time_source") > 0)
+    if (options.time_source.has_value())
     {
-        setTimeSource(args.at("time_source"));
+        setTimeSource(*options.time_source);
     }
 
     // allocate for # blocks

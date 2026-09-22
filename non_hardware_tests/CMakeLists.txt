@@ -36,8 +36,10 @@ endif()
 add_executable(unit_tests
     support/TestMain.cpp
     unit/AsyncBufferPoolTests.cpp
+    unit/DeviceConfigurationTests.cpp
     unit/SampleConversionTests.cpp
-    unit/TimestampConversionTests.cpp)
+    unit/TimestampConversionTests.cpp
+    ../DeviceOptions.cpp)
 target_include_directories(unit_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include")

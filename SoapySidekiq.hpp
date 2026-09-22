@@ -15,14 +15,13 @@
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
+#include <SoapySidekiq/ChannelMap.hpp>
 
 
-#define DEFAULT_TOPOLOGY_ID 0
 #define DEFAULT_SAMPLE_RATE (20000000)
 #define DEFAULT_BANDWIDTH (18000000)
 #define DEFAULT_FREQUENCY (1000000000)
 #define DEFAULT_NUM_BUFFERS (30000)
-#define DEFAULT_TX_BUFFER_LENGTH (16380)
 #define DEFAULT_SLEEP_US (1)
 #define SLEEP_1SEC (1 * 1000000)
 #define NANOS_IN_SEC (1000000000ULL)
@@ -291,6 +290,7 @@ class SoapySidekiq : public SoapySDR::Device
         StreamHandle *active_rx_stream{};
 
         uint8_t num_rx_channels{};
+        soapy_sidekiq::ChannelMap<skiq_rx_hdl_t, skiq_tx_hdl_t> channel_map;
         std::vector<uint32_t> rx_sample_rates;
         std::vector<uint32_t> rx_bandwidths;
         uint32_t rx_block_size_in_words{};

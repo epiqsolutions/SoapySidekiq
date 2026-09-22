@@ -56,6 +56,7 @@ SOAPY_SDR_MODULE_UTIL(
     SOURCES
         SoapySidekiq.hpp
         DeviceDiscovery.cpp
+        DeviceOptions.cpp
         Registation.cpp
         Settings.cpp
         Streaming.cpp
