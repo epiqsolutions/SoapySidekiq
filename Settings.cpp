@@ -1,4 +1,5 @@
 #include "SoapySidekiq.hpp"
+#include "SidekiqRfBackend.hpp"
 #include <SoapySidekiq/DeviceOptions.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
@@ -14,6 +15,24 @@
 #include <unistd.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+namespace
+{
+
+soapy_sidekiq::RfDirection rfDirection(const int direction)
+{
+    if (direction == SOAPY_SDR_RX)
+    {
+        return soapy_sidekiq::RfDirection::rx;
+    }
+    if (direction == SOAPY_SDR_TX)
+    {
+        return soapy_sidekiq::RfDirection::tx;
+    }
+    throw std::invalid_argument("invalid RF direction " + std::to_string(direction));
+}
+
+} // namespace
 
 /******************************************************************************/
 /** This is the custom logging handler.  If there were custom handling
@@ -430,6 +449,8 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     SoapySDR_logf(SOAPY_SDR_TRACE, "channel mode set to single");
 
     /* cache the current sample rate and bandwidth */
+    std::vector<soapy_sidekiq::RateBandwidth> rx_rate_bandwidth;
+    rx_rate_bandwidth.reserve(num_rx_channels);
     rx_sample_rates.resize(num_rx_channels, 0);
     rx_bandwidths.resize(num_rx_channels, 0);
     for (size_t chan = 0; chan < num_rx_channels; chan++)
@@ -455,8 +476,12 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
         rx_sample_rates[chan] = static_cast<uint32_t>(actual_rate);
         rx_bandwidths[chan] = actual_bandwidth;
+        rx_rate_bandwidth.push_back(
+            {configured_rate, actual_rate, configured_bw, actual_bandwidth});
     }
 
+    std::vector<soapy_sidekiq::RateBandwidth> tx_rate_bandwidth;
+    tx_rate_bandwidth.reserve(num_tx_channels);
     tx_sample_rates.resize(num_tx_channels, 0);
     tx_bandwidths.resize(num_tx_channels, 0);
     for (size_t chan = 0; chan < num_tx_channels; chan++)
@@ -482,7 +507,35 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
         tx_sample_rates[chan] = static_cast<uint32_t>(actual_rate);
         tx_bandwidths[chan] = actual_bandwidth;
+        tx_rate_bandwidth.push_back(
+            {configured_rate, actual_rate, configured_bw, actual_bandwidth});
     }
+
+    std::vector<std::uint32_t> rf_rx_handles;
+    rf_rx_handles.reserve(num_rx_channels);
+    for (std::size_t channel = 0; channel < num_rx_channels; ++channel)
+    {
+        rf_rx_handles.push_back(static_cast<std::uint32_t>(getRxHandle(channel)));
+    }
+    std::vector<std::uint32_t> rf_tx_handles;
+    std::vector<std::uint16_t> tx_max_attenuation_indices;
+    rf_tx_handles.reserve(num_tx_channels);
+    tx_max_attenuation_indices.reserve(num_tx_channels);
+    for (std::size_t channel = 0; channel < num_tx_channels; ++channel)
+    {
+        rf_tx_handles.push_back(static_cast<std::uint32_t>(getTxHandle(channel)));
+        tx_max_attenuation_indices.push_back(
+            static_cast<std::uint16_t>(param.tx_param[channel].atten_quarter_db_max));
+    }
+    rf_backend = std::make_unique<soapy_sidekiq::SidekiqRfBackend>(card);
+    rf_configuration = std::make_unique<soapy_sidekiq::RfConfiguration>(
+        *rf_backend,
+        soapy_sidekiq::ChannelMap<std::uint32_t, std::uint32_t>(
+            std::move(rf_rx_handles), std::move(rf_tx_handles)),
+        soapy_sidekiq::gainProfileFor(part),
+        std::move(rx_rate_bandwidth),
+        std::move(tx_rate_bandwidth),
+        std::move(tx_max_attenuation_indices));
 
     if (options.clock_source.has_value())
     {
@@ -842,78 +895,34 @@ bool SoapySidekiq::hasGainMode(const int direction, const size_t channel) const
 void SoapySidekiq::setGainMode(const int direction, const size_t channel,
                                const bool automatic)
 {
-    int status = 0;
-
     SoapySDR_logf(SOAPY_SDR_TRACE, "setGainMode");
-
     if (direction == SOAPY_SDR_RX)
     {
-        skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
-
-        skiq_rx_gain_t mode =
-            automatic ? skiq_rx_gain_auto : skiq_rx_gain_manual;
-
-        status = skiq_write_rx_gain_mode(card, rx_hdl, mode);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_write_rx_gain_mode failed "
-                          "(card %u, channel %d, mode %d), status %d",
-                          card, channel, mode, status);
-            throw std::runtime_error("");
-        }
-
-        SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, handle: %u, setting RX gain mode: %s",
-                      card, rx_hdl, automatic ? "skiq_rx_gain_auto" :
-                      "skiq_rx_gain_manual");
+        rf_configuration->setGainMode(channel, automatic);
+        return;
     }
-    else if (direction == SOAPY_SDR_TX)
+    if (direction == SOAPY_SDR_TX)
     {
-        // Tx has no mode
         SoapySDR_logf(SOAPY_SDR_WARNING, "TX does not have an attenuation mode");
+        return;
     }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
-    }
+    (void)rfDirection(direction);
 }
 
 bool SoapySidekiq::getGainMode(const int direction, const size_t channel) const
 {
-    int status = 0;
     SoapySDR_logf(SOAPY_SDR_TRACE, "getGainMode");
-
     if (direction == SOAPY_SDR_RX)
     {
-        skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
-        skiq_rx_gain_t p_gain_mode;
-
-        status = skiq_read_rx_gain_mode(card, rx_hdl, &p_gain_mode);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_read_rx_gain_mode failed, (card %u), status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-        SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, handle: %u, RX gain mode: is %s",
-                      card, rx_hdl, p_gain_mode ? "skiq_rx_gain_auto" :
-                      "skiq_rx_gain_manual");
-
-        return p_gain_mode;
+        return rf_configuration->getGainMode(channel);
     }
-    else if (direction == SOAPY_SDR_TX)
+    if (direction == SOAPY_SDR_TX)
     {
-        // Tx has no mode
         SoapySDR_logf(SOAPY_SDR_WARNING, "TX does not have an attenuation mode");
+        return false;
     }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
-    }
-
-    return false;
+    (void)rfDirection(direction);
+    return false; // Unreachable; keeps older compilers satisfied.
 }
 
 void SoapySidekiq::setGain(const int direction,
@@ -930,6 +939,8 @@ void SoapySidekiq::setGain(const int direction,
 {
     int status = 0;
     SoapySDR_logf(SOAPY_SDR_TRACE, "setGain called with direction %d, channel %zu, value %.1f", direction, channel, value);
+    rf_configuration->setGain(rfDirection(direction), channel, value);
+    return;
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -1095,6 +1106,7 @@ double SoapySidekiq::getGain(const int direction, const size_t channel) const
 {
     int status = 0;
     SoapySDR_logf(SOAPY_SDR_TRACE, "getGain, direction: %d channel: %zu", direction, channel);
+    return rf_configuration->getGain(rfDirection(direction), channel);
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -1172,6 +1184,8 @@ SoapySDR::Range SoapySidekiq::getGainRange(const int    direction,
                                            const size_t channel) const
 {
     SoapySDR_log(SOAPY_SDR_TRACE, "getGainRange");
+    const auto range = rf_configuration->getGainRange(rfDirection(direction));
+    return SoapySDR::Range(range.minimum, range.maximum, range.step);
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -1278,6 +1292,8 @@ void SoapySidekiq::setFrequency(const int direction, const size_t channel,
     int status = 0;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "setFrequency");
+    rf_configuration->setFrequency(rfDirection(direction), channel, frequency);
+    return;
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -1337,6 +1353,7 @@ double SoapySidekiq::getFrequency(const int direction, const size_t channel) con
     int status = 0;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "getFrequency");
+    return rf_configuration->getFrequency(rfDirection(direction), channel);
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -1383,6 +1400,9 @@ SoapySDR::RangeList SoapySidekiq::getFrequencyRange(const int direction,
     SoapySDR::RangeList results;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "getFrequencyRange");
+    const auto range = rf_configuration->getFrequencyRange(rfDirection(direction));
+    results.emplace_back(range.minimum, range.maximum, range.step);
+    return results;
 
     uint64_t max;
     uint64_t min;
@@ -1432,6 +1452,20 @@ void SoapySidekiq::setSampleRate(const int direction, const size_t channel,
     int status = 0;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "setSampleRate");
+    const auto rf_direction = rfDirection(direction);
+    rf_configuration->setSampleRate(rf_direction, channel, rate);
+    const auto &state = rf_configuration->cachedRateBandwidth(rf_direction, channel);
+    if (direction == SOAPY_SDR_RX)
+    {
+        rx_sample_rates.at(channel) = static_cast<std::uint32_t>(state.actual_rate);
+        rx_bandwidths.at(channel) = state.actual_bandwidth;
+    }
+    else
+    {
+        tx_sample_rates.at(channel) = static_cast<std::uint32_t>(state.actual_rate);
+        tx_bandwidths.at(channel) = state.actual_bandwidth;
+    }
+    return;
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -1566,6 +1600,7 @@ double SoapySidekiq::getSampleRate(const int    direction,
     int      status = 0;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "getSampleRate");
+    return rf_configuration->getSampleRate(rfDirection(direction), channel);
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -1611,6 +1646,9 @@ SoapySDR::RangeList SoapySidekiq::getSampleRateRange(const int direction,
     SoapySDR::RangeList ranges;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "getSampleRateRange");
+    const auto range = rf_configuration->getSampleRateRange();
+    ranges.emplace_back(range.minimum, range.maximum, range.step);
+    return ranges;
 
     status = skiq_read_min_sample_rate(card, &min_sample_rate);
     if (status != 0)
@@ -1639,6 +1677,20 @@ void SoapySidekiq::setBandwidth(const int direction, const size_t channel,
     int status = 0;
 
     SoapySDR_logf(SOAPY_SDR_TRACE, "setBandwidth");
+    const auto rf_direction = rfDirection(direction);
+    rf_configuration->setBandwidth(rf_direction, channel, bw);
+    const auto &state = rf_configuration->cachedRateBandwidth(rf_direction, channel);
+    if (direction == SOAPY_SDR_RX)
+    {
+        rx_sample_rates.at(channel) = static_cast<std::uint32_t>(state.actual_rate);
+        rx_bandwidths.at(channel) = state.actual_bandwidth;
+    }
+    else
+    {
+        tx_sample_rates.at(channel) = static_cast<std::uint32_t>(state.actual_rate);
+        tx_bandwidths.at(channel) = state.actual_bandwidth;
+    }
+    return;
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -1790,6 +1842,7 @@ double SoapySidekiq::getBandwidth(const int    direction,
     uint32_t actual_bandwidth;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "getBandwidth");
+    return rf_configuration->getBandwidth(rfDirection(direction), channel);
     if (direction == SOAPY_SDR_RX)
     {
         skiq_rx_hdl_t rx_hdl = getRxHandle(channel);

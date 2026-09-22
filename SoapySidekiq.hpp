@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -16,6 +17,7 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 #include <SoapySidekiq/ChannelMap.hpp>
+#include <SoapySidekiq/RfConfiguration.hpp>
 
 
 #define DEFAULT_SAMPLE_RATE (20000000)
@@ -291,6 +293,8 @@ class SoapySidekiq : public SoapySDR::Device
 
         uint8_t num_rx_channels{};
         soapy_sidekiq::ChannelMap<skiq_rx_hdl_t, skiq_tx_hdl_t> channel_map;
+        std::unique_ptr<soapy_sidekiq::RfBackend> rf_backend;
+        std::unique_ptr<soapy_sidekiq::RfConfiguration> rf_configuration;
         std::vector<uint32_t> rx_sample_rates;
         std::vector<uint32_t> rx_bandwidths;
         uint32_t rx_block_size_in_words{};

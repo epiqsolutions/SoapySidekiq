@@ -37,11 +37,14 @@ add_executable(unit_tests
     support/TestMain.cpp
     unit/AsyncBufferPoolTests.cpp
     unit/DeviceConfigurationTests.cpp
+    unit/RfConfigurationTests.cpp
     unit/SampleConversionTests.cpp
     unit/TimestampConversionTests.cpp
-    ../DeviceOptions.cpp)
+    ../DeviceOptions.cpp
+    ../RfConfiguration.cpp)
 target_include_directories(unit_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/fakes"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 target_link_libraries(unit_tests PRIVATE non_hardware_test_options Threads::Threads)
 add_test(NAME unit.all COMMAND unit_tests)
