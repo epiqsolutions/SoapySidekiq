@@ -22,6 +22,7 @@ int SidekiqSensorBackend::isAccelerometerSupported(bool &supported)
 
 int SidekiqSensorBackend::setAccelerometerEnabled(const bool enabled)
 {
+    // The SDK uses integer state values while the policy layer uses bool.
     return skiq_write_accel_state(card_, enabled ? 1 : 0);
 }
 

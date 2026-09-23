@@ -7,6 +7,15 @@
 namespace soapy_sidekiq
 {
 
+/**
+ * Convert counter ticks to nanoseconds using truncating integer division.
+ *
+ * The implementation avoids floating-point precision loss for large counters
+ * and rejects results that cannot fit the signed SoapySDR timestamp type.
+ *
+ * @throws std::invalid_argument when frequency is zero.
+ * @throws std::overflow_error when the nanosecond result exceeds int64_t.
+ */
 inline std::int64_t ticksToNanoseconds(
     const std::uint64_t ticks,
     const std::uint64_t frequency)
@@ -17,6 +26,7 @@ inline std::int64_t ticksToNanoseconds(
     }
 
 #if defined(__SIZEOF_INT128__)
+    // Widen before multiplication so the exact numerator cannot wrap uint64_t.
     __extension__ using uint128 = unsigned __int128;
     const auto nanoseconds =
         (static_cast<uint128>(ticks) * 1000000000ULL) / frequency;
@@ -27,6 +37,7 @@ inline std::int64_t ticksToNanoseconds(
     }
     return static_cast<std::int64_t>(nanoseconds);
 #else
+    // Split whole and fractional seconds on compilers without 128-bit integers.
     constexpr std::uint64_t nanoseconds_per_second = 1000000000ULL;
     const std::uint64_t whole_seconds = ticks / frequency;
     const std::uint64_t remaining_ticks = ticks % frequency;

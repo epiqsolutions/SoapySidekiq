@@ -15,6 +15,7 @@ StreamRequest validateStreamRequest(
 {
     if (stream_already_configured)
     {
+        // Report lifecycle misuse before secondary format/channel errors.
         throw std::logic_error(
             direction == StreamDirection::rx
                 ? "only one RX stream per device is currently supported"
@@ -28,6 +29,7 @@ StreamRequest validateStreamRequest(
                 : "multi-channel TX streams are not currently supported");
     }
 
+    // Soapy's empty channel list convention selects the first logical channel.
     const std::size_t channel = channels.empty() ? 0 : channels.front();
     if (channel >= available_channels)
     {

@@ -29,6 +29,7 @@ SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
 
 soapy_sidekiq::StreamDirection streamDirection(const int direction)
 {
+    // Reject unknown Soapy constants before selecting RX or TX device state.
     if (direction == SOAPY_SDR_RX)
     {
         return soapy_sidekiq::StreamDirection::rx;
@@ -99,6 +100,7 @@ void SoapySidekiq::tx_enabled_callback(uint8_t card, int32_t status)
 long long SoapySidekiq::convert_timestamp_to_nanos(
         const uint64_t timestamp, const uint64_t timestamp_freq) const
 {
+    // Central helper provides exact arithmetic plus zero/overflow validation.
     return soapy_sidekiq::ticksToNanoseconds(timestamp, timestamp_freq);
 }
 
@@ -401,12 +403,12 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error("");
         }
 
+        // Keep the handle locally owned until RX setup is ready to publish it.
         auto stream_handle = std::make_unique<StreamHandle>();
         stream_handle->direction = direction;
         stream_handle->channel = channel;
         stream_handle->rx_handle = rx_handle;
         stream_handle->tx_handle = skiq_tx_hdl_end;
-
         active_rx_stream = stream_handle.release();
         return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream);
     }
@@ -452,6 +454,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error("");
         }
 
+        // Timestamp setup must succeed before committing TX memory ownership.
         auto stream_handle = std::make_unique<StreamHandle>();
         stream_handle->direction = direction;
         stream_handle->channel = channel;
@@ -462,6 +465,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
             if (p_tx_block[i] == nullptr)
             {
+                // Free only the successfully allocated prefix on partial failure.
                 for (int allocated = 0; allocated < i; ++allocated)
                 {
                     skiq_tx_block_free(p_tx_block[allocated]);
@@ -1014,6 +1018,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         }
         else
         {
+            // Clip and normalize exceptional CF32 values before integer storage.
             soapy_sidekiq::convertCf32ToCs16(
                 reinterpret_cast<const float *>(inbuff_ptr),
                 reinterpret_cast<std::int16_t *>(outbuff_ptr),
