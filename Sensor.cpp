@@ -1,3 +1,8 @@
+/**
+ * @file Sensor.cpp
+ * @brief Implements the SoapySDR-facing sensor enumeration and read methods.
+ */
+
 #include "SoapySidekiq.hpp"
 
 #include <SoapySidekiq/SensorReader.hpp>

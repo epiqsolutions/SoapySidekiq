@@ -1,3 +1,8 @@
+/**
+ * @file SensorReaderTests.cpp
+ * @brief Verifies signed readings, lifecycle cleanup, errors, and JSON output.
+ */
+
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/SensorReader.hpp>
@@ -18,6 +23,7 @@ namespace
 class FakeSensorBackend final : public SensorBackend
 {
 public:
+    /** @copydoc SensorBackend::readTemperature */
     int readTemperature(std::int8_t &value) override
     {
         calls.push_back("temperature");
@@ -25,6 +31,7 @@ public:
         return temperature_status;
     }
 
+    /** @copydoc SensorBackend::isAccelerometerSupported */
     int isAccelerometerSupported(bool &value) override
     {
         calls.push_back("supported");
@@ -32,12 +39,14 @@ public:
         return support_status;
     }
 
+    /** @copydoc SensorBackend::setAccelerometerEnabled */
     int setAccelerometerEnabled(const bool enabled) override
     {
         calls.push_back(enabled ? "enable" : "disable");
         return enabled ? enable_status : disable_status;
     }
 
+    /** @copydoc SensorBackend::readAccelerometer */
     int readAccelerometer(
         std::int16_t &x, std::int16_t &y, std::int16_t &z) override
     {

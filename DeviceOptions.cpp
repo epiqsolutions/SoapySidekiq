@@ -1,3 +1,8 @@
+/**
+ * @file DeviceOptions.cpp
+ * @brief Parses and validates Sidekiq constructor arguments without hardware.
+ */
+
 #include <SoapySidekiq/DeviceOptions.hpp>
 
 #include <charconv>
@@ -12,6 +17,7 @@ namespace soapy_sidekiq
 namespace
 {
 
+/** Parse a bounded unsigned decimal argument with no ignored characters. */
 std::uint32_t parseUnsigned(
     const std::string &value,
     const std::string &name,
@@ -31,6 +37,7 @@ std::uint32_t parseUnsigned(
     return parsed;
 }
 
+/** Return a nonempty optional keyword value, or nullopt when it is absent. */
 std::optional<std::string> optionalString(
     const std::map<std::string, std::string> &arguments,
     const std::string &key)
