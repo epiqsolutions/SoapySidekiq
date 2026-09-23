@@ -1,3 +1,8 @@
+/**
+ * @file StreamConfiguration.cpp
+ * @brief Implements side-effect-free validation of stream setup requests.
+ */
+
 #include <SoapySidekiq/StreamConfiguration.hpp>
 
 #include <stdexcept>

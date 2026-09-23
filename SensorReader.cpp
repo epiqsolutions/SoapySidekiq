@@ -1,3 +1,8 @@
+/**
+ * @file SensorReader.cpp
+ * @brief Implements sensor error handling, lifecycle balancing, and formatting.
+ */
+
 #include <SoapySidekiq/SensorReader.hpp>
 
 #include <sstream>

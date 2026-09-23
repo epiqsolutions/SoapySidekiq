@@ -1,3 +1,8 @@
+/**
+ * @file SampleConversion.hpp
+ * @brief Provides deterministic, hardware-independent sample conversion helpers.
+ */
+
 #pragma once
 
 #include <algorithm>
@@ -16,6 +21,9 @@ namespace soapy_sidekiq
  * Values outside [-1, 1] are clipped, infinities clip to their corresponding
  * endpoint, and NaN maps deterministically to zero.
  *
+ * @param value Normalized floating-point component to convert.
+ * @param full_scale Positive integer-domain full-scale magnitude.
+ * @return Rounded and clipped signed 16-bit component.
  * @throws std::invalid_argument when full_scale is non-finite, non-positive,
  * or larger than the signed 16-bit range.
  */
@@ -41,6 +49,12 @@ inline std::int16_t convertNormalizedFloatToSample(
 /**
  * Convert interleaved normalized CF32 IQ pairs to interleaved CS16 IQ pairs.
  * Zero samples permit null buffers; non-empty conversions require both buffers.
+ *
+ * @param input Source buffer containing two floats per complex sample.
+ * @param output Destination buffer receiving two int16 values per sample.
+ * @param complex_samples Number of complex samples to convert.
+ * @param full_scale Positive integer-domain full-scale magnitude.
+ * @throws std::invalid_argument for invalid scale or nonempty null buffers.
  */
 inline void convertCf32ToCs16(
     const float *input,

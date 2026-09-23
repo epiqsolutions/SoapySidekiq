@@ -1,3 +1,8 @@
+/**
+ * @file RxSampleQueue.hpp
+ * @brief Declares the synchronized, bounded queue used by RX streaming.
+ */
+
 #pragma once
 
 #include <chrono>
@@ -31,9 +36,13 @@ enum class RxPushStatus
 /** Metadata and sample count produced by one queue read. */
 struct RxReadResult
 {
+    /** Logical outcome of the read attempt. */
     RxReadStatus status{RxReadStatus::timeout};
+    /** Number of complex samples copied to the caller. */
     std::size_t samples{};
+    /** Nanosecond timestamp of the first returned sample. */
     std::int64_t time_ns{};
+    /** Whether time_ns contains valid sample metadata. */
     bool has_time{};
 };
 
@@ -47,7 +56,11 @@ struct RxReadResult
 class RxSampleQueue
 {
 public:
-    /** Construct an inactive queue that can retain at most capacity_blocks. */
+    /**
+     * Construct an inactive queue.
+     * @param capacity_blocks Maximum number of retained hardware blocks.
+     * @throws std::invalid_argument when capacity_blocks is zero.
+     */
     explicit RxSampleQueue(std::size_t capacity_blocks);
 
     /** Begin a fresh session, discarding data and lifecycle state from the last one. */
@@ -67,6 +80,13 @@ public:
      *
      * If the queue is full, the oldest block is discarded so the receive
      * worker never blocks the hardware while waiting for a slow consumer.
+     *
+     * @param samples Source buffer containing interleaved CS16 IQ values.
+     * @param complex_samples Number of complex samples in the source buffer.
+     * @param time_ns Timestamp of the source block's first sample.
+     * @param sample_rate Samples per second used to advance partial timestamps.
+     * @return Whether the block was accepted, displaced old data, or was stopped.
+     * @throws std::invalid_argument for a nonempty null buffer or zero rate.
      */
     RxPushStatus push(
         const std::int16_t *samples,
@@ -85,19 +105,26 @@ public:
      *
      * A successful result may span blocks. Its timestamp always describes the
      * first returned sample, including any offset left by an earlier read.
+     *
+     * @param output Destination for interleaved CS16 IQ values.
+     * @param requested_samples Maximum number of complex samples to copy.
+     * @param timeout Maximum time to wait for data or a lifecycle transition.
+     * @return Read status, copied sample count, and first-sample timestamp.
+     * @throws std::invalid_argument for a nonempty null output or negative timeout.
+     * @throws std::overflow_error when an adjusted timestamp exceeds int64_t.
      */
     RxReadResult read(
         std::int16_t *output,
         std::size_t requested_samples,
         std::chrono::microseconds timeout);
 
-    /** Return whether the queue is accepting producer blocks. */
+    /** @return Whether the queue is accepting producer blocks. */
     bool running() const;
 
-    /** Return the number of blocks currently available to readers. */
+    /** @return Number of whole or partially consumed blocks awaiting reads. */
     std::size_t queuedBlocks() const;
 
-    /** Return the number of oldest blocks discarded in the current session. */
+    /** @return Number of oldest blocks discarded in the current session. */
     std::size_t droppedBlocks() const;
 
 private:
@@ -110,7 +137,12 @@ private:
         std::uint64_t sample_rate{};
     };
 
-    /** Calculate the timestamp of the next unread sample in a block. */
+    /**
+     * Calculate the timestamp of the next unread sample in a block.
+     * @param block Queue block whose current offset is being reported.
+     * @return Adjusted timestamp in nanoseconds.
+     * @throws std::overflow_error when the adjusted timestamp exceeds int64_t.
+     */
     std::int64_t blockTime(const Block &block) const;
 
     const std::size_t capacity_blocks_;

@@ -1,3 +1,8 @@
+/**
+ * @file RxSampleQueue.cpp
+ * @brief Implements synchronized RX block ownership, waiting, and timestamps.
+ */
+
 #include <SoapySidekiq/RxSampleQueue.hpp>
 #include <SoapySidekiq/TimestampConversion.hpp>
 

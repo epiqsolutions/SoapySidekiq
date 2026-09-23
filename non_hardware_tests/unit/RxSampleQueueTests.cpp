@@ -1,3 +1,8 @@
+/**
+ * @file RxSampleQueueTests.cpp
+ * @brief Verifies RX queue ownership, timing, overruns, and concurrent wake-ups.
+ */
+
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/RxSampleQueue.hpp>
