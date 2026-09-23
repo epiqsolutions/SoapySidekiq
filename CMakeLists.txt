@@ -59,6 +59,7 @@ SOAPY_SDR_MODULE_UTIL(
         SensorReader.cpp
         SidekiqSensorBackend.cpp
         StreamConfiguration.cpp
+        RxSampleQueue.cpp
         Registation.cpp
         Settings.cpp
         Streaming.cpp

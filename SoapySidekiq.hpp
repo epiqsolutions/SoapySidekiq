@@ -15,6 +15,7 @@
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
+#include <SoapySidekiq/RxSampleQueue.hpp>
 
 
 #define DEFAULT_SAMPLE_RATE (20000000)
@@ -280,12 +281,9 @@ class SoapySidekiq : public SoapySDR::Device
         uint32_t debug_ctr{};
 
         //  rx
-        std::mutex rx_mutex;
-        std::condition_variable rx_cv;
         std::basic_string<char> timetype{};
-        bool rx_running{};
-        bool rx_start_signal{};
-        bool rx_receive_operation_exited_due_to_error{};
+        std::atomic<bool> rx_running{};
+        soapy_sidekiq::RxSampleQueue rx_sample_queue{64};
         StreamHandle *active_rx_stream{};
 
         uint8_t num_rx_channels{};
@@ -325,15 +323,6 @@ class SoapySidekiq : public SoapySDR::Device
         bool rfTimeSource{};
         uint64_t sys_freq{};
 
-        // RX buffer
-        skiq_rx_block_t *p_rx_block[DEFAULT_NUM_BUFFERS]{};
-        uint32_t rxReadIndex{};
-        uint32_t rxWriteIndex{};
-
-        // Buffer for leftover RX samples to allow readStream() to return arbitrary numElems
-        std::vector<int16_t> rx_fifo_buffer;
-        size_t rx_fifo_offset = 0;
-
         // TX buffer
         skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
         uint32_t currTXBuffIndex{};
@@ -368,8 +357,8 @@ class SoapySidekiq : public SoapySDR::Device
 
         //  receive thread
         std::thread _rx_receive_thread;
-        void rx_receive_operation(skiq_rx_hdl_t rx_handle);
-        void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle);
+        void rx_receive_operation(skiq_rx_hdl_t rx_handle, size_t channel);
+        void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle, size_t channel);
 
         // tx thread
         std::thread _tx_streaming_thread;
