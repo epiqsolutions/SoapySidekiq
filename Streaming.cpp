@@ -10,7 +10,9 @@
 
 #include "SoapySidekiq.hpp"
 #include <SoapySDR/Formats.hpp>
+#include <SoapySidekiq/SampleConversion.hpp>
 #include <SoapySidekiq/StreamConfiguration.hpp>
+#include <SoapySidekiq/TimestampConversion.hpp>
 #include <sidekiq_types.h>
 
 namespace
@@ -95,13 +97,7 @@ void SoapySidekiq::tx_enabled_callback(uint8_t card, int32_t status)
 long long SoapySidekiq::convert_timestamp_to_nanos(
         const uint64_t timestamp, const uint64_t timestamp_freq) const
 {
-    const double nanos_per_tic = 1.0/timestamp_freq*1e9;
-    const uint64_t whole_nanos_per_tic = static_cast<uint64_t>(nanos_per_tic);
-    const double frac_nanos_per_tic = nanos_per_tic - whole_nanos_per_tic;
-    const long long nanos =
-        static_cast<long long>(timestamp * whole_nanos_per_tic) +
-        static_cast<long long>(timestamp * frac_nanos_per_tic);
-    return nanos;
+    return soapy_sidekiq::ticksToNanoseconds(timestamp, timestamp_freq);
 }
 
 
@@ -1101,21 +1097,11 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         }
         else
         {
-            // float
-            float *  float_inbuff = (float *)inbuff_ptr;
-            uint32_t words_left = current_tx_block_size;
-            uint16_t * new_outbuff = (uint16_t *)outbuff_ptr;
-
-            int short_ctr = 0;
-            for (uint32_t i = 0; i < words_left; i++)
-            {
-                new_outbuff[short_ctr + 1] = (uint16_t)(float_inbuff[short_ctr + 1] *
-                                              this->maxValue);
-
-                new_outbuff[short_ctr] = (uint16_t)(float_inbuff[short_ctr] *
-                                          this->maxValue);
-                short_ctr += 2;
-            }
+            soapy_sidekiq::convertCf32ToCs16(
+                reinterpret_cast<const float *>(inbuff_ptr),
+                reinterpret_cast<std::int16_t *>(outbuff_ptr),
+                current_tx_block_size,
+                static_cast<float>(this->maxValue));
         }
 
 
