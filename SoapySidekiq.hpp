@@ -1,3 +1,8 @@
+/**
+ * @file SoapySidekiq.hpp
+ * @brief Declares the SoapySDR device implementation for Epiq Sidekiq radios.
+ */
+
 #pragma once
 
 #include <sidekiq_api.h>
@@ -372,7 +377,6 @@ class SoapySidekiq : public SoapySDR::Device
         std::thread _rx_receive_thread;
         void rx_receive_operation(skiq_rx_hdl_t rx_handle);
         void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle);
-        static std::vector<SoapySDR::Kwargs> sidekiq_devices;
 
         // tx thread
         std::thread _tx_streaming_thread;
