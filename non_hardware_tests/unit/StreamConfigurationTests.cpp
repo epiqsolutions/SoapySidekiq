@@ -1,3 +1,8 @@
+/**
+ * @file StreamConfigurationTests.cpp
+ * @brief Verifies stream format, channel, direction, and ownership validation.
+ */
+
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/StreamConfiguration.hpp>
