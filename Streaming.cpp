@@ -25,6 +25,7 @@ SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
 
 soapy_sidekiq::StreamDirection streamDirection(const int direction)
 {
+    // Reject unknown Soapy constants before selecting RX or TX device state.
     if (direction == SOAPY_SDR_RX)
     {
         return soapy_sidekiq::StreamDirection::rx;
@@ -400,6 +401,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error("");
         }
 
+        // Keep the handle locally owned until every RX buffer is allocated.
         auto stream_handle = std::make_unique<StreamHandle>();
         stream_handle->direction = direction;
         stream_handle->channel = channel;
@@ -410,6 +412,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             p_rx_block[i] = static_cast<skiq_rx_block_t *>(malloc(rx_block_size_in_bytes));
             if (p_rx_block[i] == nullptr)
             {
+                // setupStream has not published the handle, so rollback is local.
                 for (int allocated = 0; allocated < i; ++allocated)
                 {
                     free(p_rx_block[allocated]);
@@ -467,6 +470,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error("");
         }
 
+        // Timestamp setup must succeed before committing TX memory ownership.
         auto stream_handle = std::make_unique<StreamHandle>();
         stream_handle->direction = direction;
         stream_handle->channel = channel;
@@ -477,6 +481,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
             if (p_tx_block[i] == nullptr)
             {
+                // Free only the successfully allocated prefix on partial failure.
                 for (int allocated = 0; allocated < i; ++allocated)
                 {
                     skiq_tx_block_free(p_tx_block[allocated]);

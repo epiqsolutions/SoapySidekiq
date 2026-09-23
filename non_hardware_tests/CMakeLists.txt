@@ -70,6 +70,7 @@ target_link_libraries(sensor_tests PRIVATE non_hardware_test_options)
 add_test(NAME sensors.all COMMAND sensor_tests)
 set_tests_properties(sensors.all PROPERTIES LABELS "unit;non-hardware")
 
+# Validate stream requests without invoking SDK setup or allocating buffer pools.
 add_executable(stream_configuration_tests
     support/TestMain.cpp
     unit/StreamConfigurationTests.cpp

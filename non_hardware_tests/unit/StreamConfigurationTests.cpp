@@ -9,6 +9,7 @@ using soapy_sidekiq::StreamDirection;
 using soapy_sidekiq::StreamFormat;
 using soapy_sidekiq::validateStreamRequest;
 
+// Validation tests deliberately avoid constructing a Sidekiq device or buffers.
 TEST_CASE("an omitted stream channel selects channel zero")
 {
     const auto rx = validateStreamRequest(
