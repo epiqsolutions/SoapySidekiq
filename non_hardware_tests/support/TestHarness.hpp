@@ -1,3 +1,8 @@
+/**
+ * @file TestHarness.hpp
+ * @brief Provides a dependency-free test registry and assertion macros.
+ */
+
 #pragma once
 
 #include <exception>
@@ -18,7 +23,10 @@ struct TestCase
     std::function<void()> function;
 };
 
-/** Process-wide registry shared by the lightweight test runner. */
+/**
+ * Access the process-wide registry shared by the lightweight test runner.
+ * @return Mutable registry populated during static initialization.
+ */
 inline std::vector<TestCase> &registry()
 {
     static std::vector<TestCase> tests;
@@ -29,6 +37,7 @@ inline std::vector<TestCase> &registry()
 class Registration
 {
 public:
+    /** Register one named test callable for execution by TestMain.cpp. */
     Registration(std::string name, std::function<void()> function)
     {
         registry().push_back({std::move(name), std::move(function)});
@@ -42,7 +51,13 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-/** Throw a source-located Failure when an expression is false. */
+/**
+ * Throw a source-located Failure when an expression is false.
+ * @param condition Evaluated assertion result.
+ * @param expression Source text of the asserted expression.
+ * @param file Source file containing the assertion.
+ * @param line Source line containing the assertion.
+ */
 inline void require(
     const bool condition,
     const char *expression,
@@ -57,8 +72,12 @@ inline void require(
     }
 }
 
+/**
+ * Compare printable values and report both sides on failure.
+ * @tparam Actual Actual value type.
+ * @tparam Expected Expected value type.
+ */
 template <typename Actual, typename Expected>
-/** Compare printable values and report both sides on failure. */
 void requireEqual(
     const Actual &actual,
     const Expected &expected,
