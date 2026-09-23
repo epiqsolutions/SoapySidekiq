@@ -1,3 +1,8 @@
+/**
+ * @file DeviceDiscoveryTests.cpp
+ * @brief Verifies discovery filtering and recoverable backend failures.
+ */
+
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/DeviceDiscovery.hpp>
@@ -15,7 +20,9 @@ namespace
 
 struct FakeCard
 {
+    /** Serial returned by the fake backend. */
     std::string serial;
+    /** Availability returned by the fake backend. */
     bool available{};
 };
 
@@ -23,6 +30,7 @@ struct FakeCard
 class FakeDiscoveryBackend final : public soapy_sidekiq::DiscoveryBackend
 {
 public:
+    /** Populate representative available and unavailable cards. */
     FakeDiscoveryBackend()
     {
         cards.emplace(0, FakeCard{"SERIAL-A", true});
@@ -30,6 +38,7 @@ public:
         cards.emplace(7, FakeCard{"SERIAL-C", true});
     }
 
+    /** @copydoc soapy_sidekiq::DiscoveryBackend::cardIds */
     std::vector<std::uint8_t> cardIds() override
     {
         if (enumeration_failure)
@@ -44,6 +53,7 @@ public:
         return ids;
     }
 
+    /** @copydoc soapy_sidekiq::DiscoveryBackend::serial */
     std::string serial(const std::uint8_t card) override
     {
         if (serial_failures.count(card) != 0)
@@ -53,6 +63,7 @@ public:
         return cards.at(card).serial;
     }
 
+    /** @copydoc soapy_sidekiq::DiscoveryBackend::isAvailable */
     bool isAvailable(const std::uint8_t card) override
     {
         if (availability_failures.count(card) != 0)
