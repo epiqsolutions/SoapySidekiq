@@ -68,7 +68,19 @@ target_link_libraries(sensor_tests PRIVATE non_hardware_test_options)
 add_test(NAME sensors.all COMMAND sensor_tests)
 set_tests_properties(sensors.all PROPERTIES LABELS "unit;non-hardware")
 
+add_executable(stream_configuration_tests
+    support/TestMain.cpp
+    unit/StreamConfigurationTests.cpp
+    ../StreamConfiguration.cpp)
+target_include_directories(stream_configuration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_link_libraries(stream_configuration_tests PRIVATE non_hardware_test_options)
+
+add_test(NAME stream-configuration.all COMMAND stream_configuration_tests)
+set_tests_properties(stream-configuration.all PROPERTIES LABELS "unit;non-hardware")
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
     USES_TERMINAL)
