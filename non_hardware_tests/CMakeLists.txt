@@ -56,7 +56,19 @@ target_link_libraries(device_option_tests PRIVATE non_hardware_test_options)
 add_test(NAME device-options.all COMMAND device_option_tests)
 set_tests_properties(device-options.all PROPERTIES LABELS "unit;non-hardware")
 
+add_executable(sensor_tests
+    support/TestMain.cpp
+    unit/SensorReaderTests.cpp
+    ../SensorReader.cpp)
+target_include_directories(sensor_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_link_libraries(sensor_tests PRIVATE non_hardware_test_options)
+
+add_test(NAME sensors.all COMMAND sensor_tests)
+set_tests_properties(sensors.all PROPERTIES LABELS "unit;non-hardware")
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests
     USES_TERMINAL)
