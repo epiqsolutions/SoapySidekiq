@@ -189,7 +189,10 @@ void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
     tx_start_signal = false;
 }
 /*******************************************************************
- * Sidekiq receive thread
+ * Sidekiq receive producer
+ *
+ * The worker is the sole caller of skiq_receive. It copies accepted blocks
+ * into RxSampleQueue so readStream can consume them safely on another thread.
  ******************************************************************/
 
 void SoapySidekiq::rx_receive_operation(
@@ -203,6 +206,7 @@ void SoapySidekiq::rx_receive_operation(
     {
         SoapySDR_log(SOAPY_SDR_WARNING, "Exiting RX Sidekiq Thread due to error");
         rx_running.store(false);
+        // Convert every worker exception into a wakeable readStream error.
         rx_sample_queue.fail();
     }
 
@@ -256,6 +260,7 @@ void SoapySidekiq::rx_receive_operation_impl(
                 }
                 last_timestamp = this_timestamp;
 
+                // Store time with the block so partial reads can advance it exactly.
                 const uint64_t timestamp = rfTimeSource
                     ? tmp_p_rx_block->rf_timestamp
                     : tmp_p_rx_block->sys_timestamp;
@@ -499,6 +504,7 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
         }
         if (_rx_receive_thread.joinable())
         {
+            // Joining before reset guarantees the producer no longer accesses the queue.
             _rx_receive_thread.join();
         }
 
@@ -616,6 +622,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             }
         }
 
+        // Publish running state before launching the worker that observes it.
         rx_sample_queue.start();
         rx_running.store(true);
         try
@@ -775,7 +782,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
         }
 
         const skiq_rx_hdl_t rx_handle = stream_handle->rx_handle;
-        // stop receive thread
+        // Wake blocked consumers as soon as this stream stops accepting data.
         rx_running.store(false);
         rx_sample_queue.stop();
 
@@ -914,6 +921,7 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
         return SOAPY_SDR_STREAM_ERROR;
     }
 
+    // The queue stores native CS16; CF32 requests use a temporary conversion buffer.
     std::vector<int16_t> converted_samples;
     int16_t *queue_output = nullptr;
     if (numElems != 0)
@@ -929,6 +937,7 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
         }
     }
 
+    // Queue waiting honors zero as a poll instead of substituting a one-second delay.
     const auto result = rx_sample_queue.read(
         queue_output,
         numElems,

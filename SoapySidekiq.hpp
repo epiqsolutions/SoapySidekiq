@@ -280,7 +280,7 @@ class SoapySidekiq : public SoapySDR::Device
         bool txUseShort{};
         uint32_t debug_ctr{};
 
-        //  rx
+        // RX producer state is atomic; queued sample state synchronizes internally.
         std::basic_string<char> timetype{};
         std::atomic<bool> rx_running{};
         soapy_sidekiq::RxSampleQueue rx_sample_queue{64};
@@ -355,7 +355,7 @@ class SoapySidekiq : public SoapySDR::Device
 
         passedStruct *passedStructInstance;
 
-        //  receive thread
+        // The receive thread owns SDK reads and publishes copied blocks to the queue.
         std::thread _rx_receive_thread;
         void rx_receive_operation(skiq_rx_hdl_t rx_handle, size_t channel);
         void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle, size_t channel);

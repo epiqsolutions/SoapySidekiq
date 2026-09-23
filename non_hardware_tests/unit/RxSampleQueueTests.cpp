@@ -15,6 +15,7 @@ using soapy_sidekiq::RxPushStatus;
 using soapy_sidekiq::RxReadStatus;
 using soapy_sidekiq::RxSampleQueue;
 
+// Cover queue ownership, timestamps, lifecycle wake-ups, overruns, and validation.
 TEST_CASE("RX queue requires a positive block capacity")
 {
     REQUIRE_THROWS_AS(RxSampleQueue(0), std::invalid_argument);
@@ -91,6 +92,7 @@ TEST_CASE("stopping RX wakes a blocked reader")
     RxSampleQueue queue(1);
     queue.start();
     std::array<std::int16_t, 2> output{};
+    // Model readStream waiting while the controlling thread deactivates the stream.
     auto reader = std::async(std::launch::async, [&] {
         return queue.read(output.data(), 1, 5s);
     });
@@ -106,6 +108,7 @@ TEST_CASE("RX worker failure wakes a blocked reader with an error")
     RxSampleQueue queue(1);
     queue.start();
     std::array<std::int16_t, 2> output{};
+    // Model the receive worker translating an exception into a consumer error.
     auto reader = std::async(std::launch::async, [&] {
         return queue.read(output.data(), 1, 5s);
     });
@@ -125,6 +128,7 @@ TEST_CASE("bounded RX queue drops the oldest block")
     const std::array<std::int16_t, 2> third{{3, -3}};
     REQUIRE(queue.push(first.data(), 1, 100, 1) == RxPushStatus::accepted);
     REQUIRE(queue.push(second.data(), 1, 200, 1) == RxPushStatus::accepted);
+    // Hardware reception stays non-blocking by sacrificing the oldest unread data.
     REQUIRE(queue.push(third.data(), 1, 300, 1) == RxPushStatus::dropped_oldest);
     REQUIRE_EQ(queue.droppedBlocks(), std::size_t{1});
 

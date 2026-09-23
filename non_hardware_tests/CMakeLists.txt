@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(SoapySidekiqNonHardwareTests LANGUAGES CXX)
 
 include(CTest)
+# RxSampleQueue tests exercise real producer/consumer wake-ups with std::thread.
 find_package(Threads REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -97,6 +98,7 @@ target_link_libraries(stream_conversion_tests PRIVATE non_hardware_test_options)
 add_test(NAME stream-conversion.all COMMAND stream_conversion_tests)
 set_tests_properties(stream-conversion.all PROPERTIES LABELS "unit;non-hardware")
 
+# Keep the queue test independent of hardware and the proprietary Sidekiq runtime.
 add_executable(rx_sample_queue_tests
     support/TestMain.cpp
     unit/RxSampleQueueTests.cpp
