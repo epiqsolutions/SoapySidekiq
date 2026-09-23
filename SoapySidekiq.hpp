@@ -360,9 +360,11 @@ class SoapySidekiq : public SoapySDR::Device
 
         passedStruct *passedStructInstance;
 
-        // The receive thread owns SDK reads and publishes copied blocks to the queue.
+        /** Worker that exclusively receives SDK blocks for the active RX stream. */
         std::thread _rx_receive_thread;
+        /** Run the guarded receive worker for one hardware handle and channel. */
         void rx_receive_operation(skiq_rx_hdl_t rx_handle, size_t channel);
+        /** Receive SDK blocks and publish owned samples until deactivation. */
         void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle, size_t channel);
 
         // tx thread
