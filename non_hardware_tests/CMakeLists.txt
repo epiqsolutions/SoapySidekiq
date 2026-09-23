@@ -44,6 +44,7 @@ target_link_libraries(discovery_tests PRIVATE non_hardware_test_options)
 add_test(NAME discovery.all COMMAND discovery_tests)
 set_tests_properties(discovery.all PROPERTIES LABELS "component;non-hardware")
 
+# Keep constructor validation independent from the hardware-owning device class.
 add_executable(device_option_tests
     support/TestMain.cpp
     unit/DeviceOptionsTests.cpp
