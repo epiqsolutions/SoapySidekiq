@@ -59,11 +59,13 @@ std::optional<AccelerometerReading> SensorReader::readAccelerometer()
     }
 
     AccelerometerReading reading;
+    // Always attempt disable after a successful enable, even when reading fails.
     const int read_status = backend_.readAccelerometer(
         reading.x, reading.y, reading.z);
     const int disable_status = backend_.setAccelerometerEnabled(false);
     if (read_status != 0)
     {
+        // Preserve the primary read failure if cleanup also reported an error.
         throw SensorBackendError("read accelerometer", read_status);
     }
     if (disable_status != 0)
