@@ -44,7 +44,19 @@ target_link_libraries(discovery_tests PRIVATE non_hardware_test_options)
 add_test(NAME discovery.all COMMAND discovery_tests)
 set_tests_properties(discovery.all PROPERTIES LABELS "component;non-hardware")
 
+add_executable(device_option_tests
+    support/TestMain.cpp
+    unit/DeviceOptionsTests.cpp
+    ../DeviceOptions.cpp)
+target_include_directories(device_option_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_link_libraries(device_option_tests PRIVATE non_hardware_test_options)
+
+add_test(NAME device-options.all COMMAND device_option_tests)
+set_tests_properties(device-options.all PROPERTIES LABELS "unit;non-hardware")
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests
+    DEPENDS discovery_tests device_option_tests
     USES_TERMINAL)
