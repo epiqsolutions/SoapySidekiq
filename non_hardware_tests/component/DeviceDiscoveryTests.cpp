@@ -19,6 +19,7 @@ struct FakeCard
     bool available{};
 };
 
+/** Scriptable discovery backend with deterministic card ordering and errors. */
 class FakeDiscoveryBackend final : public soapy_sidekiq::DiscoveryBackend
 {
 public:
