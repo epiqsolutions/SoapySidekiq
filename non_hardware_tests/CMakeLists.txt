@@ -57,6 +57,7 @@ target_link_libraries(device_option_tests PRIVATE non_hardware_test_options)
 add_test(NAME device-options.all COMMAND device_option_tests)
 set_tests_properties(device-options.all PROPERTIES LABELS "unit;non-hardware")
 
+# Test sensor lifecycle and formatting without constructing a hardware device.
 add_executable(sensor_tests
     support/TestMain.cpp
     unit/SensorReaderTests.cpp
