@@ -1,3 +1,8 @@
+/**
+ * @file SampleConversionTests.cpp
+ * @brief Verifies CF32 clipping, rounding, validation, and CS16 layout.
+ */
+
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/SampleConversion.hpp>

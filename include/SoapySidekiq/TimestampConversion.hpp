@@ -1,3 +1,8 @@
+/**
+ * @file TimestampConversion.hpp
+ * @brief Provides overflow-checked conversion from device ticks to nanoseconds.
+ */
+
 #pragma once
 
 #include <cstdint>
@@ -13,6 +18,9 @@ namespace soapy_sidekiq
  * The implementation avoids floating-point precision loss for large counters
  * and rejects results that cannot fit the signed SoapySDR timestamp type.
  *
+ * @param ticks Device counter value to convert.
+ * @param frequency Counter ticks per second.
+ * @return Whole nanoseconds, truncated toward zero.
  * @throws std::invalid_argument when frequency is zero.
  * @throws std::overflow_error when the nanosecond result exceeds int64_t.
  */
