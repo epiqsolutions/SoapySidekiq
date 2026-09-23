@@ -1,3 +1,8 @@
+/**
+ * @file DeviceOptions.hpp
+ * @brief Declares validated, hardware-independent device constructor options.
+ */
+
 #pragma once
 
 #include <cstdint>
@@ -29,6 +34,8 @@ struct DeviceOptions
 /**
  * Parse and range-check Soapy constructor arguments before hardware is opened.
  *
+ * @param arguments SoapySDR keyword arguments supplied to the constructor.
+ * @return Fully validated options with defaults applied.
  * @throws std::invalid_argument for missing, malformed, empty, or out-of-range
  * values.
  */

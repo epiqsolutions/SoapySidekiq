@@ -1,3 +1,8 @@
+/**
+ * @file DeviceDiscovery.hpp
+ * @brief Hardware-independent types and interfaces for Sidekiq discovery.
+ */
+
 #pragma once
 
 #include <cstdint>
@@ -42,7 +47,9 @@ struct DiscoveryError
 /** Devices and diagnostics returned together by a discovery pass. */
 struct DiscoveryResult
 {
+    /** Successfully described devices that match the requested filters. */
     std::vector<DeviceDescriptor> devices;
+    /** Recoverable errors encountered during the same discovery pass. */
     std::vector<DiscoveryError> errors;
 };
 
@@ -52,13 +59,24 @@ class DiscoveryBackend
 public:
     virtual ~DiscoveryBackend() = default;
 
-    /** Return every Sidekiq card index visible to the transport. */
+    /**
+     * Return every Sidekiq card index visible to the transport.
+     * @return Card indexes in backend-defined enumeration order.
+     */
     virtual std::vector<std::uint8_t> cardIds() = 0;
 
-    /** Read the serial string for one card. */
+    /**
+     * Read the serial string for one card.
+     * @param card SDK card index to inspect.
+     * @return Hardware serial string reported for the card.
+     */
     virtual std::string serial(std::uint8_t card) = 0;
 
-    /** Return whether the current process can access one card. */
+    /**
+     * Return whether the current process can access one card.
+     * @param card SDK card index to inspect.
+     * @return True when the current process may open the card.
+     */
     virtual bool isAvailable(std::uint8_t card) = 0;
 };
 
@@ -67,6 +85,10 @@ public:
  *
  * A serial-read failure excludes that card because it cannot produce a valid
  * descriptor. An availability-read failure retains the card as unavailable.
+ *
+ * @param backend Hardware adapter used for all discovery operations.
+ * @param query Optional card or serial filter.
+ * @return Matching descriptors and any recoverable diagnostics.
  */
 DiscoveryResult discoverDevices(
     DiscoveryBackend &backend,

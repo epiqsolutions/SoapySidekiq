@@ -1,5 +1,7 @@
 ########################################################################
 # Build Soapy SDR support module for Sidekiq Devices
+#
+# This file configures the production module and its Sidekiq SDK dependency.
 ########################################################################
 cmake_minimum_required(VERSION 2.8.12...3.10)
 project(SoapySidekiq CXX)

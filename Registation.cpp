@@ -1,5 +1,10 @@
 //  Copyright [2018] <Alexander Hurd>"
 
+/**
+ * @file Registation.cpp
+ * @brief Connects Sidekiq discovery and construction to the SoapySDR registry.
+ */
+
 #include "SoapySidekiq.hpp"
 #include <SoapySidekiq/DeviceDiscovery.hpp>
 #include <SoapySDR/Registry.hpp>
@@ -18,6 +23,7 @@ namespace
 class SidekiqDiscoveryBackend final : public soapy_sidekiq::DiscoveryBackend
 {
 public:
+    /** @copydoc soapy_sidekiq::DiscoveryBackend::cardIds */
     std::vector<std::uint8_t> cardIds() override
     {
         std::uint8_t count = 0;
@@ -31,6 +37,7 @@ public:
         return std::vector<std::uint8_t>(cards, cards + count);
     }
 
+    /** @copydoc soapy_sidekiq::DiscoveryBackend::serial */
     std::string serial(const std::uint8_t card) override
     {
         char *serial_string = nullptr;
@@ -43,6 +50,7 @@ public:
         return serial_string;
     }
 
+    /** @copydoc soapy_sidekiq::DiscoveryBackend::isAvailable */
     bool isAvailable(const std::uint8_t card) override
     {
         pid_t owner = 0;
@@ -60,6 +68,7 @@ public:
     }
 };
 
+/** Translate supported SoapySDR keyword filters into a discovery query. */
 soapy_sidekiq::DiscoveryQuery makeQuery(const SoapySDR::Kwargs &args)
 {
     // Copy only filters understood by the Sidekiq discovery contract.
@@ -77,6 +86,7 @@ soapy_sidekiq::DiscoveryQuery makeQuery(const SoapySDR::Kwargs &args)
     return query;
 }
 
+/** Discover Sidekiq cards and translate them into SoapySDR registry records. */
 std::vector<SoapySDR::Kwargs> findSidekiq(const SoapySDR::Kwargs &args)
 {
     SoapySDR_log(SOAPY_SDR_TRACE, "findSidekiq");
@@ -117,6 +127,7 @@ std::vector<SoapySDR::Kwargs> findSidekiq(const SoapySDR::Kwargs &args)
     return results;
 }
 
+/** Construct the driver instance requested by the SoapySDR registry. */
 SoapySDR::Device *makeSidekiq(const SoapySDR::Kwargs &args)
 {
     return new SoapySidekiq(args);

@@ -1,3 +1,8 @@
+/**
+ * @file SoapySidekiq.hpp
+ * @brief Declares the SoapySDR device implementation for Epiq Sidekiq radios.
+ */
+
 #pragma once
 
 #include <sidekiq_api.h>

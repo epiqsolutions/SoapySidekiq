@@ -1,3 +1,8 @@
+/**
+ * @file Streaming.cpp
+ * @brief Implements SoapySDR stream setup, lifecycle, receive, and transmit I/O.
+ */
+
 #include <cstring>
 #include <unistd.h>
 #include <iostream>
@@ -22,11 +27,13 @@ namespace
 std::mutex g_instance_registry_mutex;
 std::unordered_map<uint8_t, SoapySidekiq *> g_instance_registry;
 
+/** Convert the opaque SoapySDR stream token back to its driver-owned handle. */
 SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
 {
     return reinterpret_cast<SoapySidekiq::StreamHandle *>(stream);
 }
 
+/** Translate a SoapySDR direction constant or reject an unknown value. */
 soapy_sidekiq::StreamDirection streamDirection(const int direction)
 {
     // Reject unknown Soapy constants before selecting RX or TX device state.

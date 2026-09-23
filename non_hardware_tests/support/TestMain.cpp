@@ -1,7 +1,13 @@
+/**
+ * @file TestMain.cpp
+ * @brief Runs all cases registered with the non-hardware test harness.
+ */
+
 #include "TestHarness.hpp"
 
 #include <iostream>
 
+/** Execute registered cases and return a conventional process status. */
 int main()
 {
     // Run every statically registered case so one failure does not hide others.

@@ -1,3 +1,4 @@
+# Non-hardware test build: compiles portable driver logic without the Sidekiq SDK.
 cmake_minimum_required(VERSION 3.16)
 project(SoapySidekiqNonHardwareTests LANGUAGES CXX)
 

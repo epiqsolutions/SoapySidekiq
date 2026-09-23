@@ -1,3 +1,8 @@
+/**
+ * @file StreamConfiguration.hpp
+ * @brief Declares validation and normalization for SoapySDR stream requests.
+ */
+
 #pragma once
 
 #include <cstddef>
@@ -37,6 +42,16 @@ struct StreamRequest
  *
  * An omitted channel selects channel zero. Only one channel and one stream per
  * direction are currently supported.
+ *
+ * @param direction Requested receive or transmit direction.
+ * @param format SoapySDR sample-format name.
+ * @param channels Requested logical channel list.
+ * @param available_channels Number of channels exposed in this direction.
+ * @param stream_already_configured Whether this direction already owns a stream.
+ * @return Normalized format, direction, and selected channel.
+ * @throws std::logic_error when a stream already exists in this direction.
+ * @throws std::invalid_argument for unsupported formats or multiple channels.
+ * @throws std::out_of_range when the selected channel is unavailable.
  */
 StreamRequest validateStreamRequest(
     StreamDirection direction,

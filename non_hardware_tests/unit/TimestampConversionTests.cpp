@@ -1,3 +1,8 @@
+/**
+ * @file TimestampConversionTests.cpp
+ * @brief Verifies exact, fractional, invalid, and overflowing tick conversion.
+ */
+
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/TimestampConversion.hpp>
