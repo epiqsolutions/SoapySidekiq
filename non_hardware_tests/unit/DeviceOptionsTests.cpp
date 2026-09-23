@@ -1,3 +1,8 @@
+/**
+ * @file DeviceOptionsTests.cpp
+ * @brief Verifies constructor option defaults, parsing, and rejection paths.
+ */
+
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/DeviceOptions.hpp>
