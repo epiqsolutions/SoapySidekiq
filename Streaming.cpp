@@ -187,111 +187,6 @@ void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
     tx_start_signal = false;
 }
 /*******************************************************************
- * Sidekiq receive thread
- ******************************************************************/
-
-void SoapySidekiq::rx_receive_operation(
-        const skiq_rx_hdl_t rx_handle, const size_t channel)
-{
-    try
-    {
-        rx_receive_operation_impl(rx_handle, channel);
-    }
-    catch (const std::exception&)
-    {
-        SoapySDR_log(SOAPY_SDR_WARNING, "Exiting RX Sidekiq Thread due to error");
-        rx_running.store(false);
-        rx_sample_queue.fail();
-    }
-
-}
-void SoapySidekiq::rx_receive_operation_impl(
-        const skiq_rx_hdl_t rx_handle, const size_t channel)
-{
-    int status = 0;
-
-    skiq_rx_block_t *tmp_p_rx_block;
-    uint32_t len;
-    bool first = true;
-    uint64_t last_timestamp = 0;
-    skiq_rx_hdl_t rcvd_hdl;
-    const uint64_t sample_rate = rx_sample_rates.at(channel);
-
-    //  loop until stream is deactivated
-    while (rx_running.load())
-    {
-        status = skiq_receive(card, &rcvd_hdl, &tmp_p_rx_block, &len);
-        if (status == skiq_rx_status_success)
-        {
-            if (rcvd_hdl == rx_handle)
-            {
-                if (len != rx_block_size_in_bytes)
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                                  "received length %d is not the correct block size %d\n",
-                                  len, rx_block_size_in_bytes);
-                    throw std::runtime_error("");
-                }
-
-                // --- Timestamp integrity check ---
-                uint64_t this_timestamp = tmp_p_rx_block->rf_timestamp;
-                if (!first)
-                {
-                    uint64_t expected_ts = last_timestamp + rx_payload_size_in_words;
-                    if (this_timestamp != expected_ts)
-                    {
-                        SoapySDR_log(SOAPY_SDR_WARNING,
-                                     "Detected timestamp overflow/missed samples"
-                                     " in RX Sidekiq Thread");
-                        SoapySDR_logf(SOAPY_SDR_DEBUG, "expected timestamp %lu, actual %lu",
-                                      expected_ts, this_timestamp);
-                        first = true; // restart
-                    }
-                }
-                if (first)
-                {
-                    first = false;
-                }
-                last_timestamp = this_timestamp;
-
-                const uint64_t timestamp = rfTimeSource
-                    ? tmp_p_rx_block->rf_timestamp
-                    : tmp_p_rx_block->sys_timestamp;
-                const uint64_t timestamp_frequency = rfTimeSource
-                    ? sample_rate
-                    : sys_freq;
-                const auto time_ns = convert_timestamp_to_nanos(
-                    timestamp, timestamp_frequency);
-                const auto push_status = rx_sample_queue.push(
-                    const_cast<const int16_t *>(tmp_p_rx_block->data),
-                    rx_payload_size_in_words,
-                    time_ns,
-                    sample_rate);
-                if (push_status == soapy_sidekiq::RxPushStatus::dropped_oldest)
-                {
-                    SoapySDR_log(SOAPY_SDR_WARNING,
-                        "RX queue overrun: client too slow, dropping oldest block");
-                }
-            }
-        }
-        else if (status == skiq_rx_status_error_overrun)
-        {
-            SoapySDR_logf(SOAPY_SDR_WARNING, "overrun detected, (card %u)", card);
-        }
-        else
-        {
-            if (status != skiq_rx_status_no_data)
-            {
-                SoapySDR_logf(SOAPY_SDR_FATAL,
-                              "skiq_receive failed, (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
-            }
-        }
-    }
-}
-
-/*******************************************************************
  * Stream API
  ******************************************************************/
 
@@ -489,21 +384,21 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
 
     if (stream_handle->direction == SOAPY_SDR_RX)
     {
-        if (rx_running)
+        if (rx_session != nullptr && rx_session->running())
         {
             throw std::runtime_error("deactivate the RX stream before closing it");
         }
-        if (_rx_receive_thread.joinable())
+
+        // A failed worker is stopped but remains joinable until shutdown.
+        if (rx_session != nullptr)
         {
-            _rx_receive_thread.join();
+            rx_session->shutdown();
         }
 
         if (active_rx_stream == stream_handle)
         {
             active_rx_stream = nullptr;
         }
-
-        rx_sample_queue.reset();
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
     {
@@ -568,12 +463,11 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         }
 
         const skiq_rx_hdl_t rx_handle = stream_handle->rx_handle;
-        if (rx_running.load() || _rx_receive_thread.joinable())
+        if (rx_session == nullptr)
         {
             return SOAPY_SDR_STREAM_ERROR;
         }
 
-        /* start rx streaming */
         if ((flags & SOAPY_SDR_HAS_TIME) != 0)
         {
             if (tx_start_signal == true)
@@ -588,46 +482,22 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
                                                  " delayed 2 seconds");
 
             }
-
-            rx_streaming_on_1pps_started = true;
-            status = skiq_start_rx_streaming_on_1pps(card, rx_handle, 0);
-            if (status != 0)
-            {
-                SoapySDR_logf(SOAPY_SDR_ERROR,
-                              "skiq_start_rx_streaming_on_1pps failed, (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
-            }
-            rx_streaming_on_1pps_started = false;
-        }
-        else
-        {
-            status = skiq_start_rx_streaming(card, rx_handle);
-            if (status !=0)
-            {
-                SoapySDR_logf(SOAPY_SDR_ERROR,
-                              "skiq_start_rx_streaming failed, (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
-            }
         }
 
-        rx_sample_queue.start();
-        rx_running.store(true);
-        try
+        // The session starts hardware before publishing or creating a worker.
+        status = rx_session->activate({
+            static_cast<uint32_t>(rx_handle),
+            rx_payload_size_in_words,
+            rx_sample_rates.at(stream_handle->channel),
+            sys_freq,
+            rfTimeSource,
+            (flags & SOAPY_SDR_HAS_TIME) != 0});
+        if (status != 0)
         {
-            _rx_receive_thread = std::thread(
-                &SoapySidekiq::rx_receive_operation,
-                this,
-                rx_handle,
-                stream_handle->channel);
-        }
-        catch (...)
-        {
-            rx_running.store(false);
-            rx_sample_queue.stop();
-            skiq_stop_rx_streaming(card, rx_handle);
-            throw;
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                "starting RX streaming failed (card %u, handle %d), status %d",
+                card, rx_handle, status);
+            throw std::runtime_error("failed to start RX streaming");
         }
 
         SoapySDR_logf(SOAPY_SDR_INFO,
@@ -771,58 +641,22 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
         }
 
         const skiq_rx_hdl_t rx_handle = stream_handle->rx_handle;
-        // stop receive thread
-        rx_running.store(false);
-        rx_sample_queue.stop();
-
-        /* stop rx streaming */
-        if ((flags & SOAPY_SDR_HAS_TIME) != 0)
+        // RxStreamSession joins the worker even when the backend stop fails.
+        status = rx_session == nullptr
+            ? SOAPY_SDR_STREAM_ERROR
+            : rx_session->deactivate();
+        if (status == -ENODEV)
         {
-            status = skiq_stop_rx_streaming_on_1pps(card, rx_handle, 0);
-            if (status != 0)
-            {
-                if (status == -ENODEV) // Handle not streaming
-                {
-                    SoapySDR_logf(SOAPY_SDR_WARNING,
-                        "skiq_stop_rx_streaming_on_1pps: handle not streaming"
-                        " (card %u, handle %d), ignoring",
-                        card, rx_handle);
-                }
-                else
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                        "skiq_stop_rx_streaming_on_1pps failed,"
-                        " (card %u) handle %d, status %d",
-                        card, rx_handle, status);
-                    throw std::runtime_error("");
-                }
-            }
+            SoapySDR_logf(SOAPY_SDR_WARNING,
+                "RX handle was not streaming while deactivating (card %u, handle %d)",
+                card, rx_handle);
         }
-        else
+        else if (status != 0)
         {
-            status = skiq_stop_rx_streaming(card, rx_handle);
-            if (status != 0)
-            {
-                if (status == -ENODEV) // Handle not streaming
-                {
-                    SoapySDR_logf(SOAPY_SDR_WARNING,
-                        "skiq_stop_rx_streaming: handle not streaming (card %u, handle %d), ignoring",
-                        card, rx_handle);
-                }
-                else
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                        "skiq_stop_rx_streaming failed, (card %u) handle %d, status %d",
-                        card, rx_handle, status);
-                    throw std::runtime_error("");
-                }
-            }
-        }
-
-        /* wait till the rx thread is done */
-        if (_rx_receive_thread.joinable())
-        {
-            _rx_receive_thread.join();
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                "stopping RX streaming failed (card %u, handle %d), status %d",
+                card, rx_handle, status);
+            throw std::runtime_error("failed to stop RX streaming");
         }
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
@@ -898,6 +732,7 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
     const StreamHandle *stream_handle = getStreamHandle(stream);
     if (stream_handle->direction != SOAPY_SDR_RX) return SOAPY_SDR_NOT_SUPPORTED;
     if (active_rx_stream != stream_handle) return SOAPY_SDR_STREAM_ERROR;
+    if (rx_session == nullptr) return SOAPY_SDR_STREAM_ERROR;
     flags = 0;
     timeNs = 0;
     if (numElems > static_cast<size_t>(std::numeric_limits<int>::max()))
@@ -925,7 +760,8 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
         }
     }
 
-    const auto result = rx_sample_queue.read(
+    // Session read translates worker stop/failure into a stable queue status.
+    const auto result = rx_session->read(
         queue_output,
         numElems,
         std::chrono::microseconds(timeoutUs));

@@ -160,7 +160,11 @@ TEST_CASE("RX queue validates buffers rates timeouts and timestamp overflow")
     RxSampleQueue queue(1);
     queue.start();
     std::array<std::int16_t, 2> input{{1, 2}};
+    // Both raw and owned inputs must contain at least one complete IQ pair.
     REQUIRE_THROWS_AS(queue.push(nullptr, 1, 0, 1), std::invalid_argument);
+    REQUIRE_THROWS_AS(queue.push(input.data(), 0, 0, 1), std::invalid_argument);
+    REQUIRE_THROWS_AS(queue.push(std::vector<std::int16_t>{}, 0, 1),
+                      std::invalid_argument);
     REQUIRE_THROWS_AS(queue.push(input.data(), 1, 0, 0), std::invalid_argument);
     REQUIRE_THROWS_AS(queue.read(nullptr, 1, 0us), std::invalid_argument);
     REQUIRE_THROWS_AS(queue.read(input.data(), 1, -1us), std::invalid_argument);
