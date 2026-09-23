@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace soapy_sidekiq
 {
@@ -67,7 +68,12 @@ RxPushStatus RxSampleQueue::push(
     const std::int64_t time_ns,
     const std::uint64_t sample_rate)
 {
-    if (complex_samples != 0 && samples == nullptr)
+    if (complex_samples == 0 ||
+        complex_samples > std::numeric_limits<std::size_t>::max() / 2)
+    {
+        throw std::invalid_argument("RX sample count must be positive");
+    }
+    if (samples == nullptr)
     {
         throw std::invalid_argument("RX samples cannot be null");
     }
@@ -76,12 +82,29 @@ RxPushStatus RxSampleQueue::push(
         throw std::invalid_argument("RX sample rate cannot be zero");
     }
 
-    // Copy before taking the lock to keep producer/consumer serialization short.
-    Block block;
-    if (complex_samples != 0)
+    // Copying overload keeps raw SDK memory outside the queue's lifetime.
+    return push(
+        std::vector<std::int16_t>(samples, samples + complex_samples * 2),
+        time_ns,
+        sample_rate);
+}
+
+RxPushStatus RxSampleQueue::push(
+    std::vector<std::int16_t> samples,
+    const std::int64_t time_ns,
+    const std::uint64_t sample_rate)
+{
+    if (samples.empty() || samples.size() % 2 != 0)
     {
-        block.samples.assign(samples, samples + complex_samples * 2);
+        throw std::invalid_argument("RX sample data must contain complete IQ pairs");
     }
+    if (sample_rate == 0)
+    {
+        throw std::invalid_argument("RX sample rate cannot be zero");
+    }
+
+    Block block;
+    block.samples = std::move(samples);
     block.time_ns = time_ns;
     block.sample_rate = sample_rate;
 
@@ -94,7 +117,7 @@ RxPushStatus RxSampleQueue::push(
         }
         if (blocks_.size() == capacity_blocks_)
         {
-            // Favor current hardware data instead of blocking the receive worker.
+            // Keep latency bounded without blocking the hardware receive worker.
             blocks_.pop_front();
             ++dropped_blocks_;
             dropped = true;

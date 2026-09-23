@@ -74,6 +74,12 @@ public:
         std::int64_t time_ns,
         std::uint64_t sample_rate);
 
+    /** Move one owned interleaved CS16 hardware block into the queue. */
+    RxPushStatus push(
+        std::vector<std::int16_t> samples,
+        std::int64_t time_ns,
+        std::uint64_t sample_rate);
+
     /**
      * Read up to requested_samples interleaved complex samples.
      *

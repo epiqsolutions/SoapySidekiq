@@ -1,5 +1,6 @@
 #include "SoapySidekiq.hpp"
 #include <SoapySidekiq/DeviceOptions.hpp>
+#include <SoapySidekiq/SidekiqRxBackend.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
 #include <cinttypes>
@@ -283,8 +284,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     timetype = "rf_timestamp";
     complete_count = 0;
 
-    rx_running = false;
-
     card = options.card;
     current_tx_block_size = options.tx_block_size;
     SoapySDR_logf(SOAPY_SDR_INFO, "TX block size set to %u", current_tx_block_size);
@@ -302,6 +301,10 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
                       card, status);
         throw std::runtime_error("");
     }
+
+    // The backend owns no hardware resource; the session owns its worker.
+    rx_backend = std::make_unique<soapy_sidekiq::SidekiqRxBackend>(card);
+    rx_session = std::make_unique<soapy_sidekiq::RxStreamSession>(*rx_backend);
 
     if (options.topology.has_value())
     {
@@ -536,6 +539,15 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 SoapySidekiq::~SoapySidekiq(void)
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "In destructor", card);
+
+    // Stop and join RX before invalidating callbacks or exiting the SDK.
+    if (rx_session != nullptr)
+    {
+        rx_session->shutdown();
+    }
+    delete active_rx_stream;
+    active_rx_stream = nullptr;
+
     unregisterInstance(card, this);
     skiq_register_tx_enabled_callback(card, nullptr);
     skiq_register_tx_complete_callback(card, nullptr);

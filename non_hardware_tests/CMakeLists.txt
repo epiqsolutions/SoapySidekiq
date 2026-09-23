@@ -112,8 +112,24 @@ target_link_libraries(rx_sample_queue_tests PRIVATE
 add_test(NAME rx-sample-queue.all COMMAND rx_sample_queue_tests)
 set_tests_properties(rx-sample-queue.all PROPERTIES LABELS "unit;non-hardware")
 
+# Exercise the complete RX worker lifecycle through a blocking fake backend.
+add_executable(rx_stream_session_tests
+    support/TestMain.cpp
+    component/RxStreamSessionTests.cpp
+    ../RxSampleQueue.cpp
+    ../RxStreamSession.cpp)
+target_include_directories(rx_stream_session_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_link_libraries(rx_stream_session_tests PRIVATE
+    non_hardware_test_options Threads::Threads)
+
+add_test(NAME rx-stream-session.all COMMAND rx_stream_session_tests)
+set_tests_properties(rx-stream-session.all PROPERTIES LABELS "component;non-hardware")
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests
+            rx_stream_session_tests
     USES_TERMINAL)
