@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(SoapySidekiqNonHardwareTests LANGUAGES CXX)
 
 include(CTest)
+find_package(Threads REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -92,8 +93,21 @@ target_link_libraries(stream_conversion_tests PRIVATE non_hardware_test_options)
 add_test(NAME stream-conversion.all COMMAND stream_conversion_tests)
 set_tests_properties(stream-conversion.all PROPERTIES LABELS "unit;non-hardware")
 
+add_executable(rx_sample_queue_tests
+    support/TestMain.cpp
+    unit/RxSampleQueueTests.cpp
+    ../RxSampleQueue.cpp)
+target_include_directories(rx_sample_queue_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_link_libraries(rx_sample_queue_tests PRIVATE
+    non_hardware_test_options Threads::Threads)
+
+add_test(NAME rx-sample-queue.all COMMAND rx_sample_queue_tests)
+set_tests_properties(rx-sample-queue.all PROPERTIES LABELS "unit;non-hardware")
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
-            stream_conversion_tests
+            stream_conversion_tests rx_sample_queue_tests
     USES_TERMINAL)
