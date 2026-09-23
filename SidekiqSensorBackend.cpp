@@ -1,3 +1,8 @@
+/**
+ * @file SidekiqSensorBackend.cpp
+ * @brief Adapts Sidekiq SDK sensor calls to the portable SensorBackend API.
+ */
+
 #include <SoapySidekiq/SidekiqSensorBackend.hpp>
 
 #include <sidekiq_api.h>

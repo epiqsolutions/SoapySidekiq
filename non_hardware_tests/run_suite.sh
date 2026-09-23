@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Run the aggregate non-hardware suite and append individual-case totals.
+
 set -o pipefail
 
 # Accept alternate build/output paths for sanitizer and local watch workflows.
