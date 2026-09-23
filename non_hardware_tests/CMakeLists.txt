@@ -80,7 +80,20 @@ target_link_libraries(stream_configuration_tests PRIVATE non_hardware_test_optio
 add_test(NAME stream-configuration.all COMMAND stream_configuration_tests)
 set_tests_properties(stream-configuration.all PROPERTIES LABELS "unit;non-hardware")
 
+add_executable(stream_conversion_tests
+    support/TestMain.cpp
+    unit/SampleConversionTests.cpp
+    unit/TimestampConversionTests.cpp)
+target_include_directories(stream_conversion_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_link_libraries(stream_conversion_tests PRIVATE non_hardware_test_options)
+
+add_test(NAME stream-conversion.all COMMAND stream_conversion_tests)
+set_tests_properties(stream-conversion.all PROPERTIES LABELS "unit;non-hardware")
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
+            stream_conversion_tests
     USES_TERMINAL)
