@@ -98,6 +98,7 @@ void SoapySidekiq::tx_enabled_callback(uint8_t card, int32_t status)
 long long SoapySidekiq::convert_timestamp_to_nanos(
         const uint64_t timestamp, const uint64_t timestamp_freq) const
 {
+    // Central helper provides exact arithmetic plus zero/overflow validation.
     return soapy_sidekiq::ticksToNanoseconds(timestamp, timestamp_freq);
 }
 
@@ -1102,6 +1103,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         }
         else
         {
+            // Clip and normalize exceptional CF32 values before integer storage.
             soapy_sidekiq::convertCf32ToCs16(
                 reinterpret_cast<const float *>(inbuff_ptr),
                 reinterpret_cast<std::int16_t *>(outbuff_ptr),

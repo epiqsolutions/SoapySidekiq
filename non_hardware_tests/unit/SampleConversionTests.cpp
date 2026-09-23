@@ -9,6 +9,7 @@
 
 using soapy_sidekiq::convertCf32ToCs16;
 
+// Cover normal values and every exceptional-value policy used by TX streaming.
 TEST_CASE("CF32 samples convert to signed CS16 pairs")
 {
     const std::array<float, 6> input{{1.0F, -1.0F, 0.0F, 0.5F, -0.5F, 0.25F}};

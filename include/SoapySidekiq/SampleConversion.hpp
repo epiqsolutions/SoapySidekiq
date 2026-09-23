@@ -10,6 +10,15 @@
 namespace soapy_sidekiq
 {
 
+/**
+ * Convert one normalized floating-point component to a signed integer sample.
+ *
+ * Values outside [-1, 1] are clipped, infinities clip to their corresponding
+ * endpoint, and NaN maps deterministically to zero.
+ *
+ * @throws std::invalid_argument when full_scale is non-finite, non-positive,
+ * or larger than the signed 16-bit range.
+ */
 inline std::int16_t convertNormalizedFloatToSample(
     const float value,
     const float full_scale)
@@ -21,6 +30,7 @@ inline std::int16_t convertNormalizedFloatToSample(
     }
     if (std::isnan(value))
     {
+        // Avoid implementation-defined floating-to-integer handling for NaN.
         return 0;
     }
 
@@ -28,6 +38,10 @@ inline std::int16_t convertNormalizedFloatToSample(
     return static_cast<std::int16_t>(std::lround(clipped * full_scale));
 }
 
+/**
+ * Convert interleaved normalized CF32 IQ pairs to interleaved CS16 IQ pairs.
+ * Zero samples permit null buffers; non-empty conversions require both buffers.
+ */
 inline void convertCf32ToCs16(
     const float *input,
     std::int16_t *output,

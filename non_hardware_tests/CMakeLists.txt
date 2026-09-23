@@ -83,6 +83,7 @@ target_link_libraries(stream_configuration_tests PRIVATE non_hardware_test_optio
 add_test(NAME stream-configuration.all COMMAND stream_configuration_tests)
 set_tests_properties(stream-configuration.all PROPERTIES LABELS "unit;non-hardware")
 
+# Test numerical stream conversion policy independently from SDK buffers.
 add_executable(stream_conversion_tests
     support/TestMain.cpp
     unit/SampleConversionTests.cpp

@@ -8,6 +8,7 @@
 
 using soapy_sidekiq::ticksToNanoseconds;
 
+// Exercise exact, fractional, large-counter, invalid, and overflow paths.
 TEST_CASE("timestamp conversion handles exact sample-rate intervals")
 {
     REQUIRE_EQ(ticksToNanoseconds(0, 20000000), std::int64_t{0});
