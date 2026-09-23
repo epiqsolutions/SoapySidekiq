@@ -1,3 +1,8 @@
+/**
+ * @file SidekiqRxBackend.hpp
+ * @brief Declares the Sidekiq SDK adapter used by RxStreamSession.
+ */
+
 #pragma once
 
 #include <SoapySidekiq/RxStreamSession.hpp>
@@ -11,19 +16,23 @@ namespace soapy_sidekiq
 class SidekiqRxBackend final : public RxStreamBackend
 {
 public:
-    /** Bind the backend to one initialized Sidekiq card. */
+    /**
+     * Bind the backend to one initialized Sidekiq card.
+     * @param card SDK card index used by all receive operations.
+     */
     explicit SidekiqRxBackend(std::uint8_t card);
 
-    /** Start the requested Sidekiq RX handle. */
+    /** @copydoc RxStreamBackend::start */
     int start(std::uint32_t handle, bool on_pps) override;
 
-    /** Stop the requested Sidekiq RX handle. */
+    /** @copydoc RxStreamBackend::stop */
     int stop(std::uint32_t handle, bool on_pps) override;
 
-    /** Convert one SDK receive result and block into portable value types. */
+    /** @copydoc RxStreamBackend::receive */
     RxReceiveResult receive() override;
 
 private:
+    /** Initialized SDK card index owned by the surrounding device. */
     std::uint8_t card_;
 };
 

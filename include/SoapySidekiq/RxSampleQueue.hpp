@@ -94,7 +94,14 @@ public:
         std::int64_t time_ns,
         std::uint64_t sample_rate);
 
-    /** Move one owned interleaved CS16 hardware block into the queue. */
+    /**
+     * Move one owned interleaved CS16 hardware block into the queue.
+     * @param samples Interleaved IQ values transferred into queue ownership.
+     * @param time_ns Timestamp of the block's first sample.
+     * @param sample_rate Samples per second used for partial-read timestamps.
+     * @return Whether the block was accepted, displaced old data, or was stopped.
+     * @throws std::invalid_argument for empty/odd sample data or a zero rate.
+     */
     RxPushStatus push(
         std::vector<std::int16_t> samples,
         std::int64_t time_ns,

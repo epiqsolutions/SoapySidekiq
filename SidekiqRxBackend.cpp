@@ -1,3 +1,8 @@
+/**
+ * @file SidekiqRxBackend.cpp
+ * @brief Normalizes Sidekiq SDK receive calls into owned portable results.
+ */
+
 #include <SoapySidekiq/SidekiqRxBackend.hpp>
 
 #include <sidekiq_api.h>

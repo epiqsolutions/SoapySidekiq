@@ -1,3 +1,8 @@
+/**
+ * @file RxStreamSession.cpp
+ * @brief Implements RX hardware start, worker execution, reads, and teardown.
+ */
+
 #include <SoapySidekiq/RxStreamSession.hpp>
 #include <SoapySidekiq/TimestampConversion.hpp>
 

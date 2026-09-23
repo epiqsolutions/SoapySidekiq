@@ -1,3 +1,8 @@
+/**
+ * @file RxStreamSessionTests.cpp
+ * @brief Verifies RX worker lifecycle, errors, timing, filtering, and cleanup.
+ */
+
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/RxStreamSession.hpp>
@@ -28,6 +33,7 @@ namespace
 class FakeRxBackend final : public RxStreamBackend
 {
 public:
+    /** @copydoc RxStreamBackend::start */
     int start(std::uint32_t handle, bool on_pps) override
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -41,6 +47,7 @@ public:
         return start_status;
     }
 
+    /** @copydoc RxStreamBackend::stop */
     int stop(std::uint32_t handle, bool on_pps) override
     {
         {
@@ -55,6 +62,7 @@ public:
         return stop_status;
     }
 
+    /** @copydoc RxStreamBackend::receive */
     RxReceiveResult receive() override
     {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -70,7 +78,10 @@ public:
         return event;
     }
 
-    /** Make one receive result available to the session worker. */
+    /**
+     * Make one receive result available to the session worker.
+     * @param event Owned result appended to the fake's receive queue.
+     */
     void enqueue(RxReceiveResult event)
     {
         {
@@ -96,7 +107,11 @@ private:
     bool streaming_{};
 };
 
-/** Return a valid two-complex-sample session configuration. */
+/**
+ * Return a valid two-complex-sample session configuration.
+ * @param use_rf_timestamp Select RF rather than system timestamps.
+ * @param on_pps Select PPS-synchronized backend start and stop.
+ */
 RxSessionConfiguration configuration(
     const bool use_rf_timestamp = true,
     const bool on_pps = false)
@@ -104,7 +119,13 @@ RxSessionConfiguration configuration(
     return {7, 2, 20000000, 1000000, use_rf_timestamp, on_pps};
 }
 
-/** Build a successful receive event with explicit handle and timestamps. */
+/**
+ * Build a successful receive event with explicit handle and timestamps.
+ * @param handle Hardware handle reported by the fake backend.
+ * @param values Interleaved CS16 values transferred into the result.
+ * @param rf_timestamp RF sample-counter timestamp.
+ * @param system_timestamp System-counter timestamp.
+ */
 RxReceiveResult samples(
     const std::uint32_t handle,
     std::vector<std::int16_t> values,

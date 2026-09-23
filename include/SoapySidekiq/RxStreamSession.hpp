@@ -1,3 +1,8 @@
+/**
+ * @file RxStreamSession.hpp
+ * @brief Declares the hardware-independent RX worker and lifecycle controller.
+ */
+
 #pragma once
 
 #include <SoapySidekiq/RxSampleQueue.hpp>
@@ -25,11 +30,17 @@ enum class RxReceiveStatus
 /** One normalized receive result, independent of the Sidekiq SDK types. */
 struct RxReceiveResult
 {
+    /** Normalized outcome of the backend receive call. */
     RxReceiveStatus status{RxReceiveStatus::no_data};
+    /** Hardware RX handle associated with a successful block. */
     std::uint32_t handle{};
+    /** Owned interleaved CS16 IQ values. */
     std::vector<std::int16_t> samples;
+    /** RF sample-counter timestamp supplied by the hardware. */
     std::uint64_t rf_timestamp{};
+    /** System-counter timestamp supplied by the hardware. */
     std::uint64_t system_timestamp{};
+    /** Original backend status for an error result. */
     int error_code{};
 };
 
@@ -39,24 +50,43 @@ class RxStreamBackend
 public:
     virtual ~RxStreamBackend() = default;
 
-    /** Start an RX handle, optionally synchronized to PPS. */
+    /**
+     * Start an RX handle, optionally synchronized to PPS.
+     * @param handle Portable numeric RX handle.
+     * @param on_pps Whether start should wait for the next PPS edge.
+     * @return Backend status code; zero indicates success.
+     */
     virtual int start(std::uint32_t handle, bool on_pps) = 0;
 
-    /** Stop an RX handle using the same synchronization mode as start(). */
+    /**
+     * Stop an RX handle using the same synchronization mode as start().
+     * @param handle Portable numeric RX handle.
+     * @param on_pps Whether stop should wait for the next PPS edge.
+     * @return Backend status code; zero indicates success.
+     */
     virtual int stop(std::uint32_t handle, bool on_pps) = 0;
 
-    /** Wait for and normalize the next hardware receive result. */
+    /**
+     * Wait for and normalize the next hardware receive result.
+     * @return Owned samples, timestamps, handle, and normalized status.
+     */
     virtual RxReceiveResult receive() = 0;
 };
 
 /** Immutable settings captured for one active receive session. */
 struct RxSessionConfiguration
 {
+    /** Hardware RX handle accepted by this session. */
     std::uint32_t handle{};
+    /** Expected number of complex samples per hardware block. */
     std::size_t block_samples{};
+    /** RX sample rate used for RF timestamp conversion. */
     std::uint64_t sample_rate{};
+    /** System-counter frequency used when RF time is not selected. */
     std::uint64_t system_timestamp_frequency{};
+    /** Select RF timestamps instead of system-counter timestamps. */
     bool use_rf_timestamp{true};
+    /** Synchronize hardware start and stop to PPS. */
     bool on_pps{};
 };
 
@@ -68,7 +98,12 @@ struct RxSessionConfiguration
 class RxStreamSession
 {
 public:
-    /** Construct a session around a backend that must outlive this object. */
+    /**
+     * Construct a session around a backend that must outlive this object.
+     * @param backend Hardware adapter used by the worker thread.
+     * @param queue_capacity_blocks Maximum number of queued hardware blocks.
+     * @throws std::invalid_argument when queue_capacity_blocks is zero.
+     */
     explicit RxStreamSession(
         RxStreamBackend &backend,
         std::size_t queue_capacity_blocks = 64);
@@ -79,41 +114,61 @@ public:
     RxStreamSession(const RxStreamSession &) = delete;
     RxStreamSession &operator=(const RxStreamSession &) = delete;
 
-    /** Start hardware and its receive worker; return the backend status. */
+    /**
+     * Start hardware and its receive worker.
+     * @param configuration Immutable settings captured by the worker.
+     * @return Backend start status; zero indicates an active session.
+     * @throws std::invalid_argument for unusable sizes or timestamp frequencies.
+     * @throws std::logic_error when a prior session is still active or joinable.
+     */
     int activate(const RxSessionConfiguration &configuration);
 
-    /** Stop hardware, wake readers, join the worker, and return stop status. */
+    /**
+     * Stop hardware, wake readers, and join the worker.
+     * @return Backend stop status, or zero when already inactive.
+     */
     int deactivate();
 
     /** Best-effort, non-throwing teardown for destructors and device cleanup. */
     void shutdown() noexcept;
 
-    /** Read queued complex samples with the caller's exact timeout. */
+    /**
+     * Read queued complex samples with the caller's exact timeout.
+     * @param output Destination for interleaved CS16 IQ values.
+     * @param requested_samples Maximum number of complex samples to copy.
+     * @param timeout Maximum wait for samples or a lifecycle transition.
+     * @return Queue result containing status, count, and timestamp metadata.
+     */
     RxReadResult read(
         std::int16_t *output,
         std::size_t requested_samples,
         std::chrono::microseconds timeout);
 
-    /** Return true while the receive worker should continue running. */
+    /** @return True while the receive worker should continue running. */
     bool running() const;
 
-    /** Return true after a fatal receive or validation error. */
+    /** @return True after a fatal receive or block-validation error. */
     bool failed() const;
 
-    /** Return the number of hardware overrun notifications seen this session. */
+    /** @return Hardware overrun notifications seen in the current session. */
     std::size_t hardwareOverruns() const;
 
-    /** Return the number of non-contiguous RF timestamps seen this session. */
+    /** @return Non-contiguous RF timestamps seen in the current session. */
     std::size_t timestampDiscontinuities() const;
 
-    /** Return the backend error code saved by the receive worker. */
+    /** @return Backend error code saved by the receive worker, or zero. */
     int receiveError() const;
 
 private:
-    /** Worker entry point; all failures are translated into session state. */
+    /**
+     * Worker entry point; all failures are translated into session state.
+     * @param configuration Immutable settings copied into the worker thread.
+     */
     void receiveLoop(RxSessionConfiguration configuration) noexcept;
 
+    /** Non-owning backend reference; the caller guarantees its lifetime. */
     RxStreamBackend &backend_;
+    /** Synchronized producer/consumer handoff owned by this session. */
     RxSampleQueue queue_;
     mutable std::mutex lifecycle_mutex_;
     std::thread receive_thread_;
