@@ -261,6 +261,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     uint8_t channels = 0;
     skiq_iq_order_t iq_order;
     int i;
+    // Reject all malformed constructor input before registering or opening SDK state.
     const auto options = soapy_sidekiq::parseDeviceOptions(args);
 
     /* Register our own logging function before initializing the library */
@@ -468,6 +469,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         tx_bandwidths[chan] = actual_bandwidth;
     }
 
+    // Source setters require initialized hardware, so apply validated names last.
     if (options.clock_source.has_value())
     {
         setClockSource(*options.clock_source);

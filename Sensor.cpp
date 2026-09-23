@@ -12,6 +12,7 @@ std::vector<std::string> SoapySidekiq::listSensors(void) const
 std::string SoapySidekiq::readSensor(const std::string &key) const
 {
     SoapySDR_log(SOAPY_SDR_TRACE, "readSensor");
+    // Keep the Soapy-facing method thin; SensorReader owns lifecycle policy.
     soapy_sidekiq::SidekiqSensorBackend backend(card);
     soapy_sidekiq::SensorReader reader(backend);
 
@@ -40,6 +41,7 @@ std::string SoapySidekiq::readSensor(const std::string &key) const
     }
     catch (const soapy_sidekiq::SensorBackendError &error)
     {
+        // Preserve the legacy string-returning API while logging full diagnostics.
         SoapySDR_logf(SOAPY_SDR_ERROR,
             "Sensor operation '%s' failed (card %u), status %d",
             error.operation().c_str(), card, error.status());

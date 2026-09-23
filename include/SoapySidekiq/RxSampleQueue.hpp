@@ -11,7 +11,7 @@
 namespace soapy_sidekiq
 {
 
-/** Outcomes from a consumer read. */
+/** Outcomes returned when a consumer attempts to read RX samples. */
 enum class RxReadStatus
 {
     samples,
@@ -20,7 +20,7 @@ enum class RxReadStatus
     error
 };
 
-/** Outcomes from adding a hardware block to the bounded queue. */
+/** Outcomes returned when the receive worker submits an RX block. */
 enum class RxPushStatus
 {
     accepted,
@@ -28,7 +28,7 @@ enum class RxPushStatus
     stopped
 };
 
-/** Sample count and timestamp metadata returned by one queue read. */
+/** Metadata and sample count produced by one queue read. */
 struct RxReadResult
 {
     RxReadStatus status{RxReadStatus::timeout};
@@ -38,31 +38,36 @@ struct RxReadResult
 };
 
 /**
- * Thread-safe, bounded queue of interleaved CS16 IQ blocks.
+ * Thread-safe bounded handoff between the Sidekiq receive worker and SoapySDR.
  *
- * The producer may push whole hardware blocks while a consumer reads an
- * arbitrary number of complex samples. Partial-block timestamps are adjusted
- * by the number of samples already consumed.
+ * The queue owns a copy of each interleaved CS16 block because Sidekiq retains
+ * ownership of its receive buffers. Partial reads retain their exact sample
+ * offset so the next read reports the timestamp of its first returned sample.
  */
 class RxSampleQueue
 {
 public:
-    /** Create a queue that retains at most capacity_blocks complete blocks. */
+    /** Construct an inactive queue that can retain at most capacity_blocks. */
     explicit RxSampleQueue(std::size_t capacity_blocks);
 
-    /** Clear prior state and begin accepting blocks. */
+    /** Begin a fresh session, discarding data and lifecycle state from the last one. */
     void start();
 
-    /** Stop accepting blocks and wake all waiting consumers. */
+    /** End the session and wake readers currently waiting for data. */
     void stop();
 
-    /** Mark the producer failed and wake readers with an error result. */
+    /** Mark the producer as failed and wake readers with an error result. */
     void fail();
 
-    /** Clear queued data, counters, and all lifecycle state. */
+    /** Return the queue to its initial inactive, empty state. */
     void reset();
 
-    /** Copy one interleaved CS16 hardware block into the queue. */
+    /**
+     * Copy one timestamped block into the queue.
+     *
+     * If the queue is full, the oldest block is discarded so the receive
+     * worker never blocks the hardware while waiting for a slow consumer.
+     */
     RxPushStatus push(
         const std::int16_t *samples,
         std::size_t complex_samples,
@@ -75,23 +80,28 @@ public:
         std::int64_t time_ns,
         std::uint64_t sample_rate);
 
-    /** Read up to requested_samples, waiting no longer than timeout. */
+    /**
+     * Read up to requested_samples interleaved complex samples.
+     *
+     * A successful result may span blocks. Its timestamp always describes the
+     * first returned sample, including any offset left by an earlier read.
+     */
     RxReadResult read(
         std::int16_t *output,
         std::size_t requested_samples,
         std::chrono::microseconds timeout);
 
-    /** Return whether the queue currently accepts producer blocks. */
+    /** Return whether the queue is accepting producer blocks. */
     bool running() const;
 
-    /** Return the number of whole or partially consumed queued blocks. */
+    /** Return the number of blocks currently available to readers. */
     std::size_t queuedBlocks() const;
 
-    /** Return the number of oldest blocks discarded since start(). */
+    /** Return the number of oldest blocks discarded in the current session. */
     std::size_t droppedBlocks() const;
 
 private:
-    /** Owned sample block and its current complex-sample read offset. */
+    /** An owned CS16 block plus the next unread complex-sample offset. */
     struct Block
     {
         std::vector<std::int16_t> samples;
@@ -100,13 +110,14 @@ private:
         std::uint64_t sample_rate{};
     };
 
-    /** Calculate the timestamp of the block's next unread sample. */
+    /** Calculate the timestamp of the next unread sample in a block. */
     std::int64_t blockTime(const Block &block) const;
 
     const std::size_t capacity_blocks_;
     mutable std::mutex mutex_;
     std::condition_variable data_available_;
     std::deque<Block> blocks_;
+    // All lifecycle and queue fields below are protected by mutex_.
     bool running_{};
     bool failed_{};
     std::size_t dropped_blocks_{};

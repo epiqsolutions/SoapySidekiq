@@ -17,6 +17,7 @@ std::uint32_t parseUnsigned(
     const std::string &name,
     const std::uint32_t maximum)
 {
+    // from_chars rejects signs, whitespace, and trailing characters uniformly.
     std::uint32_t parsed = 0;
     const char *begin = value.data();
     const char *end = begin + value.size();
@@ -41,6 +42,7 @@ std::optional<std::string> optionalString(
     }
     if (value->second.empty())
     {
+        // Presence with no value is distinct from omitting an optional setting.
         throw std::invalid_argument(key + " cannot be empty");
     }
     return value->second;
@@ -57,6 +59,7 @@ DeviceOptions parseDeviceOptions(const std::map<std::string, std::string> &argum
     }
 
     DeviceOptions options;
+    // Validate every argument before the constructor performs SDK side effects.
     options.card = static_cast<std::uint8_t>(
         parseUnsigned(card->second, "card", std::numeric_limits<std::uint8_t>::max()));
 

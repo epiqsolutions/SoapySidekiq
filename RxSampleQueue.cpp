@@ -22,6 +22,7 @@ RxSampleQueue::RxSampleQueue(const std::size_t capacity_blocks)
 void RxSampleQueue::start()
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    // A reactivated stream must never expose samples or errors from its prior run.
     blocks_.clear();
     running_ = true;
     failed_ = false;
@@ -34,6 +35,7 @@ void RxSampleQueue::stop()
         std::lock_guard<std::mutex> lock(mutex_);
         running_ = false;
     }
+    // A reader may otherwise remain asleep until its entire timeout expires.
     data_available_.notify_all();
 }
 
@@ -44,6 +46,7 @@ void RxSampleQueue::fail()
         running_ = false;
         failed_ = true;
     }
+    // Failure is terminal for this session and must be visible to every reader.
     data_available_.notify_all();
 }
 
@@ -114,7 +117,7 @@ RxPushStatus RxSampleQueue::push(
         }
         if (blocks_.size() == capacity_blocks_)
         {
-            // Keep latency bounded by retaining the newest hardware data.
+            // Keep latency bounded without blocking the hardware receive worker.
             blocks_.pop_front();
             ++dropped_blocks_;
             dropped = true;
@@ -127,6 +130,7 @@ RxPushStatus RxSampleQueue::push(
 
 std::int64_t RxSampleQueue::blockTime(const Block &block) const
 {
+    // offset counts complex samples, which advance RF time by one tick each.
     const auto offset_ns = ticksToNanoseconds(block.offset, block.sample_rate);
     if (offset_ns > 0 &&
         block.time_ns > std::numeric_limits<std::int64_t>::max() - offset_ns)
@@ -155,6 +159,7 @@ RxReadResult RxSampleQueue::read(
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
+    // Lifecycle transitions share the wake-up path with newly queued samples.
     const auto ready = [this] {
         return !blocks_.empty() || failed_ || !running_;
     };
@@ -167,6 +172,7 @@ RxReadResult RxSampleQueue::read(
         return {failed_ ? RxReadStatus::error : RxReadStatus::stopped, 0, 0, false};
     }
 
+    // Capture metadata before consuming blocks; it belongs to the first sample.
     RxReadResult result{RxReadStatus::samples, 0, blockTime(blocks_.front()), true};
     while (result.samples < requested_samples && !blocks_.empty())
     {
