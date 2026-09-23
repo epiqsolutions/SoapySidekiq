@@ -14,6 +14,7 @@
 namespace
 {
 
+/** Adapts Sidekiq discovery calls to the hardware-independent interface. */
 class SidekiqDiscoveryBackend final : public soapy_sidekiq::DiscoveryBackend
 {
 public:
@@ -61,6 +62,7 @@ public:
 
 soapy_sidekiq::DiscoveryQuery makeQuery(const SoapySDR::Kwargs &args)
 {
+    // Copy only filters understood by the Sidekiq discovery contract.
     soapy_sidekiq::DiscoveryQuery query;
     const auto card = args.find("card");
     if (card != args.end())
@@ -83,6 +85,7 @@ std::vector<SoapySDR::Kwargs> findSidekiq(const SoapySDR::Kwargs &args)
 
     for (const auto &error : discovery.errors)
     {
+        // Discovery is best-effort: log diagnostics while returning valid cards.
         if (error.card.has_value())
         {
             SoapySDR_logf(SOAPY_SDR_ERROR,
@@ -101,6 +104,7 @@ std::vector<SoapySDR::Kwargs> findSidekiq(const SoapySDR::Kwargs &args)
     results.reserve(discovery.devices.size());
     for (const auto &device : discovery.devices)
     {
+        // Translate the portable descriptor into SoapySDR registry metadata.
         SoapySDR::Kwargs info;
         info["card"] = std::to_string(device.card);
         info["label"] = "Epiq Solutions - Sidekiq :: ";
