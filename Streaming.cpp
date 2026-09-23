@@ -1,3 +1,8 @@
+/**
+ * @file Streaming.cpp
+ * @brief Implements SoapySDR stream setup, lifecycle, receive, and transmit I/O.
+ */
+
 #include <cstring>
 #include <unistd.h>
 #include <iostream>
@@ -6,9 +11,11 @@
 #include <string>
 #include <thread>
 #include <mutex>
+#include <new>
 
 #include "SoapySidekiq.hpp"
 #include <SoapySDR/Formats.hpp>
+#include <SoapySidekiq/StreamConfiguration.hpp>
 #include <sidekiq_types.h>
 
 namespace
@@ -16,9 +23,25 @@ namespace
 std::mutex g_instance_registry_mutex;
 std::unordered_map<uint8_t, SoapySidekiq *> g_instance_registry;
 
+/** Convert the opaque SoapySDR stream token back to its driver-owned handle. */
 SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
 {
     return reinterpret_cast<SoapySidekiq::StreamHandle *>(stream);
+}
+
+/** Translate a SoapySDR direction constant or reject an unknown value. */
+soapy_sidekiq::StreamDirection streamDirection(const int direction)
+{
+    // Reject unknown Soapy constants before selecting RX or TX device state.
+    if (direction == SOAPY_SDR_RX)
+    {
+        return soapy_sidekiq::StreamDirection::rx;
+    }
+    if (direction == SOAPY_SDR_TX)
+    {
+        return soapy_sidekiq::StreamDirection::tx;
+    }
+    throw std::invalid_argument("invalid stream direction " + std::to_string(direction));
 }
 }
 
@@ -98,11 +121,7 @@ std::vector<std::string> SoapySidekiq::getStreamFormats(
     std::vector<std::string> formats;
 
     formats.push_back(SOAPY_SDR_CS16);
-
-    if (direction == SOAPY_SDR_RX)
-    {
-        formats.push_back(SOAPY_SDR_CF32);
-    }
+    formats.push_back(SOAPY_SDR_CF32);
 
     return formats;
 }
@@ -289,9 +308,19 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
                                             const SoapySDR::Kwargs &args)
 {
     int status = 0;
-    const size_t channel = channels.empty() ? 0 : channels.at(0);
-
     SoapySDR_logf(SOAPY_SDR_TRACE, "setupStream");
+
+    const auto stream_direction = streamDirection(direction);
+    const bool already_configured = stream_direction == soapy_sidekiq::StreamDirection::rx
+        ? active_rx_stream != nullptr
+        : active_tx_stream != nullptr;
+    const std::size_t available_channels =
+        stream_direction == soapy_sidekiq::StreamDirection::rx
+            ? num_rx_channels
+            : num_tx_channels;
+    const auto request = soapy_sidekiq::validateStreamRequest(
+        stream_direction, format, channels, available_channels, already_configured);
+    const std::size_t channel = request.channel;
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -326,21 +355,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
                       rx_payload_size_in_words);
-
-        // allocate the RAM buffers
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-        {
-            p_rx_block[i] = (skiq_rx_block_t *)malloc(rx_block_size_in_bytes);
-            if (p_rx_block[i] == NULL)
-            {
-                SoapySDR_log(SOAPY_SDR_ERROR, "malloc failed to allocate memory ");
-                throw std::runtime_error("");
-            }
-
-            memset(p_rx_block[i], 0, rx_block_size_in_bytes);
-        }
-        rxWriteIndex = 0;
-        rxReadIndex  = 0;
 
         if (format == "CS16")
         {
@@ -394,13 +408,32 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error("");
         }
 
-        StreamHandle *stream_handle = new StreamHandle{};
+        // Keep the handle locally owned until every RX buffer is allocated.
+        auto stream_handle = std::make_unique<StreamHandle>();
         stream_handle->direction = direction;
         stream_handle->channel = channel;
         stream_handle->rx_handle = rx_handle;
         stream_handle->tx_handle = skiq_tx_hdl_end;
-        active_rx_stream = stream_handle;
-        return reinterpret_cast<SoapySDR::Stream *>(stream_handle);
+        for (int i = 0; i < DEFAULT_NUM_BUFFERS; ++i)
+        {
+            p_rx_block[i] = static_cast<skiq_rx_block_t *>(malloc(rx_block_size_in_bytes));
+            if (p_rx_block[i] == nullptr)
+            {
+                // setupStream has not published the handle, so rollback is local.
+                for (int allocated = 0; allocated < i; ++allocated)
+                {
+                    free(p_rx_block[allocated]);
+                    p_rx_block[allocated] = nullptr;
+                }
+                throw std::bad_alloc();
+            }
+            memset(p_rx_block[i], 0, rx_block_size_in_bytes);
+        }
+        rxWriteIndex = 0;
+        rxReadIndex = 0;
+
+        active_rx_stream = stream_handle.release();
+        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream);
     }
     else if (direction == SOAPY_SDR_TX)
     {
@@ -435,13 +468,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
                 "' -- Only CS16 is supported by SoapySidekiq TX module.");
         }
 
-        // Allocate buffers
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-        {
-            p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
-        }
-        currTXBuffIndex = 0;
-
         status = skiq_read_sys_timestamp_freq(this->card, &this->sys_freq);
         if (status != 0)
         {
@@ -451,13 +477,30 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error("");
         }
 
-        StreamHandle *stream_handle = new StreamHandle{};
+        // Timestamp setup must succeed before committing TX memory ownership.
+        auto stream_handle = std::make_unique<StreamHandle>();
         stream_handle->direction = direction;
         stream_handle->channel = channel;
         stream_handle->rx_handle = skiq_rx_hdl_end;
         stream_handle->tx_handle = tx_handle;
-        active_tx_stream = stream_handle;
-        return reinterpret_cast<SoapySDR::Stream *>(stream_handle);
+        for (int i = 0; i < DEFAULT_NUM_BUFFERS; ++i)
+        {
+            p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
+            if (p_tx_block[i] == nullptr)
+            {
+                // Free only the successfully allocated prefix on partial failure.
+                for (int allocated = 0; allocated < i; ++allocated)
+                {
+                    skiq_tx_block_free(p_tx_block[allocated]);
+                    p_tx_block[allocated] = nullptr;
+                }
+                throw std::bad_alloc();
+            }
+        }
+        currTXBuffIndex = 0;
+
+        active_tx_stream = stream_handle.release();
+        return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream);
     }
     else
     {
