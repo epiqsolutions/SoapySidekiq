@@ -14,6 +14,7 @@ using soapy_sidekiq::SensorReader;
 namespace
 {
 
+/** Records call order and scripts each sensor backend status independently. */
 class FakeSensorBackend final : public SensorBackend
 {
 public:

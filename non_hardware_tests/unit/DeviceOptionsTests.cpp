@@ -8,6 +8,7 @@
 
 using soapy_sidekiq::parseDeviceOptions;
 
+// These tests exercise the parser without registering callbacks or opening a card.
 TEST_CASE("device options require a card and provide a safe TX default")
 {
     const auto options = parseDeviceOptions({{"card", "3"}});

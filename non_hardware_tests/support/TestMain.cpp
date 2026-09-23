@@ -4,6 +4,7 @@
 
 int main()
 {
+    // Run every statically registered case so one failure does not hide others.
     std::size_t failures = 0;
     for (const auto &test : test_harness::registry())
     {
