@@ -1,3 +1,8 @@
+/**
+ * @file Settings.cpp
+ * @brief Implements Sidekiq device settings, callbacks, and utility operations.
+ */
+
 #include "SoapySidekiq.hpp"
 #include <SoapySDR/Formats.hpp>
 #include <cstring>

@@ -1,3 +1,8 @@
+/**
+ * @file DeviceDiscovery.cpp
+ * @brief Implements resilient, filterable Sidekiq device discovery.
+ */
+
 #include <SoapySidekiq/DeviceDiscovery.hpp>
 
 #include <exception>
@@ -9,6 +14,7 @@ namespace soapy_sidekiq
 namespace
 {
 
+/** Return whether a descriptor satisfies the query's precedence rules. */
 bool matchesQuery(const DeviceDescriptor &device, const DiscoveryQuery &query)
 {
     // Soapy callers historically expect an explicit card to win over serial.
@@ -23,6 +29,7 @@ bool matchesQuery(const DeviceDescriptor &device, const DiscoveryQuery &query)
     return true;
 }
 
+/** Normalize empty exception text before exposing it as a diagnostic. */
 std::string exceptionMessage(const std::exception &error)
 {
     const std::string message = error.what();
