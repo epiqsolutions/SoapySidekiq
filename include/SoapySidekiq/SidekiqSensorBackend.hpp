@@ -1,3 +1,8 @@
+/**
+ * @file SidekiqSensorBackend.hpp
+ * @brief Declares the Sidekiq SDK adapter for portable sensor policy.
+ */
+
 #pragma once
 
 #include <SoapySidekiq/SensorReader.hpp>
@@ -11,20 +16,24 @@ namespace soapy_sidekiq
 class SidekiqSensorBackend final : public SensorBackend
 {
 public:
-    /** Bind sensor operations to one initialized Sidekiq card. */
+    /**
+     * Bind sensor operations to one initialized Sidekiq card.
+     * @param card SDK card index used by every backend operation.
+     */
     explicit SidekiqSensorBackend(std::uint8_t card);
 
-    /** Forward a signed temperature read to the SDK. */
+    /** @copydoc SensorBackend::readTemperature */
     int readTemperature(std::int8_t &temperature) override;
-    /** Forward the accelerometer support query to the SDK. */
+    /** @copydoc SensorBackend::isAccelerometerSupported */
     int isAccelerometerSupported(bool &supported) override;
-    /** Forward accelerometer enable state to the SDK. */
+    /** @copydoc SensorBackend::setAccelerometerEnabled */
     int setAccelerometerEnabled(bool enabled) override;
-    /** Forward a three-axis accelerometer read to the SDK. */
+    /** @copydoc SensorBackend::readAccelerometer */
     int readAccelerometer(
         std::int16_t &x, std::int16_t &y, std::int16_t &z) override;
 
 private:
+    /** Initialized SDK card index owned by the surrounding device. */
     std::uint8_t card_;
 };
 
