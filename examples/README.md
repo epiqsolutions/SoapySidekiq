@@ -21,6 +21,9 @@ setup, MTU-sized writes, error handling, and reliable stream cleanup.
 - `rx_tx_samples.py` transmits a tone while recording CS16 samples from the
   same card for a finite duration. Connect TX to RX through a suitable
   attenuator or approved lab path before running it.
+- `rx_retune_while_tx.py` keeps TX active while stopping, retuning, and
+  restarting RX for short captures at multiple frequencies. With its defaults,
+  the tone is expected at +500 kHz and then -500 kHz in the two output files.
 
 Run any example with `--help` to see its complete command-line interface. For
 example:
@@ -32,6 +35,7 @@ python3 examples/python/record_rx_to_file.py capture.bin --duration 10
 python3 examples/python/tx_from_file.py capture.bin
 python3 examples/python/timestamp.py --count 5
 python3 examples/python/rx_tx_samples.py capture.bin --duration 3
+python3 examples/python/rx_retune_while_tx.py capture --seconds-per-frequency 1
 ```
 
 ## Sample representation
