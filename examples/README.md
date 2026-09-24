@@ -16,6 +16,11 @@ setup, MTU-sized writes, error handling, and reliable stream cleanup.
 - `record_rx_to_file.py` records continuously or for a specified duration.
 - `tx_from_file.py` transmits interleaved little-endian CS16 samples from a
   file once or repeatedly.
+- `timestamp.py` resets and reads the RX RF or system hardware timestamp at a
+  fixed interval. Resetting time also affects other applications using the card.
+- `rx_tx_samples.py` transmits a tone while recording CS16 samples from the
+  same card for a finite duration. Connect TX to RX through a suitable
+  attenuator or approved lab path before running it.
 
 Run any example with `--help` to see its complete command-line interface. For
 example:
@@ -25,6 +30,8 @@ python3 examples/python/tx_tone.py --help
 python3 examples/python/rx_to_file.py capture.bin --blocks 100
 python3 examples/python/record_rx_to_file.py capture.bin --duration 10
 python3 examples/python/tx_from_file.py capture.bin
+python3 examples/python/timestamp.py --count 5
+python3 examples/python/rx_tx_samples.py capture.bin --duration 3
 ```
 
 ## Sample representation

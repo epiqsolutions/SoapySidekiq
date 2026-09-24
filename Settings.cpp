@@ -362,6 +362,15 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("");
     }
 
+    status = skiq_read_sys_timestamp_freq(card, &sys_freq);
+    if (status != 0)
+    {
+        SoapySDR_logf(SOAPY_SDR_ERROR,
+                      "skiq_read_sys_timestamp_freq failed (card %u), status %d",
+                      card, status);
+        throw std::runtime_error("");
+    }
+
     part = param.card_param.part_type;
     part_str = skiq_part_string(part);
 
@@ -2281,6 +2290,16 @@ long long SoapySidekiq::getHardwareTime(const std::string &what="") const
     }
     else if (equalsIgnoreCase(what, "sys_timestamp"))
     {
+        uint64_t current_sys_freq = 0;
+        status = skiq_read_sys_timestamp_freq(card, &current_sys_freq);
+        if (status != 0)
+        {
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                          "skiq_read_sys_timestamp_freq failed (card %u), status %d",
+                          card, status);
+            throw std::runtime_error("");
+        }
+
         status = skiq_read_curr_sys_timestamp(card, &timestamp);
         if (status != 0)
         {
@@ -2289,7 +2308,7 @@ long long SoapySidekiq::getHardwareTime(const std::string &what="") const
                           card, status);
             throw std::runtime_error("");
         }
-        return convert_timestamp_to_nanos(timestamp, this->sys_freq);
+        return convert_timestamp_to_nanos(timestamp, current_sys_freq);
 
     }
     else
@@ -2305,13 +2324,23 @@ void SoapySidekiq::setHardwareTime(const long long timeNs, const std::string &wh
     int status = 0;
     double double_timestamp = 0;
     uint64_t new_timestamp = 0;
+    uint64_t current_sys_freq = 0;
 
     SoapySDR_logf(SOAPY_SDR_TRACE, "setHardwareTime");
+
+    status = skiq_read_sys_timestamp_freq(card, &current_sys_freq);
+    if (status != 0)
+    {
+        SoapySDR_logf(SOAPY_SDR_ERROR,
+                      "skiq_read_sys_timestamp_freq failed (card %u), status %d",
+                      card, status);
+        throw std::runtime_error("");
+    }
 
     // convert timeNs to sys timestamp frequency
     // we only care about setting the sys_timestamp but we have to set both
     // given the API call
-    double_timestamp = (double)timeNs * (double)this->sys_freq / (double)NANOS_IN_SEC;
+    double_timestamp = (double)timeNs * (double)current_sys_freq / (double)NANOS_IN_SEC;
     new_timestamp = (uint64_t)double_timestamp;
 
     if (equalsIgnoreCase(what, "now"))

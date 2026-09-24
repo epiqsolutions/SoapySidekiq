@@ -17,6 +17,7 @@ Current programs:
 - `get_offset_overload.py` monitors overload and calibration-offset settings.
 - `run_cs16.py` exercises sustained CS16 receive throughput.
 - `run_loop.py` repeatedly activates and deactivates an RX stream.
-- `rx_tx_samples.py` exercises simultaneous RX and TX streaming.
 - `test_api.py` interactively exercises device-control APIs.
-- `timestamp.py` displays the RX hardware timestamp over time.
+
+The bounded timestamp and simultaneous RX/TX examples are in
+[`examples/python`](../../examples/python/).
