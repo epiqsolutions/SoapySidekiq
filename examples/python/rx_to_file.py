@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-"""Capture a finite number of CS16 sample blocks to a binary file.
+"""Capture a finite number of CS16 or CF32 sample blocks to a binary file.
 
-The output contains little-endian, interleaved signed 16-bit I/Q values.
+CS16 output contains little-endian signed 16-bit I/Q pairs. CF32 output
+contains little-endian 32-bit floating-point I/Q pairs.
 Each read requests no more than the stream MTU and only returned samples are
 written, so partial reads never expose uninitialized buffer contents.
 """
@@ -12,7 +13,7 @@ import sys
 
 import numpy as np
 import SoapySDR
-from SoapySDR import SOAPY_SDR_CS16, SOAPY_SDR_RX
+from SoapySDR import SOAPY_SDR_CF32, SOAPY_SDR_CS16, SOAPY_SDR_RX
 
 
 def device_arguments(args):
@@ -58,10 +59,18 @@ def capture(args):
             sdr.setGainMode(SOAPY_SDR_RX, args.channel, False)
             sdr.setGain(SOAPY_SDR_RX, args.channel, args.gain)
 
-        stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [args.channel])
+        stream_format = (
+            SOAPY_SDR_CF32 if args.sample_format == "CF32" else SOAPY_SDR_CS16
+        )
+        stream = sdr.setupStream(SOAPY_SDR_RX, stream_format, [args.channel])
         mtu = sdr.getStreamMTU(stream)
         total_requested = mtu * args.blocks
-        buffer = np.empty(mtu * 2, dtype="<i2")
+        if args.sample_format == "CF32":
+            buffer = np.empty(mtu, dtype="<c8")
+            bytes_per_sample = 8
+        else:
+            buffer = np.empty(mtu * 2, dtype="<i2")
+            bytes_per_sample = 4
 
         require_success("activateStream", sdr.activateStream(stream))
         active = True
@@ -81,14 +90,17 @@ def capture(args):
                 if result.ret == 0:
                     raise RuntimeError("readStream returned zero samples")
 
-                # CS16 has two int16 values per complex stream element.
-                output.write(buffer[: result.ret * 2].tobytes())
+                if args.sample_format == "CF32":
+                    output.write(buffer[: result.ret].tobytes())
+                else:
+                    output.write(buffer[: result.ret * 2].tobytes())
                 received += result.ret
                 if first_time_ns is None:
                     first_time_ns = result.timeNs
 
         print(
-            f"Captured {received:,} complex samples ({received * 4:,} bytes) "
+            f"Captured {received:,} complex {args.sample_format} samples "
+            f"({received * bytes_per_sample:,} bytes) "
             f"to {args.output}"
         )
         if first_time_ns is not None:
@@ -112,6 +124,9 @@ def parse_arguments(argv):
     parser.add_argument("-b", "--bandwidth", type=float)
     parser.add_argument("-f", "--frequency", type=float, default=1e9)
     parser.add_argument("-g", "--gain", type=float)
+    parser.add_argument(
+        "--format", dest="sample_format", choices=("CS16", "CF32"), default="CS16"
+    )
     parser.add_argument(
         "--blocks", type=int, default=1000, help="Number of MTU-sized blocks"
     )

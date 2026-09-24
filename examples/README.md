@@ -12,7 +12,10 @@ setup, MTU-sized writes, error handling, and reliable stream cleanup.
 
 - `tx_tone.py` continuously transmits a generated CS16 or CF32 tone.
 - `tx_tone_1pps.py` starts tone transmission on an external PPS edge.
-- `rx_to_file.py` captures a finite number of MTU-sized blocks.
+- `rx_to_file.py` captures a finite number of MTU-sized CS16 or CF32 blocks.
+- `rx_to_file_1pps.py` begins a finite CS16 capture on the next external PPS
+  edge. An active external PPS connection is required; the PPS start does not
+  reset the hardware timestamp.
 - `record_rx_to_file.py` records continuously or for a specified duration.
 - `tx_from_file.py` transmits interleaved little-endian CS16 samples from a
   file once or repeatedly.
@@ -31,6 +34,8 @@ example:
 ```sh
 python3 examples/python/tx_tone.py --help
 python3 examples/python/rx_to_file.py capture.bin --blocks 100
+python3 examples/python/rx_to_file.py capture.cf32 --format CF32 --blocks 100
+python3 examples/python/rx_to_file_1pps.py pps_capture.bin --blocks 100
 python3 examples/python/record_rx_to_file.py capture.bin --duration 10
 python3 examples/python/tx_from_file.py capture.bin
 python3 examples/python/timestamp.py --count 5
@@ -40,9 +45,11 @@ python3 examples/python/rx_retune_while_tx.py capture --seconds-per-frequency 1
 
 ## Sample representation
 
-The file examples use CS16 samples. One stream element is one complex sample
-containing a signed 16-bit I value followed by a signed 16-bit Q value. Each
-complex sample therefore occupies four bytes.
+The file examples use CS16 samples by default. One CS16 stream element is a
+signed 16-bit I value followed by a signed 16-bit Q value, occupying four
+bytes. `rx_to_file.py --format CF32` writes each complex sample as a
+little-endian 32-bit float I value followed by a 32-bit float Q value,
+occupying eight bytes.
 
 Every stream operation requests at most the stream MTU. Receive examples write
 only the number of samples actually returned by `readStream()`. This is
