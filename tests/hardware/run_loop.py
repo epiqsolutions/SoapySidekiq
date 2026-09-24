@@ -1,168 +1,78 @@
-#!/bin/python3
+#!/usr/bin/env python3
 
-import os
-import sys
-import time
-import threading
+"""Check repeated activation and deactivation of one hardware RX stream."""
+
 import argparse
-import pickle
-import signal
+import sys
 
 import numpy as np
 import SoapySDR
-print(SoapySDR, __file__)
-from SoapySDR import *
+from SoapySDR import SOAPY_SDR_CS16, SOAPY_SDR_RX
 
-#np.set_printoptions(threshold=sys.maxsize)
-
-############################################################################################
-# Settings
-############################################################################################
-DEBUG = False
-
-# Data transfer settings
-rx_chan = 0             # RX1 = 0, RX2 = 1
-use_agc = False          # Use or don't use the AGC
-timeout_us = int(10e6)
-running = True
-rx_stream = None
-max_qsize = 0
-getBlockId = 0
-recordId = 0
-
-sample_queue = []
-
-def getBlocks(N, rx_stream):
-    global running, sample_queue, max_qsize, getBlockId, write_idx
-
-    getBlockId = threading.get_native_id()
-    write_idx = 0
-    print("getBlocks")
-
-    streaming = False
-    buff = np.empty(2*N, dtype=np.int16)
-
-    while running:
-        sdr.activateStream(rx_stream)
-        streaming = True
-        start = time.perf_counter()
-
-        while streaming:
-            sr = sdr.readStream(rx_stream, [buff], N, timeoutUs=200000)
-            rc = sr.ret # number of samples read or the error code
-            assert rc == N, 'Error Reading Samples from Device (error code = %d)!' % rc
-
-            sample_queue.append(buff)
-
-            curr_qsize = len(sample_queue)
-            if curr_qsize > max_qsize:
-                max_qsize = curr_qsize
-
-            write_idx += 1
-
-            end = time.perf_counter()
-            elapsed_ms = (end - start) * 1000
-
-            if elapsed_ms > 250:
-                streaming = False
-                sdr.deactivateStream(rx_stream)
-
-        time.sleep(1)
+from cs16_validate import device_arguments
 
 
-def signal_handler(sig, frame):
-    global running
-    print('You pressed Ctrl+C!')
-    running = False
+def validate(args):
+    sdr = SoapySDR.Device(device_arguments(args))
+    sdr.setSampleRate(SOAPY_SDR_RX, args.channel, args.rate)
+    sdr.setBandwidth(
+        SOAPY_SDR_RX, args.channel,
+        args.bandwidth if args.bandwidth is not None else args.rate * 0.8,
+    )
+    sdr.setFrequency(SOAPY_SDR_RX, args.channel, args.frequency)
+    sdr.setGainMode(SOAPY_SDR_RX, args.channel, True)
 
-############################################################################################
-# Receive Signal
-############################################################################################
-def main(cardno, topology, rx_chan, fs, bw, freq):
-    global running, sdr, rx_stream 
-
-    args = dict(driver="sidekiq", card=cardno)
-    if topology:
-        args["topology"] = topology
-
-    sdr = SoapySDR.Device(args)
-
-    SoapySDR.setLogLevel(SOAPY_SDR_TRACE)
-
-    sdr.writeSetting("counter", "true")
-    setting = sdr.readSetting("counter")
-    print("read counter", setting)
-
-    sdr.setSampleRate(SOAPY_SDR_RX, rx_chan, fs)          # Set sample rate
-    sdr.setBandwidth(SOAPY_SDR_RX, rx_chan, fs)          # Set sample rate
-    sdr.setGainMode(SOAPY_SDR_RX, rx_chan, use_agc)       # Set the gain mode
-    sdr.setFrequency(SOAPY_SDR_RX, rx_chan, freq)         # Tune the LO
-
-    # Create data buffer and start streaming samples to it
-    rx_stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [rx_chan])  # Setup data stream
-
-    # create a re-usable buffer for receiving samples
-    N = sdr.getStreamMTU(rx_stream)
-    N = 2*N
-    print("Stream MTU",  N)
-
-    getblocks = threading.Thread(target=getBlocks, name='ThreadGet',args=(N,rx_stream, ))
-
-
-    getblocks.start()
-
-    time_ctr = 0
-    while running:
-        time.sleep(3)
-        time_ctr += 3
+    stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [args.channel])
+    active = False
+    try:
+        mtu = sdr.getStreamMTU(stream)
+        buffer = np.empty(mtu * 2, dtype="<i2")
+        for cycle in range(1, args.cycles + 1):
+            result = sdr.activateStream(stream)
+            if result < 0:
+                raise RuntimeError(f"cycle {cycle} activateStream failed: {result}")
+            active = True
+            received = 0
+            try:
+                for block in range(1, args.blocks_per_cycle + 1):
+                    result = sdr.readStream(
+                        stream, [buffer], mtu, timeoutUs=args.timeout_us,
+                    )
+                    if result.ret <= 0:
+                        raise RuntimeError(
+                            f"cycle {cycle}, read {block} failed: {result.ret}"
+                        )
+                    received += result.ret
+            finally:
+                sdr.deactivateStream(stream)
+                active = False
+            print(f"PASS cycle {cycle}: {received:,} samples")
+    finally:
         try:
-            #print(f"sample_rate {(int((read_idx * N) / time_ctr)):,}, read_idx {read_idx}, time_ctr {time_ctr}")
-            print(f"sample_rate {(int((write_idx * N) / time_ctr)):,}, write_idx {write_idx}, time_ctr {time_ctr}")
-            #print(f"max_qsize: {max_qsize}, writeindex: {write_idx:,}, readindex: {read_idx:,}" )
-
-        except OSError:
-            print("OS error occurred.")
-            running = False;
+            if active:
+                sdr.deactivateStream(stream)
+        finally:
+            sdr.closeStream(stream)
 
 
-    getblocks.join()
-
-    sdr.closeStream(rx_stream)
-
-
-def parse_command_line_arguments():
-    """ Create command line options """
-    help_formatter = argparse.ArgumentDefaultsHelpFormatter
-    parser = argparse.ArgumentParser(description='Test cf32 receive ',
-                                     formatter_class=help_formatter)
-    parser.add_argument('-c', required=False, dest='card',
-                        default='0', help=' Card')
-    parser.add_argument('--topology', required=False, dest='topology',
-                        default=None, help='Topology ID')
-    parser.add_argument('-chan', type=int, required=False, dest='chan',
-                        default=0, help=' Channel')
-    parser.add_argument('-r', type=float, required=False, dest='fs',
-                        default=2e6, help='Sample Rate')
-    parser.add_argument('-b', type=float, required=False, dest='bw',
-                        default=18e6, help='Bandwidth')
-    parser.add_argument('-f', type=float, required=False, dest='freq',
-                        default=1000e6, help='Frequency')
-
-    return parser.parse_args(sys.argv[1:])
+def parse_arguments(argv):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-c", "--card", default="0")
+    parser.add_argument("--serial", help="Select a Sidekiq card by serial number")
+    parser.add_argument("--topology", help="Sidekiq topology ID")
+    parser.add_argument("--channel", type=int, default=0)
+    parser.add_argument("--rate", type=float, default=2e6)
+    parser.add_argument("--bandwidth", type=float)
+    parser.add_argument("--frequency", type=float, default=1e9)
+    parser.add_argument("--cycles", type=int, default=3)
+    parser.add_argument("--blocks-per-cycle", type=int, default=10)
+    parser.add_argument("--timeout-us", type=int, default=200000)
+    args = parser.parse_args(argv)
+    if (args.rate <= 0 or args.cycles <= 0 or args.blocks_per_cycle <= 0
+            or args.timeout_us <= 0):
+        parser.error("--rate, --cycles, --blocks-per-cycle, and --timeout-us must be positive")
+    return args
 
 
-if __name__ == '__main__':
-
-    pars = parse_command_line_arguments()
-    signal.signal(signal.SIGINT, signal_handler)
-
-    if (pars.fs <= pars.bw):
-        print("Warning: Bandwidth must be smaller than the sample rate, Setting bandwidth to 80% of sample rate.")
-
-        pars.bw = 0.8 * pars.fs
-
-    print("card (-c)\t\t:", pars.card, "\t\t\tchannel (-chan)\t\t:", pars.chan)
-    print("sample rate (-s)\t:", pars.fs/1000000, "M","\t\tbandwidth (-bw)\t\t:", pars.bw/1000000, "M")
-    print("freq (-f)\t:", pars.freq/1000000)
-
-    main(pars.card, pars.topology, pars.chan, pars.fs, pars.bw, pars.freq)
+if __name__ == "__main__":
+    validate(parse_arguments(sys.argv[1:]))

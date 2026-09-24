@@ -1,140 +1,80 @@
-#!/bin/python3
+#!/usr/bin/env python3
 
-import sys
-import time
+"""Check CF32 conversion of real Sidekiq FPGA counter samples."""
+
 import argparse
+import sys
+
 import numpy as np
 import SoapySDR
-print(SoapySDR, __file__)
-from SoapySDR import *
+from SoapySDR import SOAPY_SDR_CF32, SOAPY_SDR_RX
 
-np.set_printoptions(threshold=sys.maxsize)
+from cs16_validate import check_counter, device_arguments
 
-############################################################################################
-# Settings
-############################################################################################
-# Data transfer settings
-NUM_BUFF = 10
-rx_handle = 0             # RX1 = 0, RX2 = 1
-use_agc = True          # Use or don't use the AGC
-timeout_us = int(10e6)
 
-############################################################################################
-# Receive Signal
-############################################################################################
-def main(cardno, topology, rx_chan, fs, bw, freq):
-    global running, sdr, rx_stream
-
-    args = dict(driver="sidekiq", card=cardno)
-    if topology:
-        args["topology"] = topology
-
-    sdr = SoapySDR.Device(args)
-
-    SoapySDR.setLogLevel(SOAPY_SDR_TRACE)
-
-    sdr.writeSetting("counter", "true")
-    setting = sdr.readSetting("counter")
-    print("read counter", setting)
-
-    # the RAMP function in the FPGA assumes Q then I
+def validate(args):
+    sdr = SoapySDR.Device(device_arguments(args))
+    sdr.setSampleRate(SOAPY_SDR_RX, args.channel, args.rate)
+    sdr.setBandwidth(
+        SOAPY_SDR_RX, args.channel,
+        args.bandwidth if args.bandwidth is not None else args.rate * 0.8,
+    )
+    sdr.setFrequency(SOAPY_SDR_RX, args.channel, args.frequency)
     sdr.writeSetting("iq_swap", "false")
+    sdr.writeSetting("counter", "true")
+    if sdr.readSetting("counter") != "true":
+        raise AssertionError("counter source was not enabled")
+    full_scale = int(sdr.readSetting("full_scale"))
 
-    sdr.setSampleRate(SOAPY_SDR_RX, rx_chan, fs)          # Set sample rate
-    sdr.setBandwidth(SOAPY_SDR_RX, rx_chan, fs)          # Set sample rate
-    sdr.setGainMode(SOAPY_SDR_RX, rx_chan, use_agc)       # Set the gain mode
-    sdr.setFrequency(SOAPY_SDR_RX, rx_chan, freq)         # Tune the LO
+    stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32, [args.channel])
+    active = False
+    try:
+        mtu = sdr.getStreamMTU(stream)
+        buffer = np.empty(mtu, dtype=np.complex64)
+        result = sdr.activateStream(stream)
+        if result < 0:
+            raise RuntimeError(f"activateStream failed: {result}")
+        active = True
 
-    # Create data buffer and start streaming samples to it
-    rx_stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32, [rx_chan])  # Setup data stream
+        expected_counter = None
+        total = 0
+        for block in range(args.blocks):
+            result = sdr.readStream(stream, [buffer], mtu, timeoutUs=args.timeout_us)
+            if result.ret <= 0:
+                raise RuntimeError(f"CF32 read {block + 1} failed: {result.ret}")
+            # The driver scales each signed counter scalar by full_scale.
+            scalars = buffer[: result.ret].view(np.float32)
+            recovered = np.rint(scalars * full_scale).astype(np.int32)
+            if not np.allclose(scalars * full_scale, recovered, atol=0.01):
+                raise AssertionError(f"CF32 read {block + 1} lost integer precision")
+            expected_counter = check_counter(recovered, full_scale, expected_counter)
+            total += result.ret
 
-    # create a re-usable buffer for receiving samples
-    N = sdr.getStreamMTU(rx_stream)
-
-    N = int(N * 7.5) + 1
-    print("Stream MTU",  N)
-
-    # get the full scale value for this card
-    max_data = int(sdr.readSetting("full_scale"))
-    SoapySDR.log(SoapySDR.SOAPY_SDR_INFO, f"RX fullscale value: {max_data:,}")
-
-    buff = np.empty([NUM_BUFF, N], dtype=np.csingle)
-    intbuff = np.empty((N * 2), dtype=np.int16)
-    real = np.zeros(N, dtype=np.int16)
-    imag = np.zeros(N, dtype=np.int16)
-
-    sdr.activateStream(rx_stream)  # this turns the radio on
-
-    for idx in range(NUM_BUFF):
-        print("read block", idx)
-
-        sr = sdr.readStream(rx_stream, [buff[idx]], N)
-
-        rc = sr.ret # number of samples read or the error code
-        assert rc == N, 'Error Reading Samples from Device (error code = %d)!' % rc
-
-    sdr.deactivateStream(rx_stream)
-    sdr.closeStream(rx_stream)
-
-    for i in range(NUM_BUFF):
-        print("analyze block", i)
-
-        real = (buff[i].real * max_data).astype(np.int16)
-        imag = (buff[i].imag * max_data).astype(np.int16)
-
-        intbuff[0::2] = real
-        intbuff[1::2] = imag
-
-        expected = intbuff[0]
-
-        #validate samples
-        for j in range(((2 * N) - 1)):
-            this_value = intbuff[j]
-
-            if (this_value != expected):
-                print("bad value", j, "expected", expected, "value", this_value)
-
-                #error print the buffer around the error
-                for k in range(-5, 5):
-                    print((j + k), " ", intbuff[j+k])
-                exit()
-
-            expected = (this_value + 1)
-            if expected == (max_data + 1):
-                expected = -(max_data+1)
-
-def parse_command_line_arguments():
-    """ Create command line options """
-    help_formatter = argparse.ArgumentDefaultsHelpFormatter
-    parser = argparse.ArgumentParser(description='Test cf32 receive ',
-                                     formatter_class=help_formatter)
-    parser.add_argument('-c', required=False, dest='card',
-                        default='0', help=' Card')
-    parser.add_argument('--topology', required=False, dest='topology',
-                        default=None, help='Topology ID')
-    parser.add_argument('-chan', type=int, required=False, dest='chan',
-                        default=0, help=' Channel')
-    parser.add_argument('-s', type=float, required=False, dest='fs',
-                        default=20e6, help='Sample Rate')
-    parser.add_argument('-bw', type=float, required=False, dest='bw',
-                        default=18e6, help='Bandwidth')
-    parser.add_argument('-f', type=float, required=False, dest='freq',
-                        default=1000e6, help='Frequency')
-
-    return parser.parse_args(sys.argv[1:])
+        print(f"PASS CF32: {args.blocks} reads, {total:,} complex samples")
+    finally:
+        try:
+            if active:
+                sdr.deactivateStream(stream)
+        finally:
+            sdr.closeStream(stream)
 
 
-if __name__ == '__main__':
+def parse_arguments(argv):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-c", "--card", default="0")
+    parser.add_argument("--serial", help="Select a Sidekiq card by serial number")
+    parser.add_argument("--topology", help="Sidekiq topology ID")
+    parser.add_argument("--channel", type=int, default=0)
+    parser.add_argument("--rate", type=float, default=2e6)
+    parser.add_argument("--bandwidth", type=float)
+    parser.add_argument("--frequency", type=float, default=1e9)
+    parser.add_argument("--blocks", type=int, default=10)
+    parser.add_argument("--timeout-us", type=int, default=200000)
+    args = parser.parse_args(argv)
+    if args.rate <= 0 or args.blocks <= 0 or args.timeout_us <= 0:
+        parser.error("--rate, --blocks, and --timeout-us must be positive")
+    return args
 
-    pars = parse_command_line_arguments()
 
-    if (pars.fs <= pars.bw):
-        print("Warning: Bandwidth must be smaller than the sample rate, Setting bandwidth to 80% of sample rate.")
-
-        pars.bw = 0.8 * pars.fs
-
-    print("card (-c)\t\t:", pars.card, "\t\t\tchannel (-chan)\t\t:", pars.chan)
-    print("sample rate (-s)\t:", pars.fs/1000000, "M","\t\tbandwidth (-bw)\t\t:", pars.bw/1000000, "M")
-    print("freq (-f)\t:", pars.freq/1000000)
-
-    main(pars.card, pars.topology, pars.chan, pars.fs, pars.bw, pars.freq)
+if __name__ == "__main__":
+    validate(parse_arguments(sys.argv[1:]))
