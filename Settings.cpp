@@ -102,17 +102,6 @@ void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t
 
 }
 
-void SoapySidekiq::tx_enabled(uint8_t card, int32_t status)
-{
-    SoapySDR_logf(SOAPY_SDR_TRACE, "tx enable received");
-
-    // Signal the condition variable
-    pthread_mutex_lock(&tx_enabled_mutex);
-    pthread_cond_signal(&tx_enabled_cond);
-    pthread_mutex_unlock(&tx_enabled_mutex);
-
-}
-
 std::vector<SoapySDR::Kwargs> SoapySidekiq::sidekiq_devices;
 
 
@@ -535,8 +524,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     // register the transmit complete callback
     pthread_mutex_init(&space_avail_mutex, nullptr);
     pthread_cond_init(&space_avail_cond, nullptr);
-    pthread_mutex_init(&tx_enabled_mutex, nullptr);
-    pthread_cond_init(&tx_enabled_cond, nullptr);
     registerInstance(card, this);
 
     status = skiq_register_tx_complete_callback(card,
@@ -544,28 +531,9 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     if (status != 0)
     {
         unregisterInstance(card, this);
-        pthread_cond_destroy(&tx_enabled_cond);
-        pthread_mutex_destroy(&tx_enabled_mutex);
         pthread_cond_destroy(&space_avail_cond);
         pthread_mutex_destroy(&space_avail_mutex);
         SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_register_tx_complete_callback failed, "
-                      "card: %u status: %d",
-                      card, status);
-        throw std::runtime_error("");
-    }
-
-    // register the transmit enabled callback
-    status = skiq_register_tx_enabled_callback(card,
-                                        &SoapySidekiq::tx_enabled_callback);
-    if (status != 0)
-    {
-        skiq_register_tx_complete_callback(card, nullptr);
-        unregisterInstance(card, this);
-        pthread_cond_destroy(&tx_enabled_cond);
-        pthread_mutex_destroy(&tx_enabled_mutex);
-        pthread_cond_destroy(&space_avail_cond);
-        pthread_mutex_destroy(&space_avail_mutex);
-        SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_register_tx_enabled_callback failed, "
                       "card: %u status: %d",
                       card, status);
         throw std::runtime_error("");
@@ -579,11 +547,8 @@ SoapySidekiq::~SoapySidekiq(void)
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "In destructor", card);
     unregisterInstance(card, this);
-    skiq_register_tx_enabled_callback(card, nullptr);
     skiq_register_tx_complete_callback(card, nullptr);
 
-    pthread_cond_destroy(&tx_enabled_cond);
-    pthread_mutex_destroy(&tx_enabled_mutex);
     pthread_cond_destroy(&space_avail_cond);
     pthread_mutex_destroy(&space_avail_mutex);
 

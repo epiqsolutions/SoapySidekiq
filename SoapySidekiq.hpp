@@ -302,12 +302,11 @@ class SoapySidekiq : public SoapySDR::Device
         std::mutex tx_mutex;
         std::condition_variable tx_cv;
         std::mutex tx_buf_mutex;
-        pthread_mutex_t tx_enabled_mutex;
-        pthread_cond_t tx_enabled_cond;
         pthread_mutex_t space_avail_mutex;
         pthread_cond_t space_avail_cond;
         bool space_avail{};
-        bool tx_start_signal{};
+        bool tx_start_finished{};
+        int tx_start_status{};
         bool tx_stream_active{};
         int32_t *p_tx_status{};
         bool first_transmit{};
@@ -350,11 +349,6 @@ class SoapySidekiq : public SoapySDR::Device
                                                 skiq_tx_block_t *p_data,
                                                 void *p_user);
 
-        // TX enabled callback static function
-        // The registration requires a static function instead of a method so
-        // this must be created to be able to register it.
-        // This function calls the tx_enabled method.
-        static void tx_enabled_callback(uint8_t card, int32_t status);
         static void registerInstance(uint8_t card, SoapySidekiq *instance);
         static void unregisterInstance(uint8_t card, SoapySidekiq *instance);
         static SoapySidekiq *getInstanceForCard(uint8_t card);
@@ -381,6 +375,4 @@ class SoapySidekiq : public SoapySDR::Device
         // tx callback method
         void tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex);
 
-        // tx enabled callback
-        void tx_enabled(uint8_t card, int32_t status);
 };
