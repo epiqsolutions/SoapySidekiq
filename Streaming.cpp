@@ -63,20 +63,6 @@ void SoapySidekiq::tx_complete_callback(int32_t status,
     delete instance;
 }
 
-void SoapySidekiq::tx_enabled_callback(uint8_t card, int32_t status)
-{
-    SoapySidekiq *self = getInstanceForCard(card);
-    if (self == nullptr)
-    {
-        SoapySDR_logf(SOAPY_SDR_WARNING,
-                      "tx_enabled callback received for unregistered card %u",
-                      card);
-        return;
-    }
-
-    self->tx_enabled(card, status);
-}
-
 long long SoapySidekiq::convert_timestamp_to_nanos(
         const uint64_t timestamp, const uint64_t timestamp_freq) const
 {
@@ -155,27 +141,25 @@ SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(
 
 void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
 {
-    int status;
-
-    std::unique_lock<std::mutex> lock(tx_mutex);
-
     SoapySDR_log(SOAPY_SDR_TRACE, "entering tx_streaming_start");
-
-    // wait till called to start running
-    tx_cv.wait(lock, [this] { return tx_start_signal; });
-
-    status = skiq_start_tx_streaming_on_1pps(card, tx_handle, 0);
+    const int status = skiq_start_tx_streaming_on_1pps(card, tx_handle, 0);
     if (status != 0)
     {
         SoapySDR_logf(SOAPY_SDR_ERROR,
                 "skiq_start_tx_streaming_on_1pps failed, (card %u) status %d",
                 card, status);
-        throw std::runtime_error("");
+    }
+    else
+    {
+        SoapySDR_logf(SOAPY_SDR_INFO, "TX start streaming on 1pps completed");
     }
 
-    SoapySDR_logf(SOAPY_SDR_INFO, "TX start streaming on 1pps completed");
-
-    tx_start_signal = false;
+    {
+        std::lock_guard<std::mutex> lock(tx_mutex);
+        tx_start_status = status;
+        tx_start_finished = true;
+    }
+    tx_cv.notify_all();
 }
 /*******************************************************************
  * Sidekiq receive thread
@@ -573,7 +557,12 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         /* start rx streaming */
         if (flags == SOAPY_SDR_HAS_TIME)
         {
-            if (tx_start_signal == true)
+            bool tx_start_pending;
+            {
+                std::lock_guard<std::mutex> tx_lock(tx_mutex);
+                tx_start_pending = _tx_streaming_thread.joinable() && !tx_start_finished;
+            }
+            if (tx_start_pending)
             {
                 /* if skiq_start_tx_streaming_on_1pps is called, then skiq_start_rx_streaming_on_1pps
                  * is called the second one called will block until the first one finishes.
@@ -703,19 +692,17 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
                                                  " delayed 2 seconds");
 
             }
-            /* skiq_start_rx_streaming_on_1pps blocks until data starts flowing
-             * but this function needs to return immediately so the application can start
-             * sending in blocks.
-             * So this will start a thread to handle the start_streaming call */
-            tx_start_signal = false;
+            /* The SDK call blocks until the PPS edge. Keep activateStream
+             * nonblocking and let the first write wait for the result. */
+            {
+                std::lock_guard<std::mutex> lock(tx_mutex);
+                tx_start_finished = false;
+                tx_start_status = 0;
+            }
             _tx_streaming_thread =
                 std::thread(&SoapySidekiq::tx_streaming_start, this, tx_handle);
 
             first_transmit = true;
-
-            // Notify the thread to run
-            tx_start_signal = true;
-            tx_cv.notify_one();
         }
         else
         {
@@ -815,6 +802,12 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
         }
 
         const skiq_tx_hdl_t tx_handle = stream_handle->tx_handle;
+        // A timed start may still be finishing when the caller stops the
+        // stream. Join it before stopping and before destroying the device.
+        if (_tx_streaming_thread.joinable())
+        {
+            _tx_streaming_thread.join();
+        }
         if (flags == SOAPY_SDR_HAS_TIME)
         {
             /* stop tx streaming */
@@ -836,11 +829,6 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
                 }
             }
 
-            /* verify the tx thread is done */
-            if (_tx_streaming_thread.joinable())
-            {
-                _tx_streaming_thread.join();
-            }
         }
         else
         {
@@ -1030,12 +1018,14 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     if (first_transmit == true)
     {
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting on enabled");
-
-        pthread_mutex_lock(&tx_enabled_mutex);
-        pthread_cond_wait(&tx_enabled_cond, &tx_enabled_mutex);
-        pthread_mutex_unlock(&tx_enabled_mutex);
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start");
+        std::unique_lock<std::mutex> lock(tx_mutex);
+        tx_cv.wait(lock, [this] { return tx_start_finished; });
         first_transmit = false;
+        if (tx_start_status != 0)
+        {
+            return SOAPY_SDR_STREAM_ERROR;
+        }
     }
 
     if (numElems % current_tx_block_size != 0)
