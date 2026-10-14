@@ -21,9 +21,9 @@ target_compile_options(non_hardware_test_options INTERFACE
 
 if(SOAPYSIDEKIQ_TEST_ASAN)
     target_compile_options(non_hardware_test_options INTERFACE
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address,undefined;-fno-omit-frame-pointer>)
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address,undefined,float-cast-overflow;-fno-sanitize-recover=all;-fno-omit-frame-pointer>)
     target_link_options(non_hardware_test_options INTERFACE
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address,undefined>)
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address,undefined,float-cast-overflow>)
 endif()
 
 if(SOAPYSIDEKIQ_TEST_TSAN)

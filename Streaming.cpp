@@ -1119,15 +1119,16 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             // float
             float *  float_inbuff = (float *)inbuff_ptr;
             uint32_t words_left = current_tx_block_size;
-            uint16_t * new_outbuff = (uint16_t *)outbuff_ptr;
+            int16_t * new_outbuff = (int16_t *)outbuff_ptr;
 
             int short_ctr = 0;
             for (uint32_t i = 0; i < words_left; i++)
             {
-                new_outbuff[short_ctr + 1] = (uint16_t)(float_inbuff[short_ctr + 1] *
+                // Normalized I/Q components are signed, including negative values.
+                new_outbuff[short_ctr + 1] = (int16_t)(float_inbuff[short_ctr + 1] *
                                               this->maxValue);
 
-                new_outbuff[short_ctr] = (uint16_t)(float_inbuff[short_ctr] *
+                new_outbuff[short_ctr] = (int16_t)(float_inbuff[short_ctr] *
                                           this->maxValue);
                 short_ctr += 2;
             }

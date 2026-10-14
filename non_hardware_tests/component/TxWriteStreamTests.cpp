@@ -77,10 +77,16 @@ TEST_CASE("CF32 TX transmits every sample from three distinct input blocks")
     std::vector<float> input(3 * words_per_block);
     for (std::size_t i = 0; i < input.size(); ++i)
     {
-        // Positive values keep this stride regression separate from conversion policy.
+        // Alternate signed I/Q components within the normalized range.
         input[i] = static_cast<float>(i / words_per_block + 1) * 0.125f +
                    static_cast<float>(i % 8) * 0.03125f;
+        if (i % 2 != 0) input[i] = -input[i];
     }
+    // Cover signed full scale, zero, and the specific negative review example.
+    input[0] = -1.0f;
+    input[1] = 1.0f;
+    input[2] = 0.0f;
+    input[3] = -0.25f;
     const void *buffers[]{input.data()};
     int flags = 0;
     REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
