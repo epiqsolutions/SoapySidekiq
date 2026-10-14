@@ -279,7 +279,8 @@ class SoapySidekiq : public SoapySDR::Device
         std::basic_string<char> serial{};
         std::basic_string<char> timeSource{};
         uint32_t resolution{};
-        double maxValue{};
+        double maxValue{}; // RX ADC full scale.
+        double txMaxValue{}; // TX DAC full scale may differ from RX.
 
         bool rxUseShort{};
         bool txUseShort{};

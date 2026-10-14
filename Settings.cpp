@@ -6,6 +6,7 @@
 #include "SoapySidekiq.hpp"
 #include <SoapySidekiq/DeviceOptions.hpp>
 #include <SoapySidekiq/SidekiqRxBackend.hpp>
+#include <SoapySidekiq/SampleScale.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
 #include <cinttypes>
@@ -405,10 +406,25 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     }
 
     this->resolution = tmp_resolution;
-    this->maxValue = (double) ((1 << (tmp_resolution-1))-1);
+    this->maxValue = soapy_sidekiq::sampleFullScale(tmp_resolution);
 
     SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, card resolution: %u bits, max ADC value: %u",
                   card, this->resolution, (uint32_t) this->maxValue);
+
+    // The transport stores signed 16-bit components, but DAC width is product-specific.
+    uint8_t tx_resolution = 0;
+    status = skiq_read_tx_iq_resolution(card, &tx_resolution);
+    if (status != 0)
+    {
+        SoapySDR_logf(SOAPY_SDR_ERROR,
+                      "skiq_read_tx_iq_resolution failed, card: %u status: %d",
+                      card, status);
+        throw std::runtime_error("");
+    }
+    this->txMaxValue = soapy_sidekiq::sampleFullScale(tx_resolution);
+    SoapySDR_logf(SOAPY_SDR_INFO,
+                  "card: %u, TX resolution: %u bits, max DAC value: %u",
+                  card, tx_resolution, static_cast<uint32_t>(this->txMaxValue));
 
     status = skiq_write_chan_mode(card, skiq_chan_mode_single);
     if (status != 0)

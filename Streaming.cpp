@@ -131,7 +131,9 @@ std::string SoapySidekiq::getNativeStreamFormat(const int    direction,
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "getNativeStreamFormat");
 
-    fullScale = this->maxValue;
+    const auto stream_direction = streamDirection(direction);
+    fullScale = stream_direction == soapy_sidekiq::StreamDirection::rx
+        ? this->maxValue : this->txMaxValue;
 
     return "CS16";
 }
@@ -848,6 +850,8 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     // total number of bytes that need to be transmitted in this call
     uint32_t tx_block_bytes = current_tx_block_size * 4;
+    const size_t input_block_bytes = current_tx_block_size * 2 *
+        (txUseShort ? sizeof(int16_t) : sizeof(float));
 
     while (curr_block < num_blocks)
     {
@@ -868,7 +872,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                 reinterpret_cast<const float *>(inbuff_ptr),
                 reinterpret_cast<std::int16_t *>(outbuff_ptr),
                 current_tx_block_size,
-                static_cast<float>(this->maxValue));
+                static_cast<float>(this->txMaxValue));
         }
 
 
@@ -935,7 +939,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             currTXBuffIndex = (currTXBuffIndex + 1) % DEFAULT_NUM_BUFFERS;
 
             // move the pointer to the next block in the writeStream buffer
-            inbuff_ptr += (current_tx_block_size * 4);
+            inbuff_ptr += input_block_bytes;
 
         }
 
