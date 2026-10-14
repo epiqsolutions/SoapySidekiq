@@ -71,3 +71,5 @@ SOAPY_SDR_MODULE_UTIL(
         ${Sidekiq_LIBRARIES}
 
 )
+
+target_include_directories(SidekiqSupport PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
