@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.16)
 project(SoapySidekiqNonHardwareTests LANGUAGES CXX)
 
 include(CTest)
+# RxSampleQueue tests exercise real producer/consumer wake-ups with std::thread.
+find_package(Threads REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -97,6 +99,30 @@ target_link_libraries(stream_conversion_tests PRIVATE non_hardware_test_options)
 add_test(NAME stream-conversion.all COMMAND stream_conversion_tests)
 set_tests_properties(stream-conversion.all PROPERTIES LABELS "unit;non-hardware")
 
+# Keep the queue test independent of hardware and the proprietary Sidekiq runtime.
+add_executable(rx_sample_queue_tests
+    support/TestMain.cpp
+    unit/RxSampleQueueTests.cpp
+    ../RxSampleQueue.cpp)
+target_include_directories(rx_sample_queue_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_link_libraries(rx_sample_queue_tests PRIVATE
+    non_hardware_test_options Threads::Threads)
+
+add_test(NAME rx-sample-queue.all COMMAND rx_sample_queue_tests)
+set_tests_properties(rx-sample-queue.all PROPERTIES LABELS "unit;non-hardware")
+
+add_executable(rx_sample_queue_portable_tests
+    support/TestMain.cpp unit/RxSampleQueueTests.cpp ../RxSampleQueue.cpp)
+target_include_directories(rx_sample_queue_portable_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_compile_definitions(rx_sample_queue_portable_tests PRIVATE
+    SOAPYSIDEKIQ_FORCE_PORTABLE_TIMESTAMP=1)
+target_link_libraries(rx_sample_queue_portable_tests PRIVATE
+    non_hardware_test_options Threads::Threads)
+add_test(NAME rx-sample-queue-portable.all COMMAND rx_sample_queue_portable_tests)
+set_tests_properties(rx-sample-queue-portable.all PROPERTIES LABELS "unit;non-hardware")
 # Exercise the integer fallback on hosts that normally select __int128.
 add_executable(timestamp_portable_tests
     support/TestMain.cpp unit/TimestampConversionTests.cpp)
@@ -130,8 +156,44 @@ target_link_libraries(tx_write_tests PRIVATE non_hardware_test_options Threads::
 add_test(NAME tx-write.all COMMAND tx_write_tests)
 set_tests_properties(tx-write.all PROPERTIES LABELS "component;non-hardware")
 
+# Reuse production lifecycle methods with a fake SDK, as in the TX write fixture.
+function(extract_stream_method output start_marker end_marker)
+    string(FIND "${streaming_source}" "${start_marker}" method_start)
+    string(FIND "${streaming_source}" "${end_marker}" method_end)
+    if(method_start LESS 0 OR method_end LESS method_start)
+        message(FATAL_ERROR "Could not locate lifecycle method: ${start_marker}")
+    endif()
+    math(EXPR method_length "${method_end} - ${method_start}")
+    string(SUBSTRING "${streaming_source}" ${method_start} ${method_length} method)
+    set(${output} "${method}" PARENT_SCOPE)
+endfunction()
+extract_stream_method(rx_worker "void SoapySidekiq::rx_receive_operation("
+    "void SoapySidekiq::rx_receive_operation_impl(")
+extract_stream_method(rx_close "void SoapySidekiq::closeStream("
+    "size_t SoapySidekiq::getStreamMTU(")
+extract_stream_method(rx_deactivate "int SoapySidekiq::deactivateStream("
+    "int SoapySidekiq::readStream(")
+extract_stream_method(activate_method "int SoapySidekiq::activateStream("
+    "int SoapySidekiq::deactivateStream(")
+string(FIND "${activate_method}" "    else if (stream_handle->direction == SOAPY_SDR_TX)" tx_branch)
+if(tx_branch LESS 0)
+    message(FATAL_ERROR "Could not locate RX activation branch")
+endif()
+string(SUBSTRING "${activate_method}" 0 ${tx_branch} rx_activate)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RxLifecycleMethods.inc"
+    "${rx_worker}\n${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
+add_executable(rx_lifecycle_tests
+    support/TestMain.cpp component/RxLifecycleTests.cpp ../RxSampleQueue.cpp)
+target_include_directories(rx_lifecycle_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+    "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(rx_lifecycle_tests PRIVATE non_hardware_test_options Threads::Threads)
+add_test(NAME rx-lifecycle.all COMMAND rx_lifecycle_tests)
+set_tests_properties(rx-lifecycle.all PROPERTIES LABELS "component;non-hardware")
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
-            stream_conversion_tests tx_write_tests timestamp_portable_tests
+            stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
+            tx_write_tests timestamp_portable_tests rx_lifecycle_tests
     USES_TERMINAL)

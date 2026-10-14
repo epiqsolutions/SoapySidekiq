@@ -37,6 +37,15 @@ on hosts with `__int128`. Both cover truncation boundaries and signed output
 overflow. On compilers with `__int128`, 10,000 deterministic input pairs also
 check each implementation against a wide integer oracle.
 
+RX queue tests retain raw RF/system timestamp phase across partial reads and
+run through both native and forced portable arithmetic. A rational integer
+oracle checks 1,000 blocks with eight partial reads each. The RX lifecycle
+fixture compiles the production worker exception wrapper, close/deactivate
+methods, and RX activation branch with an injected receive failure and fake
+SDK start/stop calls. It covers close/reuse, stop failure with retry, and
+already-stopped hardware. Stream setup, actual SDK I/O, and destructor cleanup
+are outside that fixture's coverage.
+
 AddressSanitizer and UndefinedBehaviorSanitizer:
 
 ```sh

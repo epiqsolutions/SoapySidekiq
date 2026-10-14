@@ -61,6 +61,8 @@ SOAPY_SDR_MODULE_UTIL(
         SensorReader.cpp
         SidekiqSensorBackend.cpp
         StreamConfiguration.cpp
+        # Thread-safe hardware-to-Soapy RX sample handoff.
+        RxSampleQueue.cpp
         Registation.cpp
         Settings.cpp
         Streaming.cpp
