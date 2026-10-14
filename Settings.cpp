@@ -5,6 +5,7 @@
 
 #include "SoapySidekiq.hpp"
 #include <SoapySidekiq/DeviceOptions.hpp>
+#include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
 #include <cinttypes>
@@ -18,6 +19,11 @@
 #include <unistd.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+// Keep the hardware-independent validation contract tied to the SDK in use.
+static_assert(soapy_sidekiq::maxTxBlockSize == SKIQ_MAX_TX_BLOCK_SIZE_IN_WORDS);
+static_assert(soapy_sidekiq::txHeaderWords == SKIQ_TX_HEADER_SIZE_IN_WORDS);
+static_assert(soapy_sidekiq::txPacketIncrementWords == SKIQ_TX_PACKET_SIZE_INCREMENT_IN_WORDS);
 
 /******************************************************************************/
 /** This is the custom logging handler.  If there were custom handling
@@ -308,6 +314,14 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("");
     }
 
+    // A throwing constructor never runs the device destructor. Only arm this
+    // rollback after this call successfully acquires SDK initialization.
+    soapy_sidekiq::ScopeExit rollback([this]() noexcept {
+        free(p_tx_status);
+        p_tx_status = nullptr;
+        skiq_exit();
+    });
+
     if (options.topology.has_value())
     {
         if (skiq_is_topology_supported(card))
@@ -535,6 +549,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     }
 
     SoapySDR_logf(SOAPY_SDR_TRACE, "leaving constructor", card);
+    rollback.release();
 }
 
 // Destructor

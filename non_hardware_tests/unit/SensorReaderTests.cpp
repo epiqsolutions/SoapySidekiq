@@ -6,8 +6,10 @@
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/SensorReader.hpp>
+#include <SoapySidekiq/ScopeExit.hpp>
 
 #include <cstdint>
+#include <locale>
 #include <string>
 #include <vector>
 
@@ -18,6 +20,14 @@ using soapy_sidekiq::SensorReader;
 
 namespace
 {
+
+/** Supply digit grouping without depending on installed system locales. */
+class GroupedNumbers final : public std::numpunct<char>
+{
+protected:
+    char do_thousands_sep() const override { return ','; }
+    std::string do_grouping() const override { return "\3"; }
+};
 
 /** Records call order and scripts each sensor backend status independently. */
 class FakeSensorBackend final : public SensorBackend
@@ -175,4 +185,17 @@ TEST_CASE("accelerometer readings format as valid compact JSON")
     REQUIRE_EQ(
         soapy_sidekiq::formatAccelerometer({12, -34, 56}),
         std::string{"{\"x\":12,\"y\":-34,\"z\":56}"});
+}
+
+TEST_CASE("accelerometer JSON ignores global locale digit grouping")
+{
+    const auto original = std::locale();
+    soapy_sidekiq::ScopeExit restore_locale([original]() noexcept {
+        std::locale::global(original);
+    });
+    std::locale::global(std::locale(std::locale::classic(), new GroupedNumbers));
+
+    REQUIRE_EQ(
+        soapy_sidekiq::formatAccelerometer({12345, -23456, 32767}),
+        std::string{"{\"x\":12345,\"y\":-23456,\"z\":32767}"});
 }
