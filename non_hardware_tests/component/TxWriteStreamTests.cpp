@@ -4,8 +4,10 @@
  */
 
 #include "TestHarness.hpp"
+#include <SoapySidekiq/SampleConversion.hpp>
 
 #include <cstddef>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -97,8 +99,8 @@ TEST_CASE("CF32 TX transmits every sample from three distinct input blocks")
     {
         for (std::size_t word = 0; word < words_per_block; ++word)
         {
-            REQUIRE_EQ(device.transmitted[block][word], static_cast<std::int16_t>(
-                input[block * words_per_block + word] * device.maxValue));
+            REQUIRE_EQ(device.transmitted[block][word], static_cast<std::int16_t>(std::lround(
+                input[block * words_per_block + word] * static_cast<float>(device.maxValue))));
         }
     }
 }

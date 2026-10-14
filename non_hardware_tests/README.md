@@ -31,6 +31,12 @@ includes negative normalized components, zero, and both signed full-scale
 endpoints. The ASan/UBSan configuration also enables `float-cast-overflow` and
 stops on sanitizer errors.
 
+Timestamp cases run both through the compiler-selected implementation and in
+`timestamp_portable_tests`, which forces the portable integer fallback even
+on hosts with `__int128`. Both cover truncation boundaries and signed output
+overflow. On compilers with `__int128`, 10,000 deterministic input pairs also
+check each implementation against a wide integer oracle.
+
 AddressSanitizer and UndefinedBehaviorSanitizer:
 
 ```sh
