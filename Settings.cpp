@@ -1,3 +1,8 @@
+/**
+ * @file Settings.cpp
+ * @brief Implements Sidekiq device settings, callbacks, and utility operations.
+ */
+
 #include "SoapySidekiq.hpp"
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
@@ -112,9 +117,6 @@ void SoapySidekiq::tx_enabled(uint8_t card, int32_t status)
     pthread_mutex_unlock(&tx_enabled_mutex);
 
 }
-
-std::vector<SoapySDR::Kwargs> SoapySidekiq::sidekiq_devices;
-
 
 // compares two strings and if equal range and equal values per character
 // returns true.
