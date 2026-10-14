@@ -14,6 +14,51 @@
 
 namespace soapy_sidekiq
 {
+namespace
+{
+
+struct DivisionResult
+{
+    std::uint64_t quotient;
+    std::uint64_t remainder;
+};
+
+/** Compute value * multiplier / divisor exactly; value must be below divisor. */
+DivisionResult multiplyDivide(const std::uint64_t value, const std::uint64_t multiplier,
+                             const std::uint64_t divisor)
+{
+#if defined(__SIZEOF_INT128__) && !defined(SOAPYSIDEKIQ_FORCE_PORTABLE_TIMESTAMP)
+    __extension__ using uint128 = unsigned __int128;
+    const auto product = static_cast<uint128>(value) * multiplier;
+    return {static_cast<std::uint64_t>(product / divisor),
+            static_cast<std::uint64_t>(product % divisor)};
+#else
+    // Binary long division, with comparisons before additions to avoid overflow.
+    DivisionResult result{0, 0};
+    for (std::uint64_t bit = 1ULL << 63; bit != 0; bit >>= 1)
+    {
+        result.quotient *= 2;
+        if (result.remainder >= divisor - result.remainder)
+        {
+            result.remainder -= divisor - result.remainder;
+            ++result.quotient;
+        }
+        else result.remainder *= 2;
+        if ((multiplier & bit) != 0)
+        {
+            if (result.remainder >= divisor - value)
+            {
+                result.remainder -= divisor - value;
+                ++result.quotient;
+            }
+            else result.remainder += value;
+        }
+    }
+    return result;
+#endif
+}
+
+} // namespace
 
 RxSampleQueue::RxSampleQueue(const std::size_t capacity_blocks)
     : capacity_blocks_(capacity_blocks)
@@ -68,50 +113,60 @@ void RxSampleQueue::reset()
 }
 
 RxPushStatus RxSampleQueue::push(
-    const std::int16_t *samples,
-    const std::size_t complex_samples,
-    const std::int64_t time_ns,
-    const std::uint64_t sample_rate)
+    const std::int16_t *samples, const std::size_t complex_samples,
+    const std::int64_t time_ns, const std::uint64_t sample_rate)
 {
-    if (complex_samples == 0 ||
-        complex_samples > std::numeric_limits<std::size_t>::max() / 2)
-    {
+    if (complex_samples == 0 || complex_samples > std::numeric_limits<std::size_t>::max() / 2)
         throw std::invalid_argument("RX sample count must be positive");
-    }
-    if (samples == nullptr)
-    {
-        throw std::invalid_argument("RX samples cannot be null");
-    }
-    if (sample_rate == 0)
-    {
-        throw std::invalid_argument("RX sample rate cannot be zero");
-    }
-
-    // Copying overload keeps raw SDK memory outside the queue's lifetime.
-    return push(
-        std::vector<std::int16_t>(samples, samples + complex_samples * 2),
-        time_ns,
-        sample_rate);
+    if (samples == nullptr) throw std::invalid_argument("RX samples cannot be null");
+    return push(std::vector<std::int16_t>(samples, samples + complex_samples * 2),
+                time_ns, sample_rate);
 }
 
-RxPushStatus RxSampleQueue::push(
-    std::vector<std::int16_t> samples,
-    const std::int64_t time_ns,
+RxPushStatus RxSampleQueue::pushTicks(
+    const std::int16_t *samples, const std::size_t complex_samples,
+    const std::uint64_t timestamp, const std::uint64_t timestamp_frequency,
     const std::uint64_t sample_rate)
 {
+    if (complex_samples == 0 || complex_samples > std::numeric_limits<std::size_t>::max() / 2)
+        throw std::invalid_argument("RX sample count must be positive");
+    if (samples == nullptr) throw std::invalid_argument("RX samples cannot be null");
+    return pushTicks(std::vector<std::int16_t>(samples, samples + complex_samples * 2),
+                     timestamp, timestamp_frequency, sample_rate);
+}
+
+RxPushStatus RxSampleQueue::pushTicks(
+    std::vector<std::int16_t> samples, const std::uint64_t timestamp,
+    const std::uint64_t timestamp_frequency, const std::uint64_t sample_rate)
+{
+    const auto time_ns = ticksToNanoseconds(timestamp, timestamp_frequency);
+    const auto phase = multiplyDivide(timestamp % timestamp_frequency, 1000000000,
+                                      timestamp_frequency);
+    return pushWithPhase(std::move(samples), time_ns, sample_rate,
+                         phase.remainder, timestamp_frequency);
+}
+
+RxPushStatus RxSampleQueue::push(std::vector<std::int16_t> samples,
+                               const std::int64_t time_ns, const std::uint64_t sample_rate)
+{
+    return pushWithPhase(std::move(samples), time_ns, sample_rate, 0, 1);
+}
+
+RxPushStatus RxSampleQueue::pushWithPhase(
+    std::vector<std::int16_t> samples, const std::int64_t time_ns,
+    const std::uint64_t sample_rate, const std::uint64_t remainder,
+    const std::uint64_t denominator)
+{
     if (samples.empty() || samples.size() % 2 != 0)
-    {
         throw std::invalid_argument("RX sample data must contain complete IQ pairs");
-    }
-    if (sample_rate == 0)
-    {
-        throw std::invalid_argument("RX sample rate cannot be zero");
-    }
+    if (sample_rate == 0) throw std::invalid_argument("RX sample rate cannot be zero");
 
     Block block;
     block.samples = std::move(samples);
     block.time_ns = time_ns;
     block.sample_rate = sample_rate;
+    block.time_remainder = remainder;
+    block.time_denominator = denominator;
 
     bool dropped = false;
     {
@@ -142,7 +197,24 @@ std::int64_t RxSampleQueue::blockTime(const Block &block) const
     {
         throw std::overflow_error("RX timestamp does not fit in nanoseconds");
     }
-    return block.time_ns + offset_ns;
+    auto time_ns = block.time_ns + offset_ns;
+    const auto offset_phase = multiplyDivide(block.offset % block.sample_rate,
+                                             1000000000, block.sample_rate);
+    if (block.time_remainder != 0 && offset_phase.remainder != 0)
+    {
+        // Carry one nanosecond exactly when the two fractional phases sum to >= 1.
+        // Compare against ceil((rate - offset_phase) * denominator / rate).
+        const auto threshold = multiplyDivide(block.sample_rate - offset_phase.remainder,
+                                               block.time_denominator, block.sample_rate);
+        const auto minimum_phase = threshold.quotient + (threshold.remainder != 0 ? 1 : 0);
+        if (block.time_remainder >= minimum_phase)
+        {
+            if (time_ns == std::numeric_limits<std::int64_t>::max())
+                throw std::overflow_error("RX timestamp does not fit in nanoseconds");
+            ++time_ns;
+        }
+    }
+    return time_ns;
 }
 
 RxReadResult RxSampleQueue::read(

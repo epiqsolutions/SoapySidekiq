@@ -5,6 +5,7 @@
 
 #include <SoapySidekiq/SensorReader.hpp>
 
+#include <locale>
 #include <sstream>
 #include <utility>
 
@@ -83,6 +84,8 @@ std::optional<AccelerometerReading> SensorReader::readAccelerometer()
 std::string formatAccelerometer(const AccelerometerReading &reading)
 {
     std::ostringstream output;
+    // JSON numbers must not inherit digit grouping from the host application's locale.
+    output.imbue(std::locale::classic());
     output << "{\"x\":" << reading.x
            << ",\"y\":" << reading.y
            << ",\"z\":" << reading.z << '}';

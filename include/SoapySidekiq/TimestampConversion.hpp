@@ -33,7 +33,7 @@ inline std::int64_t ticksToNanoseconds(
         throw std::invalid_argument("timestamp frequency cannot be zero");
     }
 
-#if defined(__SIZEOF_INT128__)
+#if defined(__SIZEOF_INT128__) && !defined(SOAPYSIDEKIQ_FORCE_PORTABLE_TIMESTAMP)
     // Widen before multiplication so the exact numerator cannot wrap uint64_t.
     __extension__ using uint128 = unsigned __int128;
     const auto nanoseconds =
@@ -56,11 +56,39 @@ inline std::int64_t ticksToNanoseconds(
         throw std::overflow_error("timestamp does not fit in nanoseconds");
     }
 
-    const long double fractional_nanoseconds =
-        static_cast<long double>(remaining_ticks) * nanoseconds_per_second /
-        static_cast<long double>(frequency);
+    // Binary long division computes remaining_ticks * 1e9 / frequency without
+    // forming the overflowing product. After each bit, remainder < frequency
+    // and fractional is the quotient for the multiplier prefix processed so far.
+    std::uint64_t remainder = 0;
+    std::uint64_t fractional = 0;
+    for (std::uint32_t bit = 1U << 29; bit != 0; bit >>= 1)
+    {
+        fractional *= 2;
+        // Compare before doubling so even frequencies near UINT64_MAX are safe.
+        if (remainder >= frequency - remainder)
+        {
+            remainder -= frequency - remainder;
+            ++fractional;
+        }
+        else
+        {
+            remainder *= 2;
+        }
+        if ((nanoseconds_per_second & bit) != 0)
+        {
+            // Add the next numerator contribution without overflowing uint64_t.
+            if (remainder >= frequency - remaining_ticks)
+            {
+                remainder -= frequency - remaining_ticks;
+                ++fractional;
+            }
+            else
+            {
+                remainder += remaining_ticks;
+            }
+        }
+    }
     const auto whole_nanoseconds = whole_seconds * nanoseconds_per_second;
-    const auto fractional = static_cast<std::uint64_t>(fractional_nanoseconds);
     if (fractional >
         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) -
             whole_nanoseconds)

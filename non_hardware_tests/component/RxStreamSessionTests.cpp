@@ -6,8 +6,10 @@
 #include "TestHarness.hpp"
 
 #include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/ScopeExit.hpp>
 
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -40,6 +42,7 @@ public:
         ++start_calls;
         started_handle = handle;
         started_on_pps = on_pps;
+        if (streaming_) return -EBUSY;
         if (start_status == 0)
         {
             streaming_ = true;
@@ -55,7 +58,8 @@ public:
             ++stop_calls;
             stopped_handle = handle;
             stopped_on_pps = on_pps;
-            streaming_ = false;
+            if (throw_on_stop) throw std::runtime_error("injected stop exception");
+            if (stop_status == 0 || stop_status == -ENODEV) streaming_ = false;
         }
         // Release a receive() blocked on an empty scripted event queue.
         event_available_.notify_all();
@@ -66,7 +70,8 @@ public:
     RxReceiveResult receive() override
     {
         std::unique_lock<std::mutex> lock(mutex_);
-        event_available_.wait(lock, [this] {
+        // Real SDK receive has a bounded timeout, including after stop failure.
+        event_available_.wait_for(lock, 10ms, [this] {
             return !events_.empty() || !streaming_;
         });
         if (events_.empty())
@@ -93,6 +98,7 @@ public:
 
     int start_status{};
     int stop_status{};
+    bool throw_on_stop{};
     int start_calls{};
     int stop_calls{};
     std::uint32_t started_handle{};
@@ -326,4 +332,105 @@ TEST_CASE("RX session validates configuration and repeated activation")
     REQUIRE_EQ(session.deactivate(), 0);
     REQUIRE_EQ(session.activate(configuration()), 0);
     REQUIRE_EQ(session.deactivate(), 0);
+}
+
+TEST_CASE("RX stop failure preserves hardware ownership until cleanup is retried")
+{
+    FakeRxBackend backend;
+    RxStreamSession session(backend);
+    REQUIRE_EQ(session.activate(configuration()), 0);
+    backend.stop_status = -EIO;
+    REQUIRE_EQ(session.deactivate(), -EIO);
+    REQUIRE_THROWS_AS(session.activate(configuration()), std::logic_error);
+    backend.stop_status = 0;
+    REQUIRE_EQ(session.deactivate(), 0);
+    REQUIRE_EQ(backend.stop_calls, 2);
+    REQUIRE_EQ(session.activate(configuration()), 0);
+    REQUIRE_EQ(session.deactivate(), 0);
+}
+
+TEST_CASE("RX stop exceptions join the worker and preserve retryable ownership")
+{
+    FakeRxBackend backend;
+    RxStreamSession session(backend);
+    REQUIRE_EQ(session.activate(configuration()), 0);
+    backend.throw_on_stop = true;
+    REQUIRE_THROWS_AS(session.deactivate(), std::runtime_error);
+    REQUIRE(!session.running());
+    REQUIRE_THROWS_AS(session.activate(configuration()), std::logic_error);
+    backend.throw_on_stop = false;
+    REQUIRE_EQ(session.deactivate(), 0);
+    REQUIRE_EQ(backend.stop_calls, 2);
+}
+
+TEST_CASE("RX session partial reads retain RF and system timestamp phase")
+{
+    for (const bool rf : {true, false})
+    {
+        FakeRxBackend backend;
+        RxStreamSession session(backend);
+        auto config = configuration(rf);
+        config.block_samples = 10;
+        config.sample_rate = 122880000;
+        config.system_timestamp_frequency = 40960000;
+        REQUIRE_EQ(session.activate(config), 0);
+        backend.enqueue(samples(7, std::vector<std::int16_t>(20), 1, 1));
+        std::array<std::int16_t, 20> output{};
+        REQUIRE_EQ(session.read(output.data(), 7, 250ms).samples, std::size_t{7});
+        REQUIRE_EQ(session.read(output.data(), 1, 0us).time_ns,
+                   rf ? std::int64_t{65} : std::int64_t{81});
+        REQUIRE_EQ(session.deactivate(), 0);
+    }
+}
+
+TEST_CASE("RX activation waits until the previous worker has finished joining")
+{
+    class HeldReceiveBackend final : public RxStreamBackend
+    {
+    public:
+        std::promise<void> entered, stop_called, release;
+        std::shared_future<void> released{release.get_future().share()};
+        std::atomic<bool> first_receive{true}, first_stop{true};
+        int start(std::uint32_t, bool) override { return 0; }
+        int stop(std::uint32_t, bool) override
+        {
+            if (first_stop.exchange(false)) stop_called.set_value();
+            return 0;
+        }
+        RxReceiveResult receive() override
+        {
+            if (first_receive.exchange(false))
+            {
+                entered.set_value();
+                released.wait();
+            }
+            return {};
+        }
+    } backend;
+    RxStreamSession session(backend);
+    bool released = false;
+    soapy_sidekiq::ScopeExit release_on_failure([&]() noexcept {
+        if (!released) backend.release.set_value();
+    });
+    REQUIRE_EQ(session.activate(configuration()), 0);
+    REQUIRE(backend.entered.get_future().wait_for(1s) == std::future_status::ready);
+    auto stop = std::async(std::launch::async, [&] { return session.deactivate(); });
+    backend.stop_called.get_future().wait();
+    std::promise<void> attempting;
+    auto start = std::async(std::launch::async, [&] {
+        attempting.set_value();
+        return session.activate(configuration());
+    });
+    attempting.get_future().wait();
+    const auto state = start.wait_for(30ms);
+    backend.release.set_value();
+    released = true;
+    // The old implementation could start another worker while stop was joining.
+    // Stop that worker before waiting on the first stop, so regression failure
+    // reports an assertion rather than leaving an async destructor blocked.
+    if (state == std::future_status::ready) (void)session.deactivate();
+    REQUIRE_EQ(stop.get(), 0);
+    REQUIRE_EQ(start.get(), 0);
+    REQUIRE_EQ(session.deactivate(), 0);
+    REQUIRE(state == std::future_status::timeout);
 }

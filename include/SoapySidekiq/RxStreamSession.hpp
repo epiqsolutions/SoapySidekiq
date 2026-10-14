@@ -126,6 +126,8 @@ public:
     /**
      * Stop hardware, wake readers, and join the worker.
      * @return Backend stop status, or zero when already inactive.
+     * Failed stops retain hardware ownership for retry and block activation.
+     * Backend exceptions are rethrown only after joining the worker.
      */
     int deactivate();
 
@@ -178,6 +180,7 @@ private:
     std::atomic<std::size_t> timestamp_discontinuities_{};
     std::atomic<int> receive_error_{};
     RxSessionConfiguration active_configuration_{};
+    /** Hardware ownership, retained after failed stops; guarded by lifecycle_mutex_. */
     bool active_{};
 };
 

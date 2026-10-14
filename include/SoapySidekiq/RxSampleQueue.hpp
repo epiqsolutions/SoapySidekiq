@@ -108,6 +108,34 @@ public:
         std::uint64_t sample_rate);
 
     /**
+     * Queue samples with their unrounded hardware timestamp.
+     * @param samples Interleaved CS16 source values.
+     * @param complex_samples Number of complex samples.
+     * @param timestamp Hardware counter at the first sample.
+     * @param timestamp_frequency Counter ticks per second (RF or system clock).
+     * @param sample_rate Complex samples per second.
+     * @return Whether data was accepted, displaced older data, or was stopped.
+     * @throws std::invalid_argument for invalid buffers or zero frequencies.
+     * @throws std::overflow_error when the initial timestamp cannot fit int64_t.
+     */
+    RxPushStatus pushTicks(const std::int16_t *samples, std::size_t complex_samples,
+                          std::uint64_t timestamp, std::uint64_t timestamp_frequency,
+                          std::uint64_t sample_rate);
+
+    /**
+     * Move a block while retaining its exact hardware timestamp phase.
+     * @param samples Owned interleaved CS16 values transferred into the queue.
+     * @param timestamp Hardware counter at the first sample.
+     * @param timestamp_frequency Counter ticks per second (RF or system clock).
+     * @param sample_rate Complex samples per second.
+     * @return Whether data was accepted, displaced older data, or was stopped.
+     * @throws std::invalid_argument for empty/odd samples or zero frequencies.
+     * @throws std::overflow_error when the timestamp cannot fit int64_t.
+     */
+    RxPushStatus pushTicks(std::vector<std::int16_t> samples, std::uint64_t timestamp,
+                          std::uint64_t timestamp_frequency, std::uint64_t sample_rate);
+
+    /**
      * Read up to requested_samples interleaved complex samples.
      *
      * A successful result may span blocks. Its timestamp always describes the
@@ -142,7 +170,15 @@ private:
         std::size_t offset{};
         std::int64_t time_ns{};
         std::uint64_t sample_rate{};
+        // Fractional nanosecond phase lost by the integer time_ns conversion.
+        std::uint64_t time_remainder{};
+        std::uint64_t time_denominator{1};
     };
+
+    /** Move and enqueue a block while preserving its fractional timestamp phase. */
+    RxPushStatus pushWithPhase(std::vector<std::int16_t> samples,
+                              std::int64_t time_ns, std::uint64_t sample_rate,
+                              std::uint64_t remainder, std::uint64_t denominator);
 
     /**
      * Calculate the timestamp of the next unread sample in a block.

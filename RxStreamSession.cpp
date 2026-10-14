@@ -7,6 +7,8 @@
 #include <SoapySidekiq/TimestampConversion.hpp>
 
 #include <limits>
+#include <cerrno>
+#include <exception>
 #include <stdexcept>
 #include <utility>
 
@@ -62,21 +64,26 @@ int RxStreamSession::activate(const RxSessionConfiguration &configuration)
     timestamp_discontinuities_.store(0);
     receive_error_.store(0);
     failed_.store(false);
-    queue_.start();
-    running_.store(true);
     active_ = true;
     try
     {
+        queue_.start();
+        running_.store(true);
         receive_thread_ = std::thread(
             &RxStreamSession::receiveLoop, this, configuration);
     }
     catch (...)
     {
         // Roll hardware back if the host cannot create the worker thread.
-        active_ = false;
         running_.store(false);
         queue_.reset();
-        backend_.stop(configuration.handle, configuration.on_pps);
+        // A failed rollback still owns hardware; a later deactivate can retry.
+        try
+        {
+            const int status = backend_.stop(configuration.handle, configuration.on_pps);
+            if (status == 0 || status == -ENODEV) active_ = false;
+        }
+        catch (...) {}
         throw;
     }
     return 0;
@@ -93,18 +100,20 @@ int RxStreamSession::deactivate()
     // Wake stream readers before stopping hardware, which may block briefly.
     running_.store(false);
     queue_.stop();
-    const int stop_status = active_
-        ? backend_.stop(active_configuration_.handle, active_configuration_.on_pps)
-        : 0;
-    active_ = false;
-
-    // Join without holding the lifecycle mutex; worker exit never needs it.
-    std::thread thread = std::move(receive_thread_);
-    lock.unlock();
-    if (thread.joinable())
+    int stop_status = 0;
+    std::exception_ptr stop_error;
+    try
     {
-        thread.join();
+        if (active_)
+            stop_status = backend_.stop(active_configuration_.handle, active_configuration_.on_pps);
+        if (stop_status == 0 || stop_status == -ENODEV) active_ = false;
     }
+    catch (...) { stop_error = std::current_exception(); }
+
+    // Keep activation serialized until the old worker exits. It never takes
+    // lifecycle_mutex_, so joining here cannot deadlock with receiveLoop.
+    if (receive_thread_.joinable()) receive_thread_.join();
+    if (stop_error) std::rethrow_exception(stop_error);
     return stop_status;
 }
 
@@ -224,9 +233,8 @@ void RxStreamSession::receiveLoop(RxSessionConfiguration configuration) noexcept
             const std::uint64_t frequency = configuration.use_rf_timestamp
                 ? configuration.sample_rate
                 : configuration.system_timestamp_frequency;
-            const auto time_ns = ticksToNanoseconds(timestamp, frequency);
-            queue_.push(
-                std::move(result.samples), time_ns, configuration.sample_rate);
+            queue_.pushTicks(std::move(result.samples), timestamp, frequency,
+                             configuration.sample_rate);
         }
     }
     catch (...)
