@@ -288,6 +288,8 @@ class SoapySidekiq : public SoapySDR::Device
         // RX producer state is atomic; queued sample state synchronizes internally.
         std::basic_string<char> timetype{};
         std::atomic<bool> rx_running{};
+        // Control-thread ownership of SDK RX, independent of worker liveness.
+        bool rx_hardware_streaming{};
         soapy_sidekiq::RxSampleQueue rx_sample_queue{64};
         StreamHandle *active_rx_stream{};
 

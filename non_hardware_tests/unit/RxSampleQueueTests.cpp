@@ -184,3 +184,63 @@ TEST_CASE("RX queue validates buffers rates timeouts and timestamp overflow")
     REQUIRE_EQ(queue.read(first.data(), 1, 0us).samples, std::size_t{1});
     REQUIRE_THROWS_AS(queue.read(first.data(), 1, 0us), std::overflow_error);
 }
+
+TEST_CASE("partial RX timestamps retain fractional RF and system clock phase")
+{
+    constexpr std::uint64_t rate = 122880000;
+    for (const auto frequency : {rate, std::uint64_t{40960000}})
+    {
+        RxSampleQueue queue(1);
+        queue.start();
+        std::array<std::int16_t, 20> samples{};
+        queue.pushTicks(samples.data(), 10, 1, frequency, rate);
+        REQUIRE_EQ(queue.read(samples.data(), 7, 0us).samples, std::size_t{7});
+        const auto result = queue.read(samples.data(), 1, 0us);
+        REQUIRE_EQ(result.time_ns, frequency == rate ? std::int64_t{65} : std::int64_t{81});
+    }
+}
+
+TEST_CASE("fractional RX timestamp carry cannot overflow the signed result")
+{
+    RxSampleQueue queue(1);
+    queue.start();
+    std::array<std::int16_t, 4> samples{};
+    queue.pushTicks(samples.data(), 2, std::numeric_limits<std::uint64_t>::max() - 2,
+                    2000000000, 666666666);
+    REQUIRE_EQ(queue.read(samples.data(), 1, 0us).time_ns,
+               std::numeric_limits<std::int64_t>::max() - 1);
+    REQUIRE_THROWS_AS(queue.read(samples.data(), 1, 0us), std::overflow_error);
+    REQUIRE_THROWS_AS(queue.pushTicks(samples.data(), 2, 1, 0, 1), std::invalid_argument);
+}
+
+#if defined(__SIZEOF_INT128__)
+TEST_CASE("fractional RX timestamps match a rational wide integer oracle")
+{
+    __extension__ using uint128 = unsigned __int128;
+    std::uint64_t state = 0x692cabc034bd1127ULL;
+    const auto next = [&state]() {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        return state;
+    };
+    RxSampleQueue queue(1);
+    std::array<std::int16_t, 16> samples{};
+    for (unsigned trial = 0; trial < 1000; ++trial)
+    {
+        const auto timestamp = next();
+        const auto frequency = next() | 1ULL;
+        const auto rate = next() % 200000000 + 1;
+        queue.start();
+        queue.pushTicks(samples.data(), 8, timestamp, frequency, rate);
+        for (std::uint64_t offset = 0; offset < 8; ++offset)
+        {
+            const auto expected = (static_cast<uint128>(timestamp) * 1000000000 * rate +
+                static_cast<uint128>(offset) * 1000000000 * frequency) /
+                (static_cast<uint128>(frequency) * rate);
+            REQUIRE_EQ(queue.read(samples.data(), 1, 0us).time_ns,
+                       static_cast<std::int64_t>(expected));
+        }
+    }
+}
+#endif

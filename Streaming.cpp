@@ -274,12 +274,11 @@ void SoapySidekiq::rx_receive_operation_impl(
                 const uint64_t timestamp_frequency = rfTimeSource
                     ? sample_rate
                     : sys_freq;
-                const auto time_ns = convert_timestamp_to_nanos(
-                    timestamp, timestamp_frequency);
-                const auto push_status = rx_sample_queue.push(
+                const auto push_status = rx_sample_queue.pushTicks(
                     const_cast<const int16_t *>(tmp_p_rx_block->data),
                     rx_payload_size_in_words,
-                    time_ns,
+                    timestamp,
+                    timestamp_frequency,
                     sample_rate);
                 if (push_status == soapy_sidekiq::RxPushStatus::dropped_oldest)
                 {
@@ -509,6 +508,12 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
         {
             throw std::runtime_error("deactivate the RX stream before closing it");
         }
+        if (rx_hardware_streaming)
+        {
+            // A failed worker is no longer running, but the SDK may still be active.
+            // Deactivation preserves the stream and hardware flag if stop fails.
+            deactivateStream(stream, 0, 0);
+        }
         if (_rx_receive_thread.joinable())
         {
             // Joining before reset guarantees the producer no longer accesses the queue.
@@ -585,7 +590,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         }
 
         const skiq_rx_hdl_t rx_handle = stream_handle->rx_handle;
-        if (rx_running.load() || _rx_receive_thread.joinable())
+        if (rx_running.load() || rx_hardware_streaming || _rx_receive_thread.joinable())
         {
             return SOAPY_SDR_STREAM_ERROR;
         }
@@ -629,6 +634,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             }
         }
 
+        rx_hardware_streaming = true;
         // Publish running state before launching the worker that observes it.
         rx_sample_queue.start();
         rx_running.store(true);
@@ -644,7 +650,11 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         {
             rx_running.store(false);
             rx_sample_queue.stop();
-            skiq_stop_rx_streaming(card, rx_handle);
+            const int stop_status = skiq_stop_rx_streaming(card, rx_handle);
+            if (stop_status == 0 || stop_status == -ENODEV)
+                rx_hardware_streaming = false;
+            else
+                SoapySDR_logf(SOAPY_SDR_ERROR, "RX startup rollback stop failed: %d", stop_status);
             throw;
         }
 
@@ -837,6 +847,8 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
             }
         }
 
+        // Stop succeeded (or hardware was already stopped); ownership is released.
+        rx_hardware_streaming = false;
         /* wait till the rx thread is done */
         if (_rx_receive_thread.joinable())
         {
