@@ -97,6 +97,17 @@ target_link_libraries(stream_conversion_tests PRIVATE non_hardware_test_options)
 add_test(NAME stream-conversion.all COMMAND stream_conversion_tests)
 set_tests_properties(stream-conversion.all PROPERTIES LABELS "unit;non-hardware")
 
+# Exercise the integer fallback on hosts that normally select __int128.
+add_executable(timestamp_portable_tests
+    support/TestMain.cpp unit/TimestampConversionTests.cpp)
+target_include_directories(timestamp_portable_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_compile_definitions(timestamp_portable_tests PRIVATE
+    SOAPYSIDEKIQ_FORCE_PORTABLE_TIMESTAMP=1)
+target_link_libraries(timestamp_portable_tests PRIVATE non_hardware_test_options)
+add_test(NAME timestamp-portable.all COMMAND timestamp_portable_tests)
+set_tests_properties(timestamp-portable.all PROPERTIES LABELS "unit;non-hardware")
+
 # Compile the production writeStream body against a minimal device/SDK fixture.
 # Fail configuration if its boundaries change rather than testing a stale copy.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../Streaming.cpp)
@@ -122,5 +133,5 @@ set_tests_properties(tx-write.all PROPERTIES LABELS "component;non-hardware")
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
-            stream_conversion_tests tx_write_tests
+            stream_conversion_tests tx_write_tests timestamp_portable_tests
     USES_TERMINAL)
