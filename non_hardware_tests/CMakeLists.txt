@@ -84,7 +84,28 @@ target_link_libraries(stream_configuration_tests PRIVATE non_hardware_test_optio
 add_test(NAME stream-configuration.all COMMAND stream_configuration_tests)
 set_tests_properties(stream-configuration.all PROPERTIES LABELS "unit;non-hardware")
 
+# Compile the production writeStream body against a minimal device/SDK fixture.
+# Fail configuration if its boundaries change rather than testing a stale copy.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../Streaming.cpp)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../Streaming.cpp" streaming_source)
+string(FIND "${streaming_source}" "int SoapySidekiq::writeStream(" tx_write_start)
+string(FIND "${streaming_source}" "int SoapySidekiq::readStreamStatus(" tx_write_end)
+if(tx_write_start LESS 0 OR tx_write_end LESS tx_write_start)
+    message(FATAL_ERROR "Could not locate the production TX write method for regression tests")
+endif()
+math(EXPR tx_write_length "${tx_write_end} - ${tx_write_start}")
+string(SUBSTRING "${streaming_source}" ${tx_write_start} ${tx_write_length} tx_write_method)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxWriteMethod.inc" "${tx_write_method}")
+
+find_package(Threads REQUIRED)
+add_executable(tx_write_tests support/TestMain.cpp component/TxWriteStreamTests.cpp)
+target_include_directories(tx_write_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(tx_write_tests PRIVATE non_hardware_test_options Threads::Threads)
+add_test(NAME tx-write.all COMMAND tx_write_tests)
+set_tests_properties(tx-write.all PROPERTIES LABELS "component;non-hardware")
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests tx_write_tests
     USES_TERMINAL)
