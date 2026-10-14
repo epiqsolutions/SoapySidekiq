@@ -26,6 +26,11 @@ total=$((passed + failed))
     echo "Non-hardware test cases: ${total} total, ${passed} passed, ${failed} failed"
 } | tee -a "${test_output}"
 
+if ((total == 0)); then
+    echo "Error: no non-hardware test cases ran." | tee -a "${test_output}" >&2
+    exit 1
+fi
+
 if ((ctest_status != 0 || failed != 0)); then
     exit 1
 fi

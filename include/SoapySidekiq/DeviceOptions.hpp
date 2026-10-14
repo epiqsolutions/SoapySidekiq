@@ -16,6 +16,11 @@ namespace soapy_sidekiq
 /** Default Sidekiq TX payload size used when no constructor override is given. */
 inline constexpr std::uint32_t defaultTxBlockSize = 16380;
 
+/** SDK packet limits for the driver's unpacked, single-channel TX payload. */
+inline constexpr std::uint32_t txHeaderWords = 4;
+inline constexpr std::uint32_t txPacketIncrementWords = 256;
+inline constexpr std::uint32_t maxTxBlockSize = 65536 - txHeaderWords;
+
 /** Validated constructor settings used to initialize one device. */
 struct DeviceOptions
 {
