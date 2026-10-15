@@ -77,6 +77,7 @@ set_tests_properties(sensors.all PROPERTIES LABELS "unit;non-hardware")
 add_executable(stream_configuration_tests
     support/TestMain.cpp
     unit/StreamConfigurationTests.cpp
+    unit/SampleScaleTests.cpp
     ../StreamConfiguration.cpp)
 target_include_directories(stream_configuration_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
@@ -160,6 +161,15 @@ endif()
 math(EXPR tx_write_length "${tx_write_end} - ${tx_write_start}")
 string(SUBSTRING "${streaming_source}" ${tx_write_start} ${tx_write_length} tx_write_method)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxWriteMethod.inc" "${tx_write_method}")
+
+string(FIND "${streaming_source}" "std::string SoapySidekiq::getNativeStreamFormat(" native_start)
+string(FIND "${streaming_source}" "SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(" native_end)
+if(native_start LESS 0 OR native_end LESS native_start)
+    message(FATAL_ERROR "Could not locate production native stream format method")
+endif()
+math(EXPR native_length "${native_end} - ${native_start}")
+string(SUBSTRING "${streaming_source}" ${native_start} ${native_length} native_method)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/NativeStreamFormat.inc" "${native_method}")
 
 find_package(Threads REQUIRED)
 add_executable(tx_write_tests support/TestMain.cpp component/TxWriteStreamTests.cpp)

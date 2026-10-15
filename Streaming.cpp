@@ -131,7 +131,9 @@ std::string SoapySidekiq::getNativeStreamFormat(const int    direction,
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "getNativeStreamFormat");
 
-    fullScale = this->maxValue;
+    const auto stream_direction = streamDirection(direction);
+    fullScale = stream_direction == soapy_sidekiq::StreamDirection::rx
+        ? this->maxValue : this->txMaxValue;
 
     return "CS16";
 }
@@ -871,7 +873,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                 reinterpret_cast<const float *>(inbuff_ptr),
                 reinterpret_cast<std::int16_t *>(outbuff_ptr),
                 current_tx_block_size,
-                static_cast<float>(this->maxValue));
+                static_cast<float>(this->txMaxValue));
         }
 
 

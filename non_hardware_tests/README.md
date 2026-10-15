@@ -31,6 +31,14 @@ includes negative normalized components, zero, and both signed full-scale
 endpoints. The ASan/UBSan configuration also enables `float-cast-overflow` and
 stops on sanitizer errors.
 
+The TX fixture also extracts the production native-format method to check
+separate RX/TX host scales. The SDK unpacked-sample table specifies X2/X4/X40
+TX as upper-14-bit samples in a 16-bit word: their host scale is 32767, not
+8191. Tests assert explicit native scales and signed half-amplitude values
+(16384 for upper-14-bit/16-bit, 1024 for right-justified 12-bit) across three
+packets. They do not execute the constructor's SDK product/width queries or
+measure RF output on hardware.
+
 Timestamp cases run both through the compiler-selected implementation and in
 `timestamp_portable_tests`, which forces the portable integer fallback even
 on hosts with `__int128`. Both cover truncation boundaries and signed output
