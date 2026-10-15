@@ -677,6 +677,9 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             throw std::runtime_error("");
         }
 
+        // A new activation must not inherit a failed PPS start's write gate.
+        first_transmit = false;
+
         /* start tx streaming */
         if (flags == SOAPY_SDR_HAS_TIME)
         {
@@ -1021,11 +1024,12 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start");
         std::unique_lock<std::mutex> lock(tx_mutex);
         tx_cv.wait(lock, [this] { return tx_start_finished; });
-        first_transmit = false;
         if (tx_start_status != 0)
         {
+            // Keep the gate set so retries cannot transmit after a failed start.
             return SOAPY_SDR_STREAM_ERROR;
         }
+        first_transmit = false;
     }
 
     if (numElems % current_tx_block_size != 0)
