@@ -141,12 +141,27 @@ TEST_CASE("CS16 TX preserves every signed sample across three input blocks")
     }
 }
 
-TEST_CASE("TX CF32 uses DAC scale when RX and TX widths differ")
+TEST_CASE("TX host alignment determines the transmitted CF32 amplitude")
 {
-    for (const std::uint8_t bits : {std::uint8_t{12}, std::uint8_t{14}, std::uint8_t{16}})
+    using soapy_sidekiq::TxSampleAlignment;
+    struct Layout
+    {
+        std::uint8_t bits;
+        TxSampleAlignment alignment;
+        std::int16_t expected_half;
+        double expected_scale;
+    };
+    // Independent values from the SDK unpacked-sample layout, not the converter.
+    const Layout layouts[]{
+        {12, TxSampleAlignment::right_justified, 1024, 2047},
+        {14, TxSampleAlignment::upper_bits, 16384, 32767},
+        {16, TxSampleAlignment::right_justified, 16384, 32767}
+    };
+    for (const auto &layout : layouts)
     {
         SoapySidekiq device;
-        device.txMaxValue = soapy_sidekiq::sampleFullScale(bits);
+        device.txMaxValue = soapy_sidekiq::txSampleFullScale(layout.bits, layout.alignment);
+        REQUIRE_EQ(device.txMaxValue, layout.expected_scale);
         const std::size_t words = 2 * device.current_tx_block_size;
         std::vector<float> input(3 * words);
         for (std::size_t i = 0; i < input.size(); ++i)
@@ -156,21 +171,28 @@ TEST_CASE("TX CF32 uses DAC scale when RX and TX widths differ")
         REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
                                       buffers, input.size() / 2, flags, 0, 0),
                    static_cast<int>(input.size() / 2));
+        REQUIRE_EQ(device.transmitted.size(), std::size_t{3});
         for (const auto &block : device.transmitted)
             for (std::size_t i = 0; i < words; ++i)
-                REQUIRE_EQ(block[i], soapy_sidekiq::convertNormalizedFloatToSample(input[i], static_cast<float>(device.txMaxValue)));
+                REQUIRE_EQ(block[i], i % 2 == 0 ? layout.expected_half : -layout.expected_half);
     }
 }
 
-TEST_CASE("native CS16 full scale distinguishes ADC and DAC widths")
+TEST_CASE("native CS16 reporting uses the host layout rather than physical DAC width")
 {
+    using soapy_sidekiq::TxSampleAlignment;
     SoapySidekiq device;
     device.maxValue = soapy_sidekiq::sampleFullScale(16);
-    device.txMaxValue = soapy_sidekiq::sampleFullScale(14);
+    device.txMaxValue = soapy_sidekiq::txSampleFullScale(14, TxSampleAlignment::upper_bits);
     double scale = 0;
     REQUIRE_EQ(device.getNativeStreamFormat(SOAPY_SDR_RX, 0, scale), std::string{"CS16"});
     REQUIRE_EQ(scale, 32767.0);
     REQUIRE_EQ(device.getNativeStreamFormat(SOAPY_SDR_TX, 0, scale), std::string{"CS16"});
-    REQUIRE_EQ(scale, 8191.0);
+    REQUIRE_EQ(scale, 32767.0);
+    device.txMaxValue = soapy_sidekiq::txSampleFullScale(12, TxSampleAlignment::right_justified);
+    REQUIRE_EQ(device.getNativeStreamFormat(SOAPY_SDR_TX, 0, scale), std::string{"CS16"});
+    REQUIRE_EQ(scale, 2047.0);
+    REQUIRE_EQ(device.getNativeStreamFormat(SOAPY_SDR_RX, 0, scale), std::string{"CS16"});
+    REQUIRE_EQ(scale, 32767.0);
     REQUIRE_THROWS_AS(device.getNativeStreamFormat(99, 0, scale), std::invalid_argument);
 }

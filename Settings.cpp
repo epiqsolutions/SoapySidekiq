@@ -434,9 +434,14 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
                       card, status);
         throw std::runtime_error("");
     }
-    this->txMaxValue = soapy_sidekiq::sampleFullScale(tx_resolution);
+    // The SDK manual lists these products as upper-14-bit TX. Their low two
+    // host bits are discarded, so DAC resolution is not the host amplitude width.
+    const auto tx_alignment = (part == skiq_x2 || part == skiq_x4 || part == skiq_x40)
+        ? soapy_sidekiq::TxSampleAlignment::upper_bits
+        : soapy_sidekiq::TxSampleAlignment::right_justified;
+    this->txMaxValue = soapy_sidekiq::txSampleFullScale(tx_resolution, tx_alignment);
     SoapySDR_logf(SOAPY_SDR_INFO,
-                  "card: %u, TX resolution: %u bits, max DAC value: %u",
+                  "card: %u, TX DAC resolution: %u bits, host full scale: %u",
                   card, tx_resolution, static_cast<uint32_t>(this->txMaxValue));
 
     status = skiq_write_chan_mode(card, skiq_chan_mode_single);
