@@ -10,6 +10,8 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <cstdlib>
 #include <cstdint>
 #include <stdexcept>
@@ -91,7 +93,8 @@ public:
         std::size_t channel{};
     };
     std::uint8_t card{};
-    bool tx_start_signal{}, tx_stream_active{}, rfTimeSource{true};
+    bool tx_start_finished{}, tx_stream_active{}, rfTimeSource{true};
+    std::mutex tx_mutex;
     std::uint32_t rx_payload_size_in_words{2};
     std::uint64_t sys_freq{1000000};
     std::vector<std::uint32_t> rx_sample_rates{20000000};

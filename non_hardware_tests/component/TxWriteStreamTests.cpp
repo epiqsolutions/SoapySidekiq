@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cmath>
 #include <cstdint>
+#include <condition_variable>
 #include <cstring>
 #include <mutex>
 #include <pthread.h>
@@ -18,7 +19,7 @@
 #include <SoapySidekiq/StreamConfiguration.hpp>
 #include <vector>
 
-// Only the success path is exercised: callbacks immediately release each slot.
+// Accepted sends complete synchronously; PPS startup can succeed or fail.
 // Stand-ins match the members used by writeStream without opening a real device.
 #define SOAPY_SDR_TX 0
 #define SOAPY_SDR_RX 1
@@ -51,8 +52,12 @@ public:
     std::int32_t p_tx_status[DEFAULT_NUM_BUFFERS]{};
     passedStruct *passedStructInstance{};
     std::mutex tx_buf_mutex;
-    pthread_mutex_t tx_enabled_mutex{}, space_avail_mutex{};
-    pthread_cond_t tx_enabled_cond{}, space_avail_cond{};
+    std::mutex tx_mutex;
+    std::condition_variable tx_cv;
+    bool tx_start_finished{};
+    int tx_start_status{};
+    pthread_mutex_t space_avail_mutex{};
+    pthread_cond_t space_avail_cond{};
     std::vector<std::vector<std::int16_t>> transmitted;
 
     std::string getNativeStreamFormat(int, std::size_t, double &) const;
@@ -85,6 +90,43 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
 
 // Generated directly from Streaming.cpp by CMake, including the input advance.
 #include "TxWriteMethod.inc"
+
+TEST_CASE("failed PPS startup rejects every write without submitting packets")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    device.tx_start_finished = true;
+    device.tx_start_status = -5;
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    for (int retry = 0; retry < 3; ++retry)
+    {
+        REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
+                                      buffers, device.current_tx_block_size, flags, 0, 0),
+                   SOAPY_SDR_STREAM_ERROR);
+        REQUIRE(device.first_transmit);
+        REQUIRE(device.transmitted.empty());
+    }
+}
+
+TEST_CASE("successful PPS startup opens the write gate for subsequent packets")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    device.tx_start_finished = true;
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    for (int write = 0; write < 2; ++write)
+    {
+        REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
+                                      buffers, device.current_tx_block_size, flags, 0, 0),
+                   static_cast<int>(device.current_tx_block_size));
+        REQUIRE(!device.first_transmit);
+    }
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{2});
+}
 
 TEST_CASE("CF32 TX transmits every sample from three distinct input blocks")
 {

@@ -31,6 +31,12 @@ includes negative normalized components, zero, and both signed full-scale
 endpoints. The ASan/UBSan configuration also enables `float-cast-overflow` and
 stops on sanitizer errors.
 
+The PPS write-gate regressions inject completed successful and failed startup
+results. They verify that a failed start rejects repeated writes without SDK
+submissions, while a successful start permits subsequent packets. They do not
+exercise the blocking SDK startup call, activation/reset behavior, or real PPS
+edges.
+
 The TX fixture also extracts the production native-format method to check
 separate RX/TX host scales. The SDK unpacked-sample table specifies X2/X4/X40
 TX as upper-14-bit samples in a 16-bit word: their host scale is 32767, not
