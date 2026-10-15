@@ -402,10 +402,10 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
             throw std::runtime_error("deactivate the RX stream before closing it");
         }
 
-        // A failed worker is stopped but remains joinable until shutdown.
+        // Preserve retryable hardware ownership if the backend stop fails.
         if (rx_session != nullptr)
         {
-            rx_session->shutdown();
+            deactivateStream(stream, 0, 0);
         }
 
         if (active_rx_stream == stream_handle)
@@ -657,7 +657,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
         // RxStreamSession joins the worker even when the backend stop fails.
         status = rx_session == nullptr
             ? SOAPY_SDR_STREAM_ERROR
-            : rx_session->deactivate();
+            : rx_session->deactivate((flags & SOAPY_SDR_HAS_TIME) != 0);
         if (status == -ENODEV)
         {
             SoapySDR_logf(SOAPY_SDR_WARNING,
@@ -850,6 +850,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     // total number of bytes that need to be transmitted in this call
     uint32_t tx_block_bytes = current_tx_block_size * 4;
+    // Hardware payloads are CS16, but the caller's CF32 buffer uses wider samples.
     const size_t input_block_bytes = current_tx_block_size * 2 *
         (txUseShort ? sizeof(int16_t) : sizeof(float));
 

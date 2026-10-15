@@ -5,6 +5,7 @@
 
 #include "SoapySidekiq.hpp"
 #include <SoapySidekiq/DeviceOptions.hpp>
+#include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySidekiq/SidekiqRxBackend.hpp>
 #include <SoapySidekiq/SampleScale.hpp>
 #include <SoapySDR/Formats.hpp>
@@ -20,6 +21,11 @@
 #include <unistd.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+// Keep the hardware-independent validation contract tied to the SDK in use.
+static_assert(soapy_sidekiq::maxTxBlockSize == SKIQ_MAX_TX_BLOCK_SIZE_IN_WORDS);
+static_assert(soapy_sidekiq::txHeaderWords == SKIQ_TX_HEADER_SIZE_IN_WORDS);
+static_assert(soapy_sidekiq::txPacketIncrementWords == SKIQ_TX_PACKET_SIZE_INCREMENT_IN_WORDS);
 
 /******************************************************************************/
 /** This is the custom logging handler.  If there were custom handling
@@ -308,6 +314,13 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("");
     }
 
+    // A throwing constructor never runs the device destructor. Only arm this
+    // rollback after this call successfully acquires SDK initialization.
+    soapy_sidekiq::ScopeExit rollback([this]() noexcept {
+        free(p_tx_status);
+        p_tx_status = nullptr;
+        skiq_exit();
+    });
     // The backend owns no hardware resource; the session owns its worker.
     rx_backend = std::make_unique<soapy_sidekiq::SidekiqRxBackend>(card);
     rx_session = std::make_unique<soapy_sidekiq::RxStreamSession>(*rx_backend);
@@ -554,6 +567,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     }
 
     SoapySDR_logf(SOAPY_SDR_TRACE, "leaving constructor", card);
+    rollback.release();
 }
 
 // Destructor
@@ -566,6 +580,8 @@ SoapySidekiq::~SoapySidekiq(void)
     {
         rx_session->shutdown();
     }
+    rx_session.reset();
+    rx_backend.reset();
     delete active_rx_stream;
     active_rx_stream = nullptr;
 

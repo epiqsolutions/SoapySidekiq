@@ -85,10 +85,16 @@ DeviceOptions parseDeviceOptions(const std::map<std::string, std::string> &argum
         options.tx_block_size = parseUnsigned(
             tx_block_size->second,
             "tx_block_size",
-            std::numeric_limits<std::uint16_t>::max());
+            maxTxBlockSize);
         if (options.tx_block_size == 0)
         {
             throw std::invalid_argument("tx_block_size must be greater than zero");
+        }
+        if ((options.tx_block_size + txHeaderWords) % txPacketIncrementWords != 0)
+        {
+            throw std::invalid_argument(
+                "tx_block_size plus the TX header must be a multiple of " +
+                std::to_string(txPacketIncrementWords) + " words");
         }
     }
 

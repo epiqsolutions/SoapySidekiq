@@ -24,15 +24,43 @@ The TX write regression executable compiles the `writeStream` method body
 directly from `Streaming.cpp` against a minimal device and synchronous SDK
 fixture. CMake regenerates that body when the production source changes and
 fails configuration if the method boundaries cannot be found. These tests
-compare every sample in three CF32 and CS16 packets. The native-format method
-is also extracted to check separate RX ADC and TX DAC full scales. TX regressions
-cover 12-, 14-, and 16-bit DAC widths with signed CF32 input. They exercise successful
+compare every sample in three CF32 and CS16 packets. They exercise successful
 input advancement, not hardware setup, allocation rollback, asynchronous
-callbacks, queue-full handling, or hardware behavior. TX conversion uses the clipping and rounding policy
-from the production SampleConversion helper. CF32 coverage
+callbacks, queue-full handling, or conversion clipping policy. CF32 coverage
 includes negative normalized components, zero, and both signed full-scale
 endpoints. The ASan/UBSan configuration also enables `float-cast-overflow` and
 stops on sanitizer errors.
+
+The TX fixture also extracts the production native-format method to check
+separate RX/TX scales. Additional PR #24 cases model 12-, 14-, and 16-bit DAC
+widths. Their assumption about DAC width versus host sample alignment remains
+under review; passing these cases does not validate hardware amplitude.
+
+Timestamp cases run both through the compiler-selected implementation and in
+`timestamp_portable_tests`, which forces the portable integer fallback even
+on hosts with `__int128`. Both cover truncation boundaries and signed output
+overflow. On compilers with `__int128`, 10,000 deterministic input pairs also
+check each implementation against a wide integer oracle.
+
+RX queue tests retain raw RF/system timestamp phase across partial reads and
+run through both native and forced portable arithmetic. A rational integer
+oracle checks 1,000 blocks with eight partial reads each. The RX lifecycle
+fixture compiles the production close/deactivate methods and RX activation
+branch with the real RxStreamSession, an injected receive failure, and fake
+SDK start/stop calls. It covers close/reuse, stop failure with retry, and
+already-stopped hardware. Stream setup, actual SDK I/O, and destructor cleanup
+are outside that fixture's coverage.
+
+The session component cases additionally cover concurrent activation during
+worker teardown, retained ownership after stop errors or exceptions, and
+fractional timestamps through both RF and system modes. Their backend receive
+calls have a bounded wait, matching the production receive timeout even when
+a hardware stop fails.
+
+RX lifecycle regressions also check mixed PPS/immediate start and stop modes,
+immediate close/destructor cleanup after PPS activation, and retrying a failed
+PPS stop with an immediate stop. Startup rollback explicitly requests an
+immediate stop; worker-creation failure is not injected by these tests.
 
 AddressSanitizer and UndefinedBehaviorSanitizer:
 
