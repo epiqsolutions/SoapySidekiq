@@ -36,6 +36,7 @@ struct FakeSdk
     bool streaming{};
     int stop_status{};
     unsigned starts{}, stops{};
+    bool stop_on_pps{};
 } sdk;
 }
 
@@ -49,6 +50,7 @@ int skiq_start_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 int skiq_stop_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 {
     ++sdk.stops;
+    sdk.stop_on_pps = false;
     if (sdk.stop_status != 0) return sdk.stop_status;
     if (!sdk.streaming) return -ENODEV;
     sdk.streaming = false;
@@ -57,7 +59,11 @@ int skiq_stop_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 int skiq_start_rx_streaming_on_1pps(std::uint8_t card, skiq_rx_hdl_t handle, int)
 { return skiq_start_rx_streaming(card, handle); }
 int skiq_stop_rx_streaming_on_1pps(std::uint8_t card, skiq_rx_hdl_t handle, int)
-{ return skiq_stop_rx_streaming(card, handle); }
+{
+    const int status = skiq_stop_rx_streaming(card, handle);
+    sdk.stop_on_pps = true;
+    return status;
+}
 int skiq_stop_tx_streaming(std::uint8_t, skiq_tx_hdl_t) { return 0; }
 int skiq_stop_tx_streaming_on_1pps(std::uint8_t, skiq_tx_hdl_t, int) { return 0; }
 
@@ -178,4 +184,49 @@ TEST_CASE("RX close handles already-stopped hardware without redundant deactivat
     REQUIRE(!device.rx_session->running());
     device.closeStream(stream);
     REQUIRE_EQ(sdk.stops, 1u);
+}
+
+TEST_CASE("immediate RX stop is independent of PPS activation")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+    device.awaitWorkerFailure();
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    REQUIRE(!sdk.stop_on_pps);
+    device.closeStream(stream);
+}
+
+TEST_CASE("PPS RX stop is independent of immediate activation")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    device.awaitWorkerFailure();
+    REQUIRE_EQ(device.deactivateStream(stream, SOAPY_SDR_HAS_TIME, 0), 0);
+    REQUIRE(sdk.stop_on_pps);
+    device.closeStream(stream);
+}
+
+TEST_CASE("closing a failed PPS RX stream requests immediate hardware cleanup")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+    device.awaitWorkerFailure();
+    device.closeStream(stream);
+    REQUIRE_EQ(sdk.stops, 1u);
+    REQUIRE(!sdk.stop_on_pps);
+}
+
+TEST_CASE("session destruction after PPS activation requests immediate hardware cleanup")
+{
+    {
+        SoapySidekiq device;
+        auto *stream = device.setupRx();
+        REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+        device.awaitWorkerFailure();
+    }
+    REQUIRE_EQ(sdk.stops, 1u);
+    REQUIRE(!sdk.stop_on_pps);
 }

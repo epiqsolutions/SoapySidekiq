@@ -80,7 +80,8 @@ int RxStreamSession::activate(const RxSessionConfiguration &configuration)
         // A failed rollback still owns hardware; a later deactivate can retry.
         try
         {
-            const int status = backend_.stop(configuration.handle, configuration.on_pps);
+            // Cleanup must not wait for an external PPS edge.
+            const int status = backend_.stop(configuration.handle, false);
             if (status == 0 || status == -ENODEV) active_ = false;
         }
         catch (...) {}
@@ -89,7 +90,7 @@ int RxStreamSession::activate(const RxSessionConfiguration &configuration)
     return 0;
 }
 
-int RxStreamSession::deactivate()
+int RxStreamSession::deactivate(const bool on_pps)
 {
     std::unique_lock<std::mutex> lock(lifecycle_mutex_);
     if (!active_ && !receive_thread_.joinable())
@@ -105,7 +106,7 @@ int RxStreamSession::deactivate()
     try
     {
         if (active_)
-            stop_status = backend_.stop(active_configuration_.handle, active_configuration_.on_pps);
+            stop_status = backend_.stop(active_configuration_.handle, on_pps);
         if (stop_status == 0 || stop_status == -ENODEV) active_ = false;
     }
     catch (...) { stop_error = std::current_exception(); }
@@ -121,7 +122,7 @@ void RxStreamSession::shutdown() noexcept
 {
     try
     {
-        (void)deactivate();
+        (void)deactivate(false);
     }
     catch (...)
     {

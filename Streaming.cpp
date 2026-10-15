@@ -655,7 +655,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
         // RxStreamSession joins the worker even when the backend stop fails.
         status = rx_session == nullptr
             ? SOAPY_SDR_STREAM_ERROR
-            : rx_session->deactivate();
+            : rx_session->deactivate((flags & SOAPY_SDR_HAS_TIME) != 0);
         if (status == -ENODEV)
         {
             SoapySDR_logf(SOAPY_SDR_WARNING,

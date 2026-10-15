@@ -116,7 +116,7 @@ private:
 /**
  * Return a valid two-complex-sample session configuration.
  * @param use_rf_timestamp Select RF rather than system timestamps.
- * @param on_pps Select PPS-synchronized backend start and stop.
+ * @param on_pps Select PPS-synchronized backend start.
  */
 RxSessionConfiguration configuration(
     const bool use_rf_timestamp = true,
@@ -167,7 +167,7 @@ TEST_CASE("RX session starts receives and stops through its backend")
     REQUIRE_EQ(output[0], std::int16_t{1});
     REQUIRE_EQ(output[3], std::int16_t{-2});
 
-    REQUIRE_EQ(session.deactivate(), 0);
+    REQUIRE_EQ(session.deactivate(true), 0);
     REQUIRE_EQ(backend.stop_calls, 1);
     REQUIRE_EQ(backend.stopped_handle, std::uint32_t{7});
     REQUIRE(backend.stopped_on_pps);
@@ -433,4 +433,19 @@ TEST_CASE("RX activation waits until the previous worker has finished joining")
     REQUIRE_EQ(start.get(), 0);
     REQUIRE_EQ(session.deactivate(), 0);
     REQUIRE(state == std::future_status::timeout);
+}
+
+TEST_CASE("RX stop retry may choose immediate cleanup after a PPS stop failure")
+{
+    FakeRxBackend backend;
+    RxStreamSession session(backend);
+    REQUIRE_EQ(session.activate(configuration(false, false)), 0);
+    backend.stop_status = -EIO;
+    REQUIRE_EQ(session.deactivate(true), -EIO);
+    REQUIRE(backend.stopped_on_pps);
+    REQUIRE_THROWS_AS(session.activate(configuration()), std::logic_error);
+    backend.stop_status = 0;
+    REQUIRE_EQ(session.deactivate(), 0);
+    REQUIRE(!backend.stopped_on_pps);
+    REQUIRE_EQ(backend.stop_calls, 2);
 }

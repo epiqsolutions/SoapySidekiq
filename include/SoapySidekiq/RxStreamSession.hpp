@@ -59,7 +59,7 @@ public:
     virtual int start(std::uint32_t handle, bool on_pps) = 0;
 
     /**
-     * Stop an RX handle using the same synchronization mode as start().
+     * Stop an RX handle using the requested synchronization mode.
      * @param handle Portable numeric RX handle.
      * @param on_pps Whether stop should wait for the next PPS edge.
      * @return Backend status code; zero indicates success.
@@ -86,7 +86,7 @@ struct RxSessionConfiguration
     std::uint64_t system_timestamp_frequency{};
     /** Select RF timestamps instead of system-counter timestamps. */
     bool use_rf_timestamp{true};
-    /** Synchronize hardware start and stop to PPS. */
+    /** Synchronize hardware start to PPS; stopping has its own mode. */
     bool on_pps{};
 };
 
@@ -125,11 +125,12 @@ public:
 
     /**
      * Stop hardware, wake readers, and join the worker.
+     * @param on_pps Wait for PPS when true; false stops immediately.
      * @return Backend stop status, or zero when already inactive.
      * Failed stops retain hardware ownership for retry and block activation.
      * Backend exceptions are rethrown only after joining the worker.
      */
-    int deactivate();
+    int deactivate(bool on_pps = false);
 
     /** Best-effort, non-throwing teardown for destructors and device cleanup. */
     void shutdown() noexcept;

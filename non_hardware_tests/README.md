@@ -52,6 +52,11 @@ fractional timestamps through both RF and system modes. Their backend receive
 calls have a bounded wait, matching the production receive timeout even when
 a hardware stop fails.
 
+RX lifecycle regressions also check mixed PPS/immediate start and stop modes,
+immediate close/destructor cleanup after PPS activation, and retrying a failed
+PPS stop with an immediate stop. Startup rollback explicitly requests an
+immediate stop; worker-creation failure is not injected by these tests.
+
 AddressSanitizer and UndefinedBehaviorSanitizer:
 
 ```sh
