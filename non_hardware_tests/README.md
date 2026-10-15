@@ -40,11 +40,22 @@ check each implementation against a wide integer oracle.
 RX queue tests retain raw RF/system timestamp phase across partial reads and
 run through both native and forced portable arithmetic. A rational integer
 oracle checks 1,000 blocks with eight partial reads each. The RX lifecycle
-fixture compiles the production worker exception wrapper, close/deactivate
-methods, and RX activation branch with an injected receive failure and fake
+fixture compiles the production close/deactivate methods and RX activation
+branch with the real RxStreamSession, an injected receive failure, and fake
 SDK start/stop calls. It covers close/reuse, stop failure with retry, and
 already-stopped hardware. Stream setup, actual SDK I/O, and destructor cleanup
 are outside that fixture's coverage.
+
+The session component cases additionally cover concurrent activation during
+worker teardown, retained ownership after stop errors or exceptions, and
+fractional timestamps through both RF and system modes. Their backend receive
+calls have a bounded wait, matching the production receive timeout even when
+a hardware stop fails.
+
+RX lifecycle regressions also check mixed PPS/immediate start and stop modes,
+immediate close/destructor cleanup after PPS activation, and retrying a failed
+PPS stop with an immediate stop. Startup rollback explicitly requests an
+immediate stop; worker-creation failure is not injected by these tests.
 
 AddressSanitizer and UndefinedBehaviorSanitizer:
 

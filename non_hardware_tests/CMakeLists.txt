@@ -113,6 +113,20 @@ target_link_libraries(rx_sample_queue_tests PRIVATE
 add_test(NAME rx-sample-queue.all COMMAND rx_sample_queue_tests)
 set_tests_properties(rx-sample-queue.all PROPERTIES LABELS "unit;non-hardware")
 
+# Exercise the complete RX worker lifecycle through a blocking fake backend.
+add_executable(rx_stream_session_tests
+    support/TestMain.cpp
+    component/RxStreamSessionTests.cpp
+    ../RxSampleQueue.cpp
+    ../RxStreamSession.cpp)
+target_include_directories(rx_stream_session_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_link_libraries(rx_stream_session_tests PRIVATE
+    non_hardware_test_options Threads::Threads)
+
+add_test(NAME rx-stream-session.all COMMAND rx_stream_session_tests)
+set_tests_properties(rx-stream-session.all PROPERTIES LABELS "component;non-hardware")
 add_executable(rx_sample_queue_portable_tests
     support/TestMain.cpp unit/RxSampleQueueTests.cpp ../RxSampleQueue.cpp)
 target_include_directories(rx_sample_queue_portable_tests PRIVATE
@@ -167,8 +181,6 @@ function(extract_stream_method output start_marker end_marker)
     string(SUBSTRING "${streaming_source}" ${method_start} ${method_length} method)
     set(${output} "${method}" PARENT_SCOPE)
 endfunction()
-extract_stream_method(rx_worker "void SoapySidekiq::rx_receive_operation("
-    "void SoapySidekiq::rx_receive_operation_impl(")
 extract_stream_method(rx_close "void SoapySidekiq::closeStream("
     "size_t SoapySidekiq::getStreamMTU(")
 extract_stream_method(rx_deactivate "int SoapySidekiq::deactivateStream("
@@ -181,9 +193,9 @@ if(tx_branch LESS 0)
 endif()
 string(SUBSTRING "${activate_method}" 0 ${tx_branch} rx_activate)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RxLifecycleMethods.inc"
-    "${rx_worker}\n${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
+    "${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
 add_executable(rx_lifecycle_tests
-    support/TestMain.cpp component/RxLifecycleTests.cpp ../RxSampleQueue.cpp)
+    support/TestMain.cpp component/RxLifecycleTests.cpp ../RxSampleQueue.cpp ../RxStreamSession.cpp)
 target_include_directories(rx_lifecycle_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../include"
     "${CMAKE_CURRENT_BINARY_DIR}")
@@ -195,5 +207,5 @@ add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
-            tx_write_tests timestamp_portable_tests rx_lifecycle_tests
+            rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
     USES_TERMINAL)

@@ -95,6 +95,19 @@ public:
         std::uint64_t sample_rate);
 
     /**
+     * Move one owned interleaved CS16 hardware block into the queue.
+     * @param samples Interleaved IQ values transferred into queue ownership.
+     * @param time_ns Timestamp of the block's first sample.
+     * @param sample_rate Samples per second used for partial-read timestamps.
+     * @return Whether the block was accepted, displaced old data, or was stopped.
+     * @throws std::invalid_argument for empty/odd sample data or a zero rate.
+     */
+    RxPushStatus push(
+        std::vector<std::int16_t> samples,
+        std::int64_t time_ns,
+        std::uint64_t sample_rate);
+
+    /**
      * Queue samples with their unrounded hardware timestamp.
      * @param samples Interleaved CS16 source values.
      * @param complex_samples Number of complex samples.
@@ -108,6 +121,19 @@ public:
     RxPushStatus pushTicks(const std::int16_t *samples, std::size_t complex_samples,
                           std::uint64_t timestamp, std::uint64_t timestamp_frequency,
                           std::uint64_t sample_rate);
+
+    /**
+     * Move a block while retaining its exact hardware timestamp phase.
+     * @param samples Owned interleaved CS16 values transferred into the queue.
+     * @param timestamp Hardware counter at the first sample.
+     * @param timestamp_frequency Counter ticks per second (RF or system clock).
+     * @param sample_rate Complex samples per second.
+     * @return Whether data was accepted, displaced older data, or was stopped.
+     * @throws std::invalid_argument for empty/odd samples or zero frequencies.
+     * @throws std::overflow_error when the timestamp cannot fit int64_t.
+     */
+    RxPushStatus pushTicks(std::vector<std::int16_t> samples, std::uint64_t timestamp,
+                          std::uint64_t timestamp_frequency, std::uint64_t sample_rate);
 
     /**
      * Read up to requested_samples interleaved complex samples.
@@ -149,8 +175,8 @@ private:
         std::uint64_t time_denominator{1};
     };
 
-    /** Copy and enqueue a block while preserving its fractional timestamp phase. */
-    RxPushStatus pushWithPhase(const std::int16_t *samples, std::size_t complex_samples,
+    /** Move and enqueue a block while preserving its fractional timestamp phase. */
+    RxPushStatus pushWithPhase(std::vector<std::int16_t> samples,
                               std::int64_t time_ns, std::uint64_t sample_rate,
                               std::uint64_t remainder, std::uint64_t denominator);
 

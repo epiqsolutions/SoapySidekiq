@@ -7,9 +7,9 @@
 
 #include <sidekiq_api.h>
 
-#include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -20,7 +20,7 @@
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
-#include <SoapySidekiq/RxSampleQueue.hpp>
+#include <SoapySidekiq/RxStreamSession.hpp>
 
 
 #define DEFAULT_SAMPLE_RATE (20000000)
@@ -285,12 +285,10 @@ class SoapySidekiq : public SoapySDR::Device
         bool txUseShort{};
         uint32_t debug_ctr{};
 
-        // RX producer state is atomic; queued sample state synchronizes internally.
+        // RX hardware adapter must outlive the session that references it.
         std::basic_string<char> timetype{};
-        std::atomic<bool> rx_running{};
-        // Control-thread ownership of SDK RX, independent of worker liveness.
-        bool rx_hardware_streaming{};
-        soapy_sidekiq::RxSampleQueue rx_sample_queue{64};
+        std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
+        std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
         StreamHandle *active_rx_stream{};
 
         uint8_t num_rx_channels{};
@@ -361,13 +359,6 @@ class SoapySidekiq : public SoapySDR::Device
         };
 
         passedStruct *passedStructInstance;
-
-        /** Worker that exclusively receives SDK blocks for the active RX stream. */
-        std::thread _rx_receive_thread;
-        /** Run the guarded receive worker for one hardware handle and channel. */
-        void rx_receive_operation(skiq_rx_hdl_t rx_handle, size_t channel);
-        /** Receive SDK blocks and publish owned samples until deactivation. */
-        void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle, size_t channel);
 
         // tx thread
         std::thread _tx_streaming_thread;

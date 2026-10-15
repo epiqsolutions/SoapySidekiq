@@ -4,7 +4,9 @@
  */
 
 #include "TestHarness.hpp"
-#include <SoapySidekiq/RxSampleQueue.hpp>
+#include <SoapySidekiq/RxStreamSession.hpp>
+#include <memory>
+#include <vector>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -34,6 +36,7 @@ struct FakeSdk
     bool streaming{};
     int stop_status{};
     unsigned starts{}, stops{};
+    bool stop_on_pps{};
 } sdk;
 }
 
@@ -47,6 +50,7 @@ int skiq_start_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 int skiq_stop_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 {
     ++sdk.stops;
+    sdk.stop_on_pps = false;
     if (sdk.stop_status != 0) return sdk.stop_status;
     if (!sdk.streaming) return -ENODEV;
     sdk.streaming = false;
@@ -55,9 +59,25 @@ int skiq_stop_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 int skiq_start_rx_streaming_on_1pps(std::uint8_t card, skiq_rx_hdl_t handle, int)
 { return skiq_start_rx_streaming(card, handle); }
 int skiq_stop_rx_streaming_on_1pps(std::uint8_t card, skiq_rx_hdl_t handle, int)
-{ return skiq_stop_rx_streaming(card, handle); }
+{
+    const int status = skiq_stop_rx_streaming(card, handle);
+    sdk.stop_on_pps = true;
+    return status;
+}
 int skiq_stop_tx_streaming(std::uint8_t, skiq_tx_hdl_t) { return 0; }
 int skiq_stop_tx_streaming_on_1pps(std::uint8_t, skiq_tx_hdl_t, int) { return 0; }
+
+/** Route the real session to the same fake hardware used by the device fixture. */
+class FixtureBackend final : public soapy_sidekiq::RxStreamBackend
+{
+public:
+    int start(std::uint32_t handle, bool pps) override
+    { return pps ? skiq_start_rx_streaming_on_1pps(0, handle, 0) : skiq_start_rx_streaming(0, handle); }
+    int stop(std::uint32_t handle, bool pps) override
+    { return pps ? skiq_stop_rx_streaming_on_1pps(0, handle, 0) : skiq_stop_rx_streaming(0, handle); }
+    soapy_sidekiq::RxReceiveResult receive() override
+    { throw std::runtime_error("injected receive failure"); }
+};
 
 /** Supply the device fields used by the extracted production lifecycle methods. */
 class SoapySidekiq
@@ -71,17 +91,24 @@ public:
         std::size_t channel{};
     };
     std::uint8_t card{};
-    std::atomic<bool> rx_running{};
-    bool rx_hardware_streaming{}, tx_start_signal{}, tx_stream_active{};
+    bool tx_start_signal{}, tx_stream_active{}, rfTimeSource{true};
+    std::uint32_t rx_payload_size_in_words{2};
+    std::uint64_t sys_freq{1000000};
+    std::vector<std::uint32_t> rx_sample_rates{20000000};
     StreamHandle *active_rx_stream{}, *active_tx_stream{};
-    soapy_sidekiq::RxSampleQueue rx_sample_queue{2};
-    std::thread _rx_receive_thread, _tx_streaming_thread;
+    FixtureBackend backend;
+    std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
+    std::thread _tx_streaming_thread;
     skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
 
-    SoapySidekiq() { sdk = {}; }
+    SoapySidekiq()
+    {
+        sdk = {};
+        rx_session = std::make_unique<soapy_sidekiq::RxStreamSession>(backend);
+    }
     ~SoapySidekiq()
     {
-        if (_rx_receive_thread.joinable()) _rx_receive_thread.join();
+        rx_session.reset();
         delete active_rx_stream;
     }
     SoapySDR::Stream *setupRx()
@@ -93,13 +120,10 @@ public:
     void awaitWorkerFailure()
     {
         std::int16_t output[2]{};
-        REQUIRE(rx_sample_queue.read(output, 1, std::chrono::seconds(1)).status ==
+        REQUIRE(rx_session->read(output, 1, std::chrono::seconds(1)).status ==
                 soapy_sidekiq::RxReadStatus::error);
-        REQUIRE(!rx_running.load());
+        REQUIRE(!rx_session->running());
     }
-    void rx_receive_operation(skiq_rx_hdl_t, std::size_t);
-    void rx_receive_operation_impl(skiq_rx_hdl_t, std::size_t)
-    { throw std::runtime_error("injected receive failure"); }
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
     int deactivateStream(SoapySDR::Stream *, int, long long);
     void closeStream(SoapySDR::Stream *);
@@ -108,7 +132,7 @@ public:
 static SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
 { return reinterpret_cast<SoapySidekiq::StreamHandle *>(stream); }
 
-// Production worker wrapper, close/deactivate methods, and RX activation branch.
+// Production close/deactivate and RX activation, using the real session worker.
 #include "RxLifecycleMethods.inc"
 
 TEST_CASE("closing a failed RX worker stops hardware and permits reactivation")
@@ -120,9 +144,8 @@ TEST_CASE("closing a failed RX worker stops hardware and permits reactivation")
     REQUIRE(sdk.streaming);
     device.closeStream(stream);
     REQUIRE(!sdk.streaming);
-    REQUIRE(!device.rx_hardware_streaming);
+    REQUIRE(!device.rx_session->running());
     REQUIRE_EQ(sdk.stops, 1u);
-    REQUIRE(!device._rx_receive_thread.joinable());
     stream = device.setupRx();
     REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
     device.awaitWorkerFailure();
@@ -140,12 +163,13 @@ TEST_CASE("failed RX stop preserves ownership for a successful close retry")
     sdk.stop_status = -EIO;
     REQUIRE_THROWS_AS(device.closeStream(stream), std::runtime_error);
     REQUIRE(sdk.streaming);
-    REQUIRE(device.rx_hardware_streaming);
+    REQUIRE_THROWS_AS(device.rx_session->activate({0, 2, 20000000, 1000000, true, false}),
+                      std::logic_error);
     REQUIRE(device.active_rx_stream != nullptr);
     sdk.stop_status = 0;
     device.closeStream(stream);
     REQUIRE(!sdk.streaming);
-    REQUIRE(!device.rx_hardware_streaming);
+    REQUIRE(!device.rx_session->running());
     REQUIRE_EQ(sdk.stops, 2u);
 }
 
@@ -157,7 +181,52 @@ TEST_CASE("RX close handles already-stopped hardware without redundant deactivat
     device.awaitWorkerFailure();
     sdk.streaming = false;
     REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
-    REQUIRE(!device.rx_hardware_streaming);
+    REQUIRE(!device.rx_session->running());
     device.closeStream(stream);
     REQUIRE_EQ(sdk.stops, 1u);
+}
+
+TEST_CASE("immediate RX stop is independent of PPS activation")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+    device.awaitWorkerFailure();
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    REQUIRE(!sdk.stop_on_pps);
+    device.closeStream(stream);
+}
+
+TEST_CASE("PPS RX stop is independent of immediate activation")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    device.awaitWorkerFailure();
+    REQUIRE_EQ(device.deactivateStream(stream, SOAPY_SDR_HAS_TIME, 0), 0);
+    REQUIRE(sdk.stop_on_pps);
+    device.closeStream(stream);
+}
+
+TEST_CASE("closing a failed PPS RX stream requests immediate hardware cleanup")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+    device.awaitWorkerFailure();
+    device.closeStream(stream);
+    REQUIRE_EQ(sdk.stops, 1u);
+    REQUIRE(!sdk.stop_on_pps);
+}
+
+TEST_CASE("session destruction after PPS activation requests immediate hardware cleanup")
+{
+    {
+        SoapySidekiq device;
+        auto *stream = device.setupRx();
+        REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+        device.awaitWorkerFailure();
+    }
+    REQUIRE_EQ(sdk.stops, 1u);
+    REQUIRE(!sdk.stop_on_pps);
 }
