@@ -7,8 +7,8 @@ the normal and sanitizer build and run commands.
 [`hardware/`](hardware/) contains bounded validators and diagnostics that use
 real cards. Some checks also need an RF path or external PPS source. Its README
 lists the programs; the [integration test plan](hardware/INTEGRATION_TEST_PLAN.md)
-and [validation record](hardware/INTEGRATION_VALIDATION.md) cover the combined
-branch.
+covers the combined branch. Save run-specific results with the review or
+release evidence.
 
 Run test commands through [`run_logged.sh`](run_logged.sh) to save a dated log
 in `logs/` and follow the current run through `out.txt`.

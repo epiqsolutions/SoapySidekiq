@@ -1,8 +1,10 @@
 # Hardware validation programs
 
 For the combined integration branch, follow the
-[hardware integration test plan](INTEGRATION_TEST_PLAN.md) and record outcomes
-in [INTEGRATION_VALIDATION.md](INTEGRATION_VALIDATION.md).
+[hardware integration test plan](INTEGRATION_TEST_PLAN.md). Save each run's
+commands, card and RF setup, results, and capability skips with that run's
+review or release evidence. The plan describes one integration node; check
+this README and the selected cards' capabilities when using another node.
 
 These programs require a Sidekiq card and, in some cases, additional equipment
 or configuration such as an external PPS source or an RF loopback path.
@@ -46,6 +48,31 @@ Current programs:
 - `pps_lifecycle_validate.py` checks external-PPS RX/TX timed starts and stops,
   immediate cleanup after timed activation, and stream reuse.
 - `test_api.py` interactively exercises device-control APIs.
+
+## Known integration limits
+
+The driver currently supports one RX stream and one TX stream per device,
+with one channel in each stream. An advertised handle does not establish that
+every RX/TX handle pair can operate together. Confirm the SDK topology and RF
+port mapping for the chosen pair.
+
+On the integration node, the M.2-2280 (`8N55`) can crash during SDK
+initialization if the PCIe card (`47479`) is already transmitting. The same
+startup order failed with SDK prebuilt apps from versions 4.24–4.26, without
+SoapySidekiq. Initialize `8N55` before starting PCIe TX for that pair.
+
+The NV100 (`9YAA`) RX B1/J2 plus TX A1/J1 pair passed full duplex validation
+at 1.92 MS/s. J2 TX did not produce a measurable tone in that node's RF
+setup, including a direct SDK app check; its RF path remains unverified.
+NV100's tested low, nominal, and high profiles were 1, 1.92, and 10 MS/s
+with bandwidth set to 80% of the sample rate. A 2 MS/s request was rejected
+by the SDK on this node.
+
+The `8N55` high-output tone became distorted at some TX gain settings in the
+tested RF path, including with direct SDK apps. Choose TX gain from measured
+receiver level and waveform quality; an FFT peak alone is insufficient to
+establish a clean tone. These observations do not establish calibrated RF
+power or path attenuation.
 
 For example, on a card supporting 2 MS/s:
 

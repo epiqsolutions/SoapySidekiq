@@ -3,8 +3,8 @@
 Candidate: `test/non-hardware-integration` at
 `4db75a965421a9ac79e2cce54fecf80bedfa79c8`.
 
-This is the run order and evidence checklist for the combined candidate. Record
-results in [INTEGRATION_VALIDATION.md](INTEGRATION_VALIDATION.md). Stop at the
+This is the run order and evidence checklist for the combined candidate. Save
+results with the review or release evidence for the run. Stop at the
 first unexplained failure, save the command and output, determine whether the
 cause is the driver, test, unsupported capability, or setup, then rerun the
 affected check after any fix. Put production fixes and regression tests on a
