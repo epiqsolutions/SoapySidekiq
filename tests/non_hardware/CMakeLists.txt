@@ -1,5 +1,5 @@
 # Non-hardware test build: compiles portable driver logic without the Sidekiq SDK.
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 project(SoapySidekiqNonHardwareTests LANGUAGES CXX)
 
 include(CTest)
@@ -12,9 +12,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SOAPYSIDEKIQ_TEST_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(SOAPYSIDEKIQ_TEST_TSAN "Enable ThreadSanitizer" OFF)
+option(SOAPYSIDEKIQ_TEST_COVERAGE "Enable GCC/Clang coverage instrumentation" OFF)
 
 if(SOAPYSIDEKIQ_TEST_ASAN AND SOAPYSIDEKIQ_TEST_TSAN)
     message(FATAL_ERROR "ASan/UBSan and TSan must use separate build directories")
+endif()
+
+if(SOAPYSIDEKIQ_TEST_COVERAGE AND (SOAPYSIDEKIQ_TEST_ASAN OR SOAPYSIDEKIQ_TEST_TSAN))
+    message(FATAL_ERROR "Coverage and sanitizer builds must use separate directories")
+endif()
+if((SOAPYSIDEKIQ_TEST_ASAN OR SOAPYSIDEKIQ_TEST_TSAN OR SOAPYSIDEKIQ_TEST_COVERAGE)
+        AND NOT CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
+    message(FATAL_ERROR "The requested test instrumentation requires GCC or Clang")
 endif()
 
 add_library(non_hardware_test_options INTERFACE)
@@ -23,16 +32,21 @@ soapy_sidekiq_enable_warnings(non_hardware_test_options INTERFACE)
 
 if(SOAPYSIDEKIQ_TEST_ASAN)
     target_compile_options(non_hardware_test_options INTERFACE
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address,undefined,float-cast-overflow;-fno-sanitize-recover=all;-fno-omit-frame-pointer>)
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fsanitize=address,undefined,float-cast-overflow;-fno-sanitize-recover=all;-fno-omit-frame-pointer>)
     target_link_options(non_hardware_test_options INTERFACE
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address,undefined,float-cast-overflow>)
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fsanitize=address,undefined,float-cast-overflow>)
 endif()
 
 if(SOAPYSIDEKIQ_TEST_TSAN)
     target_compile_options(non_hardware_test_options INTERFACE
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=thread;-fno-omit-frame-pointer>)
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fsanitize=thread;-fno-omit-frame-pointer>)
     target_link_options(non_hardware_test_options INTERFACE
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=thread>)
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fsanitize=thread>)
+endif()
+
+if(SOAPYSIDEKIQ_TEST_COVERAGE)
+    target_compile_options(non_hardware_test_options INTERFACE --coverage)
+    target_link_options(non_hardware_test_options INTERFACE --coverage)
 endif()
 
 add_executable(discovery_tests
@@ -220,7 +234,7 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_CURRENT_SOURCE_DIR}/tooling/run_tests.py")
     set_tests_properties(tooling.all PROPERTIES
         LABELS "component;non-hardware"
-        ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;SOAPYSIDEKIQ_TEST_CXX=${CMAKE_CXX_COMPILER}")
 else()
     message(STATUS "Python3 interpreter not found; tooling tests skipped. Set Python3_EXECUTABLE to enable them.")
 endif()

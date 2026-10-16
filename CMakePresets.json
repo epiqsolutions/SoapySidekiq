@@ -1,0 +1,73 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "SDK module with isolated installation",
+      "cacheVariables": {
+        "SOAPYSIDEKIQ_BUILD_MODULE": true,
+        "SOAPYSIDEKIQ_BUILD_TESTS": false,
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/dev-install"
+      }
+    },
+    {
+      "name": "non-hardware",
+      "inherits": "base",
+      "displayName": "Portable tests without SDK dependencies",
+      "cacheVariables": {
+        "SOAPYSIDEKIQ_BUILD_MODULE": false,
+        "SOAPYSIDEKIQ_BUILD_TESTS": true,
+        "SOAPYSIDEKIQ_TEST_ASAN": false,
+        "SOAPYSIDEKIQ_TEST_TSAN": false,
+        "SOAPYSIDEKIQ_TEST_COVERAGE": false
+      }
+    },
+    {
+      "name": "non-hardware-asan",
+      "inherits": "non-hardware",
+      "displayName": "Portable tests with ASan and UBSan",
+      "cacheVariables": { "SOAPYSIDEKIQ_TEST_ASAN": true }
+    },
+    {
+      "name": "non-hardware-tsan",
+      "inherits": "non-hardware",
+      "displayName": "Portable tests with TSan (requires compatible host)",
+      "cacheVariables": { "SOAPYSIDEKIQ_TEST_TSAN": true }
+    },
+    {
+      "name": "non-hardware-coverage",
+      "inherits": "non-hardware",
+      "displayName": "Portable tests with GCC/Clang coverage",
+      "cacheVariables": { "SOAPYSIDEKIQ_TEST_COVERAGE": true }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "non-hardware", "configurePreset": "non-hardware" },
+    { "name": "non-hardware-asan", "configurePreset": "non-hardware-asan" },
+    { "name": "non-hardware-tsan", "configurePreset": "non-hardware-tsan" },
+    { "name": "non-hardware-coverage", "configurePreset": "non-hardware-coverage" }
+  ],
+  "testPresets": [
+    {
+      "name": "non-hardware",
+      "configurePreset": "non-hardware",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    { "name": "non-hardware-asan", "inherits": "non-hardware", "configurePreset": "non-hardware-asan" },
+    { "name": "non-hardware-tsan", "inherits": "non-hardware", "configurePreset": "non-hardware-tsan" },
+    { "name": "non-hardware-coverage", "inherits": "non-hardware", "configurePreset": "non-hardware-coverage" }
+  ]
+}

@@ -1,8 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-cd build
-make clean
-bear -- make
-sudo make install
-sudo ldconfig
-cp compile_commands.json ../.
+# Compatibility entry point; CMake now produces the compile database directly.
+set -euo pipefail
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exec "$repo_root/install.sh" "$@"
