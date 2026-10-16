@@ -1,0 +1,116 @@
+name: C++ baseline
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tests:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: GCC 11
+            compiler: g++-11
+            packages: g++-11
+            asan: 'OFF'
+          - name: GCC 11 ASan-UBSan
+            compiler: g++-11
+            packages: g++-11
+            asan: 'ON'
+          - name: Clang 14
+            compiler: clang++-14
+            packages: clang-14
+            asan: 'OFF'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install test dependencies
+        env:
+          PACKAGES: ${{ matrix.packages }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            $PACKAGES python3-numpy clang-format-14
+      - name: Record versions
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" --version
+          cmake --version
+          /usr/bin/python3 --version
+          /usr/bin/python3 -c 'import numpy; print("NumPy", numpy.__version__)'
+      - name: Configure
+        env:
+          CXX: ${{ matrix.compiler }}
+          ASAN: ${{ matrix.asan }}
+        run: |
+          cmake -S tests/non_hardware -B build/non_hardware \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER="$CXX" \
+            -DPython3_EXECUTABLE=/usr/bin/python3 \
+            -DSOAPYSIDEKIQ_TEST_ASAN="$ASAN"
+      - name: Build
+        run: cmake --build build/non_hardware --parallel 2
+      - name: Run counted suite
+        run: tests/non_hardware/run_suite.sh build/non_hardware
+      - name: Save test output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tests-${{ matrix.name }}
+          path: |
+            build/non_hardware/suite.log
+            build/non_hardware/Testing/Temporary/LastTest.log
+
+  analysis:
+    name: Formatting and static analysis
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install LLVM 14
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-14 clang-format-14 clang-tidy-14
+      - name: Check changed C++ lines
+        env:
+          BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/check_format.py --base "${BASE_REVISION:-HEAD^}"
+      - name: Verify formatting gate
+        run: python3 -m unittest discover -s tests/non_hardware/tooling -p test_format.py -v
+      - name: Configure compile database
+        run: |
+          cmake -S tests/non_hardware -B build/analysis \
+            -DCMAKE_CXX_COMPILER=clang++-14 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - name: Analyze portable production sources
+        run: |
+          clang-format-14 --version
+          clang-tidy-14 --version
+          clang-tidy-14 --dump-config > build/analysis/clang-tidy-config.yml
+          run-clang-tidy-14 -p build/analysis -j 2 -quiet \
+            -clang-tidy-binary clang-tidy-14 \
+            '/(DeviceDiscovery|DeviceOptions|SensorReader|StreamConfiguration|RxSampleQueue|RxStreamSession)\.cpp$' \
+            | tee build/analysis/clang-tidy.log
+      - name: Save analysis output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: static-analysis
+          path: build/analysis/clang-tidy*

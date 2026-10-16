@@ -2,6 +2,9 @@
 
 SoapySDR support module for Epiq Solutions Sidekiq SDR devices.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the C++17 coding baseline, formatter,
+static analysis, compiler warnings, and CI/non-hardware test instructions.
+
 ## Minimum dependencies
 
 - CMake 3.8 or newer

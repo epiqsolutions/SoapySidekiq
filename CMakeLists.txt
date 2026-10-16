@@ -43,13 +43,6 @@ message(STATUS "Sidekiq_BUILD_CONFIG - ${Sidekiq_BUILD_CONFIG}")
 message(STATUS "Sidekiq_PKG_LIBRARY_DIRS - ${Sidekiq_PKG_LIBRARY_DIRS}")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-include_directories(${Sidekiq_INCLUDE_DIRS})
-
-#enable c++11 features
-if(CMAKE_COMPILER_IS_GNUCXX)
-    #disable warnings for unused parameters
-    add_definitions(-Wno-unused-parameter)
-endif(CMAKE_COMPILER_IS_GNUCXX)
 
 if (APPLE)
    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wc++11-extensions")
@@ -78,3 +71,8 @@ SOAPY_SDR_MODULE_UTIL(
 )
 
 target_include_directories(SidekiqSupport PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(SidekiqSupport SYSTEM PRIVATE
+    ${Sidekiq_INCLUDE_DIRS} ${SoapySDR_INCLUDE_DIRS})
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProjectWarnings.cmake")
+soapy_sidekiq_enable_warnings(SidekiqSupport PRIVATE)

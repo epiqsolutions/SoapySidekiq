@@ -1,0 +1,12 @@
+# Conservative correctness checks, pinned to LLVM 14; no automatic rewrites.
+Checks: >-
+  -*,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  bugprone-use-after-move,
+  bugprone-sizeof-expression,
+  bugprone-undefined-memory-manipulation
+WarningsAsErrors: 'clang-analyzer-*,bugprone-*'
+HeaderFilterRegex: '(^|/)(include/SoapySidekiq/.*|SoapySidekiq\.hpp)$'
+# System-header diagnostics stay disabled by clang-tidy's default.
+FormatStyle: file

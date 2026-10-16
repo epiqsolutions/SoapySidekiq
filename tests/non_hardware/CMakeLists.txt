@@ -18,8 +18,8 @@ if(SOAPYSIDEKIQ_TEST_ASAN AND SOAPYSIDEKIQ_TEST_TSAN)
 endif()
 
 add_library(non_hardware_test_options INTERFACE)
-target_compile_options(non_hardware_test_options INTERFACE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion;-Wshadow>)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ProjectWarnings.cmake")
+soapy_sidekiq_enable_warnings(non_hardware_test_options INTERFACE)
 
 if(SOAPYSIDEKIQ_TEST_ASAN)
     target_compile_options(non_hardware_test_options INTERFACE
