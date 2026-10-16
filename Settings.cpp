@@ -360,7 +360,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, part type is %s", card, part_str.c_str());
 
     /* set iq order to iq instead of qi */
-    if (iq_swap == true)
+    if (iq_swap)
     {
         SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, setting iq mode to I then Q", this->card);
         iq_order = skiq_iq_order_iq;
@@ -523,7 +523,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
     // allocate for # blocks
     p_tx_status = static_cast<int32_t*>(calloc(DEFAULT_NUM_BUFFERS, sizeof(*p_tx_status)));
-    if (p_tx_status == NULL)
+    if (p_tx_status == nullptr)
     {
         SoapySDR_logf(SOAPY_SDR_ERROR, "failed to allocate memory for TX status");
         throw std::runtime_error("");
@@ -577,10 +577,10 @@ SoapySidekiq::~SoapySidekiq(void)
     pthread_cond_destroy(&space_avail_cond);
     pthread_mutex_destroy(&space_avail_mutex);
 
-    if (NULL != p_tx_status)
+    if (p_tx_status != nullptr)
     {
         free(p_tx_status);
-        p_tx_status = NULL;
+        p_tx_status = nullptr;
     }
 
     skiq_exit();
@@ -767,7 +767,7 @@ void SoapySidekiq::setDCOffsetMode(const int direction,
 
         // if automatic is false, then we need to set the mode to manual
         // otherwise set the mode to automatic
-        if (automatic == false)
+        if (!automatic)
         {
             cal_mode = skiq_rx_cal_mode_manual;
         }
@@ -1908,10 +1908,10 @@ void SoapySidekiq::writeSetting(const std::string &key,
     // make sure the case of the key doesn't matter
     if (equalsIgnoreCase(key, "iq_swap"))
     {
-        this->iq_swap = ((value == "true") ? true : false);
+        this->iq_swap = (value == "true");
 
         /* set iq order to iq instead of qi */
-        if (iq_swap == true)
+        if (iq_swap)
         {
             SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, setting iq mode to I then Q", this->card);
             iq_order = skiq_iq_order_iq;
@@ -2162,9 +2162,9 @@ void check_1pps(uint8_t card, skiq_1pps_source_t pps_source)
             /* sleep for a second */
             usleep(one_second_usecs);
 
-        } while ((has_pps_source == false) && (tryCount <= 1));
+        } while ((!has_pps_source) && (tryCount <= 1));
 
-        if (has_pps_source == true)
+        if (has_pps_source)
         {
             SoapySDR_logf(SOAPY_SDR_INFO, "Expected 1pps, found 1pps pulse");
         }
