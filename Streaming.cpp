@@ -268,7 +268,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         SoapySDR_logf(SOAPY_SDR_INFO, "System Timestamp Freq: %llu", this->sys_freq);
 
         /* set rx source as iq data */
-        if (iq_swap == true)
+        if (iq_swap)
         {
             status = skiq_write_iq_order_mode(card, skiq_iq_order_iq);
             if (status != 0)
@@ -517,7 +517,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         const skiq_tx_hdl_t tx_handle = stream_handle->tx_handle;
 
         /* set as iq data */
-        if (iq_swap == true)
+        if (iq_swap)
         {
             status = skiq_write_iq_order_mode(card, skiq_iq_order_iq);
             if (status != 0)
@@ -583,7 +583,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         /* start tx streaming */
         if (flags == SOAPY_SDR_HAS_TIME)
         {
-            if (rx_streaming_on_1pps_started == true)
+            if (rx_streaming_on_1pps_started)
             {
                 /* if skiq_start_rx_streaming_on_1pps is called, then skiq_start_tx_streaming_on_1pps
                  * is called the second one called will block until the first one finishes.
@@ -814,7 +814,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         return SOAPY_SDR_STREAM_ERROR;
     }
 
-    if (first_transmit == true)
+    if (first_transmit)
     {
         SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start");
         std::unique_lock<std::mutex> lock(tx_mutex);
@@ -855,7 +855,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                     (char *)p_tx_block[currTXBuffIndex]->data;
 
         // determine if we received short or float
-        if (txUseShort == true)
+        if (txUseShort)
         {
             // CS16
             memcpy(outbuff_ptr, inbuff_ptr, tx_block_bytes);
