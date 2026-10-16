@@ -47,9 +47,13 @@ SOAPYSIDEKIQ_INSTALL_PREFIX="$PWD/build/local-install" \
 SOAPY_SDR_ROOT="$PWD/build/local-install" SoapySDRUtil --info
 ```
 
-Without `SOAPYSIDEKIQ_INSTALL_PREFIX`, the helper installs into CMake's
-configured system prefix with `sudo` and runs `ldconfig`. Set
-`SOAPYSIDEKIQ_BUILD_DIR` to use a different build directory.
+An explicit prefix also works as `./install.sh CMAKE_INSTALL_PREFIX=/path/to/install`
+(or `CMAKE_INSTALL_PREFIX:PATH=/path/to/install`). This argument overrides the
+environment prefix. Both forms install without `sudo`; the chosen directory
+must be writable by the caller. Without either prefix, the helper clears a
+previous isolated prefix, installs into CMake's default system prefix with
+`sudo`, and runs `ldconfig`. Set `SOAPYSIDEKIQ_BUILD_DIR` to use a different
+build directory.
 
 ## Streaming limitations
 

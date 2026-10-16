@@ -213,6 +213,18 @@ target_link_libraries(rx_lifecycle_tests PRIVATE non_hardware_test_options Threa
 add_test(NAME rx-lifecycle.all COMMAND rx_lifecycle_tests)
 set_tests_properties(rx-lifecycle.all PROPERTIES LABELS "component;non-hardware")
 
+# Tooling regressions need Python; synthetic RF captures additionally need NumPy.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME tooling.all COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tooling/run_tests.py")
+    set_tests_properties(tooling.all PROPERTIES
+        LABELS "component;non-hardware"
+        ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+else()
+    message(STATUS "Python3 interpreter not found; tooling tests skipped. Set Python3_EXECUTABLE to enable them.")
+endif()
+
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests

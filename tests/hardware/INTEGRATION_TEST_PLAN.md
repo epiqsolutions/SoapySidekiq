@@ -111,7 +111,10 @@ from visual or operator observations in the record.
 5. **Paired full duplex.** On the PCIe/M.2 pair, run RX and TX on both cards
    concurrently with bounded 6-second DUT and 4-second peer processes, with the two physical directions
    connected as stated. Assert both receivers obtain samples and both tones
-   appear at their expected offsets without clipping or stream errors. Repeat
+   appear at their expected offsets without clipping or stream errors. The
+   full-duplex validator also requires the peer peak to be within 40 dB of the
+   strongest captured tone; record any deliberate `--min-peer-relative-db`
+   adjustment and the measured relative peak levels. Repeat
    on NV100 only after confirming its physical ports and supported topology.
 6. **RX retuning while TX stays active.** Use a supported paired channel/RF
    configuration. Keep the source TX stream active while the paired RX stream

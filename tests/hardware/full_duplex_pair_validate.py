@@ -14,7 +14,18 @@ import numpy as np
 from paired_tone_validate import REPO, wait_for_marker
 
 
-def measure_peer_tone(path, rate, expected_offset, full_scale=2047):
+def measure_peer_tone(path, rate, expected_offset, full_scale=2047,
+                      min_relative_db=-40):
+    """Require a spectral peak near the peer, above noise and unrelated spurs.
+
+    The relative threshold limits how far below the strongest received tone the
+    peer may be. Set it from the expected RF path; a median-only noise estimate
+    can be arbitrarily small for periodic quantized captures.
+    """
+    if (not math.isfinite(rate) or rate <= 0 or full_scale <= 0
+            or not math.isfinite(expected_offset) or abs(expected_offset) >= rate / 2
+            or not math.isfinite(min_relative_db) or min_relative_db > 0):
+        raise ValueError("invalid rate, offset, full scale, or relative tone threshold")
     raw = np.fromfile(path, dtype="<i2")
     if len(raw) < 2 * 16384 or len(raw) % 2:
         raise AssertionError(f"capture has only {len(raw) // 2} complex samples")
@@ -26,21 +37,39 @@ def measure_peer_tone(path, rate, expected_offset, full_scale=2047):
     samples -= np.mean(samples)
     spectrum = np.abs(np.fft.fft(samples * np.hanning(window)))
     frequencies = np.fft.fftfreq(window, 1 / rate)
-    target_bin = int(np.argmin(np.abs(frequencies - expected_offset)))
-    nearby = [(target_bin + offset) % window for offset in range(-2, 3)]
-    peak_bin = max(nearby, key=lambda index: spectrum[index])
+    tolerance_hz = max(20000, 2 * rate / window)
+    # Search actual local maxima throughout the allowed frequency range. Merely
+    # choosing a bin next to the target makes the frequency assertion tautological.
+    peaks = ((spectrum > np.roll(spectrum, 1))
+             & (spectrum >= np.roll(spectrum, -1)))
+    candidates = np.flatnonzero(
+        peaks & (np.abs(frequencies - expected_offset) <= tolerance_hz))
+    if not candidates.size:
+        raise AssertionError("no peer tone peak within frequency tolerance")
+    peak_bin = int(candidates[np.argmax(spectrum[candidates])])
     peak_hz = float(frequencies[peak_bin])
-    tone_db = 20 * math.log10(float(spectrum[peak_bin]) /
-                              max(float(np.median(spectrum)), 1e-12))
+    # Compare the Hann main lobe with noise over the same bandwidth. A single
+    # unusually high noise bin can pass a median-only amplitude test when the
+    # search covers hundreds of bins.
+    tone_bins = [(peak_bin + offset) % window for offset in range(-2, 3)]
+    tone_power = float(np.sum(spectrum[tone_bins] ** 2))
+    noise_power = len(tone_bins) * float(np.median(spectrum ** 2))
+    tone_db = 10 * math.log10(tone_power / max(noise_power, 1e-24))
+    relative_db = 20 * math.log10(float(spectrum[peak_bin]) /
+                                  max(float(np.max(spectrum)), 1e-12))
     peak_fraction = float(np.max(np.abs(block.astype(np.int32)))) / full_scale
     clipped_fraction = float(np.mean(np.abs(block.astype(np.int32)) >= full_scale))
     print(f"MEASURE peer peak={peak_hz:+.1f} Hz, expected={expected_offset:+.1f} Hz, "
-          f"tone/noise={tone_db:.1f} dB, peak/FS={peak_fraction:.5f}, "
+          f"tone/noise={tone_db:.1f} dB, peer/strongest={relative_db:.1f} dB, "
+          f"peak/FS={peak_fraction:.5f}, "
           f"clipped={clipped_fraction:.6f}, window={selected}/{len(iq) // window}")
-    if abs(peak_hz - expected_offset) > max(20000, 2 * rate / window):
+    if abs(peak_hz - expected_offset) > tolerance_hz:
         raise AssertionError("peer tone frequency outside tolerance")
     if tone_db < 10:
         raise AssertionError("peer tone is less than 10 dB above median noise")
+    if relative_db < min_relative_db:
+        raise AssertionError(
+            f"peer tone is below {min_relative_db:g} dB relative to the strongest tone")
     if peak_fraction >= 0.8 or clipped_fraction > 0:
         raise AssertionError("RX level is too high or samples are clipped")
 
@@ -99,10 +128,10 @@ def validate(args):
         raise RuntimeError("full-duplex process failed; inspect child logs")
     print("DUT RX measurement:")
     measure_peer_tone(dut_capture, args.rate, args.peer_offset,
-                      args.dut_rx_full_scale)
+                      args.dut_rx_full_scale, args.min_peer_relative_db)
     print("Peer RX measurement:")
     measure_peer_tone(peer_capture, args.rate, args.dut_offset,
-                      args.peer_rx_full_scale)
+                      args.peer_rx_full_scale, args.min_peer_relative_db)
     print("PASS both cards transmitted and received during full duplex")
 
 
@@ -116,6 +145,8 @@ def parse_args():
     parser.add_argument("--peer-tx-channel", type=int, default=0)
     parser.add_argument("--dut-rx-full-scale", type=int, default=2047)
     parser.add_argument("--peer-rx-full-scale", type=int, default=2047)
+    parser.add_argument("--min-peer-relative-db", type=float, default=-40,
+                        help="Minimum peer peak relative to the strongest tone (dB)")
     parser.add_argument("--startup-timeout", type=float, default=6)
     parser.add_argument("--rate", type=float, default=2e6)
     parser.add_argument("--frequency", type=float, default=1e9)
@@ -128,7 +159,10 @@ def parse_args():
     parser.add_argument("--dut-duration", type=float, default=6)
     parser.add_argument("--peer-duration", type=float, default=4)
     parser.add_argument("--output-dir", default="build/integration-evidence")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not math.isfinite(args.min_peer_relative_db) or args.min_peer_relative_db > 0:
+        parser.error("--min-peer-relative-db must be finite and nonpositive")
+    return args
 
 
 if __name__ == "__main__":

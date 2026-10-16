@@ -3,6 +3,23 @@
 These tests do not open a Sidekiq card or link to the Sidekiq SDK. They live
 alongside the hardware validation programs under `tests/`.
 
+When Python 3 is available, CTest also runs `tooling.all`. Its installer cases
+configure a tiny project with real CMake, using command shims to prevent driver
+builds, installation, or privileged commands. They cover positional and
+environment prefixes, typed variables, spaces, precedence, and stale caches.
+Synthetic tone tests use NumPy to check the production full-duplex detector,
+including rejection of a wrong-tone quantization spur. Those cases explicitly
+skip when NumPy is unavailable. The Python cases are not sanitizer-instrumented;
+the sanitizer configuration instruments the C++ executables.
+If interpreter discovery fails, configure with
+`-DPython3_EXECUTABLE=/path/to/python3`; CMake reports when tooling tests are omitted.
+
+Run tooling cases directly with:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 tests/non_hardware/tooling/run_tests.py
+```
+
 Configure and build:
 
 ```sh

@@ -49,6 +49,16 @@ Current programs:
   immediate cleanup after timed activation, and stream reuse.
 - `test_api.py` interactively exercises device-control APIs.
 
+The full-duplex detector searches actual spectral peaks within the larger of
+20 kHz or two FFT bins of the expected peer frequency. It requires the peak
+to be at least 10 dB above the median spectral noise over a five-bin main-lobe
+bandwidth and within 40 dB of the
+strongest tone in that capture, rejecting weak spurs from unrelated tones.
+`--min-peer-relative-db` adjusts the latter threshold for a measured RF setup;
+record any change with the run. This is a relative detection threshold, not
+an absolute RF power measurement. Synthetic regressions cover the wrong-tone
+quantization-spur failure and a weaker real peer alongside local leakage.
+
 ## Known integration limits
 
 The driver currently supports one RX stream and one TX stream per device,
