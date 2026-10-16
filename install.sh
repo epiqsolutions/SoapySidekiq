@@ -9,7 +9,7 @@ fi
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 build_dir=${SOAPYSIDEKIQ_BUILD_DIR:-"$repo_root/build/install-driver"}
-cmake_args=(-U Sidekiq_CONFIG_EXECUTABLE -U CMAKE_INSTALL_PREFIX)
+cmake_args=(-U CMAKE_INSTALL_PREFIX -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
 install_prefix=${SOAPYSIDEKIQ_INSTALL_PREFIX:-}
 
 if [[ -n ${SIDEKIQ_SDK_DIR:-} ]]; then

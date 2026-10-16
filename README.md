@@ -7,7 +7,7 @@ static analysis, compiler warnings, and CI/non-hardware test instructions.
 
 ## Minimum dependencies
 
-- CMake 3.8 or newer
+- CMake 3.21 or newer (including standalone tests and preset commands)
 - A C++17-capable compiler
 - SoapySDR development files, version 0.4.0 or newer
 - Sidekiq SDK version 4.26.0 or newer
@@ -32,12 +32,83 @@ cmake -S . -B build
 cmake --build build
 ```
 
+The build respects `CXX`, `-DCMAKE_CXX_COMPILER=...`, and CMake toolchain files.
+The module requests C++17 without compiler extensions. For example:
+
+```bash
+cmake -S . -B build/clang -DCMAKE_CXX_COMPILER=clang++-14
+cmake --build build/clang --parallel 2
+```
+
+The `Sidekiq::sidekiq` imported target carries the SDK include paths, compiler
+options, and ordered static-link flags. Changing `SIDEKIQ_SDK_DIR` in an existing
+build directory reselects `sidekiq-config` without clearing its cache manually.
+For cross-compilation, supply your toolchain file and a compatible SDK build
+configuration through the SDK's `SIDEKIQ_CONFIG_BUILD_CONFIG` environment
+variable. The ARM compiler/sysroot and SDK binaries must match; a host build
+does not validate that combination.
+
+### Presets
+
+List presets with `cmake --list-presets`. They respect the chosen generator and
+compiler and use separate build directories:
+
+| Preset | Purpose | SDK required |
+| --- | --- | --- |
+| `dev` | Debug module; install prefix `build/dev-install` | Yes |
+| `non-hardware` | Portable regression suite | No |
+| `non-hardware-asan` | Portable suite with ASan/UBSan | No |
+| `non-hardware-tsan` | Portable suite with TSan on a compatible host | No |
+| `non-hardware-coverage` | Portable suite with GCC/Clang coverage | No |
+
+```bash
+cmake --preset dev
+cmake --build --preset dev --parallel 2
+cmake --install build/dev
+SOAPY_SDR_ROOT="$PWD/build/dev-install" SoapySDRUtil --check=sidekiq
+
+cmake --preset non-hardware
+cmake --build --preset non-hardware --parallel 2
+ctest --preset non-hardware
+tests/non_hardware/run_suite.sh build/non-hardware
+```
+
+Presets export `compile_commands.json` in their build directories. Keep local
+overrides in ignored `CMakeUserPresets.json`. The schema uses
+[CMake 3.21 presets](https://cmake.org/cmake/help/v3.21/manual/cmake-presets.7.html).
+Instrumentation applies only to portable tests. ASan/UBSan, TSan, and coverage
+use separate presets/directories; do not enable them together.
+
+Without presets, `SOAPYSIDEKIQ_BUILD_MODULE` defaults to `ON`, and
+`SOAPYSIDEKIQ_BUILD_TESTS` defaults to `OFF`. Set the former to `OFF` and the
+latter to `ON` for SDK-free root builds. The standalone
+`cmake -S tests/non_hardware -B ...` interface remains supported too.
+
+### Installation and removal
+
 Install the module with:
 
 ```bash
 sudo cmake --install build
 sudo ldconfig
 ```
+
+An explicit `-DCMAKE_INSTALL_PREFIX=...` wins; otherwise the default follows
+SoapySDR's prefix when SoapySDR is outside `/usr`. Install over an existing
+prefix with `cmake --install` again. Use a separate build directory when changing
+compilers or toolchains.
+
+The module build provides an `uninstall` target that removes files in its latest
+`install_manifest.txt`, leaves directories and unrelated files intact, and
+accepts the same `DESTDIR` used for a staged installation:
+
+```bash
+cmake --build build/dev --target uninstall
+```
+
+Use elevated permissions for a system-prefix install/uninstall. Installing with
+`--prefix` updates the manifest for that installation. Keep the manifest until
+removal; the target fails if no install has been recorded.
 
 The `install.sh` helper builds in `build/install-driver` without deleting other
 build directories. Its optional argument is a CMake variable such as
@@ -57,6 +128,10 @@ must be writable by the caller. Without either prefix, the helper clears a
 previous isolated prefix, installs into CMake's default system prefix with
 `sudo`, and runs `ldconfig`. Set `SOAPYSIDEKIQ_BUILD_DIR` to use a different
 build directory.
+
+`remake.sh` forwards to `install.sh`; it no longer requires Bear, cleans a build
+tree, or copies a compile database into the repository root. Use the database
+generated in the selected build directory directly.
 
 ## Streaming limitations
 

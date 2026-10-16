@@ -1,5 +1,30 @@
 # Non-hardware tests
 
+Requires CMake 3.21+ and a C++17 compiler. From the repository root, use the
+SDK-free `non-hardware`, `non-hardware-asan`, `non-hardware-tsan`, or
+`non-hardware-coverage` configure/build/test presets described in the main
+[README](../../README.md#presets). For example:
+
+```sh
+cmake --preset non-hardware
+cmake --build --preset non-hardware --parallel 2
+ctest --preset non-hardware
+tests/non_hardware/run_suite.sh build/non-hardware
+```
+
+The standalone configure commands below remain available. Coverage adds
+`--coverage` only to the portable targets. Inspect its `.gcda`/`.gcno` files
+with matching GCC `gcov` or Clang `llvm-cov gcov` tools; host coverage does not
+measure the SDK-dependent device implementation.
+
+On Linux, the tooling tests configure and link tiny SDK archive fixtures to exercise SDK
+selection, version/error handling, quoted compile flags, and static link order.
+Install/uninstall cases use temporary prefixes and DESTDIR staging, and check
+that unrelated files survive. The simulated ARM SDK metadata case does not
+cross-compile an ARM binary. The finder runs `sidekiq-config` as a host tool even
+when the toolchain redirects program searches into a target root. The selected
+test compiler is used by the fixtures.
+
 These tests do not open a Sidekiq card or link to the Sidekiq SDK. They live
 alongside the hardware validation programs under `tests/`.
 

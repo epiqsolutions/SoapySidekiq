@@ -39,7 +39,8 @@ LLVM commands so a default system upgrade does not silently change formatting.
 The module needs SoapySDR development files and Sidekiq SDK **4.26+**. Public
 CI builds portable production components and tests without that proprietary SDK;
 it does not establish that the module builds/links or that a card works. The
-top-level compiler selection and broader CMake modernization are separate work.
+module and standalone tests both require CMake 3.21+. The build respects the
+caller's compiler/toolchain selection; see the [presets](README.md#presets).
 
 On Ubuntu 22.04, install the portable baseline dependencies with:
 
@@ -109,6 +110,12 @@ cmake -S tests/non_hardware -B build/non_hardware-asan \
 cmake --build build/non_hardware-asan --parallel 2
 tests/non_hardware/run_suite.sh build/non_hardware-asan
 ```
+
+The root `non-hardware` and `non-hardware-asan` presets configure the same suite
+without looking for the SDK. CI uses those presets. TSan and coverage have
+separate presets too; a TSan build alone does not establish that its runtime
+works on the host. SDK-selection/link-usage and staged-uninstall regressions
+use small real-CMake fixtures, without requiring the proprietary SDK or root.
 
 The workflow runs GCC 11, GCC 11 ASan/UBSan, Clang 14, changed-line formatting,
 and portable static analysis on PRs and master pushes. It saves counted case
