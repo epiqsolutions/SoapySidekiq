@@ -9,6 +9,7 @@
 #include <SoapySidekiq/SidekiqRxBackend.hpp>
 #include <SoapySidekiq/SampleScale.hpp>
 #include <SoapySDR/Formats.hpp>
+#include <algorithm>
 #include <cstring>
 #include <cinttypes>
 #include <fstream>
@@ -19,8 +20,6 @@
 #include <string>
 #include <sidekiq_types.h>
 #include <unistd.h>
-
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 // Keep the hardware-independent validation contract tied to the SDK in use.
 static_assert(soapy_sidekiq::maxTxBlockSize == SKIQ_MAX_TX_BLOCK_SIZE_IN_WORDS);
@@ -134,10 +133,14 @@ bool equalsIgnoreCase(const std::string& a, const std::string& b)
          });
 }
 
-static const char *KERNEL_1PPS_SOURCE_PATH = "/sys/kernel/epiq-axi-timing/pps/source";
-#define SOURCE_1PPS_UNAVAILABLE    "1pps_source_unavailable"
-#define SOURCE_1PPS_EXTERNAL       "1pps_source_external"
-#define SOURCE_1PPS_INTERNAL       "1pps_source_internal"
+namespace
+{
+// Kernel PPS names are shared by source discovery, reporting, and selection.
+constexpr char KERNEL_1PPS_SOURCE_PATH[] = "/sys/kernel/epiq-axi-timing/pps/source";
+constexpr char SOURCE_1PPS_UNAVAILABLE[] = "1pps_source_unavailable";
+constexpr char SOURCE_1PPS_EXTERNAL[] = "1pps_source_external";
+constexpr char SOURCE_1PPS_INTERNAL[] = "1pps_source_internal";
+} // namespace
 
 bool readKernel1PpsSource(skiq_1pps_source_t &source)
 {
@@ -1452,7 +1455,7 @@ void SoapySidekiq::setSampleRate(const int direction, const size_t channel,
         double actual_rate = 0;
         uint32_t configured_rate = 0;
         uint32_t configured_bw = 0;
-        const uint32_t requested_bw = MIN(this->rx_bandwidths.at(channel), requested_rate);
+        const uint32_t requested_bw = std::min(this->rx_bandwidths.at(channel), requested_rate);
 
         status = skiq_write_rx_sample_rate_and_bandwidth(this->card,
                                                          rx_hdl,
@@ -1511,7 +1514,7 @@ void SoapySidekiq::setSampleRate(const int direction, const size_t channel,
         double actual_rate = 0;
         uint32_t configured_rate = 0;
         uint32_t configured_bw = 0;
-        const uint32_t requested_bw = MIN(this->tx_bandwidths.at(channel), requested_rate);
+        const uint32_t requested_bw = std::min(this->tx_bandwidths.at(channel), requested_rate);
 
         status = skiq_write_tx_sample_rate_and_bandwidth(this->card,
                                                          tx_hdl,

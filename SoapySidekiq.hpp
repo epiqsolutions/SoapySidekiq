@@ -23,13 +23,13 @@
 #include <SoapySDR/Version.h>
 #include <SoapySidekiq/RxStreamSession.hpp>
 
-#define DEFAULT_SAMPLE_RATE (20000000)
-#define DEFAULT_BANDWIDTH (18000000)
-#define DEFAULT_FREQUENCY (1000000000)
-#define DEFAULT_NUM_BUFFERS (30000)
-#define DEFAULT_SLEEP_US (1)
-#define SLEEP_1SEC (1 * 1000000)
-#define NANOS_IN_SEC (1000000000ULL)
+inline constexpr int DEFAULT_SAMPLE_RATE = 20000000;
+inline constexpr int DEFAULT_BANDWIDTH = 18000000;
+inline constexpr int DEFAULT_FREQUENCY = 1000000000;
+inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
+inline constexpr int DEFAULT_SLEEP_US = 1;
+inline constexpr int SLEEP_1SEC = 1000000;
+inline constexpr unsigned long long NANOS_IN_SEC = 1000000000ULL;
 
 /**
  * @brief Owns a Sidekiq card's streams and callback state.
