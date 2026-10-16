@@ -1,4 +1,13 @@
+/**
+ * @file Settings.cpp
+ * @brief Implements Sidekiq device settings, callbacks, and utility operations.
+ */
+
 #include "SoapySidekiq.hpp"
+#include <SoapySidekiq/DeviceOptions.hpp>
+#include <SoapySidekiq/ScopeExit.hpp>
+#include <SoapySidekiq/SidekiqRxBackend.hpp>
+#include <SoapySidekiq/SampleScale.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <cstring>
 #include <cinttypes>
@@ -12,6 +21,11 @@
 #include <unistd.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+// Keep the hardware-independent validation contract tied to the SDK in use.
+static_assert(soapy_sidekiq::maxTxBlockSize == SKIQ_MAX_TX_BLOCK_SIZE_IN_WORDS);
+static_assert(soapy_sidekiq::txHeaderWords == SKIQ_TX_HEADER_SIZE_IN_WORDS);
+static_assert(soapy_sidekiq::txPacketIncrementWords == SKIQ_TX_PACKET_SIZE_INCREMENT_IN_WORDS);
 
 /******************************************************************************/
 /** This is the custom logging handler.  If there were custom handling
@@ -101,8 +115,6 @@ void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t
 //    SoapySDR_logf(SOAPY_SDR_TRACE, "leaving tx_complete");
 
 }
-
-std::vector<SoapySDR::Kwargs> SoapySidekiq::sidekiq_devices;
 
 
 // compares two strings and if equal range and equal values per character
@@ -251,8 +263,8 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     uint8_t channels = 0;
     skiq_iq_order_t iq_order;
     int i;
-    bool topology_requested = false;
-    uint8_t topology = DEFAULT_TOPOLOGY_ID;
+    // Reject all malformed constructor input before registering or opening SDK state.
+    const auto options = soapy_sidekiq::parseDeviceOptions(args);
 
     /* Register our own logging function before initializing the library */
     skiq_register_logging( logging_handler );
@@ -274,52 +286,9 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     timetype = "rf_timestamp";
     complete_count = 0;
 
-    rx_running = false;
-
-    if (args.count("card") != 0)
-    {
-        try
-        {
-            card = std::stoi(args.at("card"));
-        }
-        catch (const std::invalid_argument &)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "Requested card not found");
-            throw std::runtime_error("");
-        }
-    }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "No cards found");
-        throw std::runtime_error("");
-    }
-
-    if (args.count("topology") != 0)
-    {
-        topology_requested = true;
-        topology = std::stoi(args.at("topology"));
-    }
-
-    if (args.count("tx_block_size") != 0)
-    {
-        current_tx_block_size = std::stoi(args.at("tx_block_size"));
-    }
-    else
-    {
-        current_tx_block_size = DEFAULT_TX_BUFFER_LENGTH;
-    }
+    card = options.card;
+    current_tx_block_size = options.tx_block_size;
     SoapySDR_logf(SOAPY_SDR_INFO, "TX block size set to %u", current_tx_block_size);
-
-    /* set the source to what is passed in */
-    if (args.count("clock_source") > 0)
-    {
-        setClockSource(args.at("clock_source"));
-    }
-
-    if (args.count("time_source") > 0)
-    {
-        setTimeSource(args.at("time_source"));
-    }
 
     skiq_xport_type_t type  = skiq_xport_type_auto;
     skiq_xport_init_level_t level = skiq_xport_init_level_full;
@@ -335,11 +304,22 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("");
     }
 
-    if (topology_requested)
+    // A throwing constructor never runs the device destructor. Only arm this
+    // rollback after this call successfully acquires SDK initialization.
+    soapy_sidekiq::ScopeExit rollback([this]() noexcept {
+        free(p_tx_status);
+        p_tx_status = nullptr;
+        skiq_exit();
+    });
+    // The backend owns no hardware resource; the session owns its worker.
+    rx_backend = std::make_unique<soapy_sidekiq::SidekiqRxBackend>(card);
+    rx_session = std::make_unique<soapy_sidekiq::RxStreamSession>(*rx_backend);
+
+    if (options.topology.has_value())
     {
         if (skiq_is_topology_supported(card))
         {
-            status = skiq_apply_topology(card, topology);
+            status = skiq_apply_topology(card, *options.topology);
             if (status != 0)
             {
                 SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_apply_topology failed (card %u), status %d",
@@ -438,10 +418,30 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     }
 
     this->resolution = tmp_resolution;
-    this->maxValue = (double) ((1 << (tmp_resolution-1))-1);
+    this->maxValue = soapy_sidekiq::sampleFullScale(tmp_resolution);
 
     SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, card resolution: %u bits, max ADC value: %u",
                   card, this->resolution, (uint32_t) this->maxValue);
+
+    // The transport stores signed 16-bit components, but DAC width is product-specific.
+    uint8_t tx_resolution = 0;
+    status = skiq_read_tx_iq_resolution(card, &tx_resolution);
+    if (status != 0)
+    {
+        SoapySDR_logf(SOAPY_SDR_ERROR,
+                      "skiq_read_tx_iq_resolution failed, card: %u status: %d",
+                      card, status);
+        throw std::runtime_error("");
+    }
+    // The SDK manual lists these products as upper-14-bit TX. Their low two
+    // host bits are discarded, so DAC resolution is not the host amplitude width.
+    const auto tx_alignment = (part == skiq_x2 || part == skiq_x4 || part == skiq_x40)
+        ? soapy_sidekiq::TxSampleAlignment::upper_bits
+        : soapy_sidekiq::TxSampleAlignment::right_justified;
+    this->txMaxValue = soapy_sidekiq::txSampleFullScale(tx_resolution, tx_alignment);
+    SoapySDR_logf(SOAPY_SDR_INFO,
+                  "card: %u, TX DAC resolution: %u bits, host full scale: %u",
+                  card, tx_resolution, static_cast<uint32_t>(this->txMaxValue));
 
     status = skiq_write_chan_mode(card, skiq_chan_mode_single);
     if (status != 0)
@@ -507,14 +507,15 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         tx_bandwidths[chan] = actual_bandwidth;
     }
 
-    if (args.count("clock_source") > 0)
+    // Source setters require initialized hardware, so apply validated names last.
+    if (options.clock_source.has_value())
     {
-        setClockSource(args.at("clock_source"));
+        setClockSource(*options.clock_source);
     }
 
-    if (args.count("time_source") > 0)
+    if (options.time_source.has_value())
     {
-        setTimeSource(args.at("time_source"));
+        setTimeSource(*options.time_source);
     }
 
     // allocate for # blocks
@@ -549,12 +550,24 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     }
 
     SoapySDR_logf(SOAPY_SDR_TRACE, "leaving constructor", card);
+    rollback.release();
 }
 
 // Destructor
 SoapySidekiq::~SoapySidekiq(void)
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "In destructor", card);
+
+    // Stop and join RX before invalidating callbacks or exiting the SDK.
+    if (rx_session != nullptr)
+    {
+        rx_session->shutdown();
+    }
+    rx_session.reset();
+    rx_backend.reset();
+    delete active_rx_stream;
+    active_rx_stream = nullptr;
+
     unregisterInstance(card, this);
     skiq_register_tx_complete_callback(card, nullptr);
 

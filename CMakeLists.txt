@@ -1,5 +1,7 @@
 ########################################################################
 # Build Soapy SDR support module for Sidekiq Devices
+#
+# This file configures the production module and its Sidekiq SDK dependency.
 ########################################################################
 cmake_minimum_required(VERSION 2.8.12...3.10)
 project(SoapySidekiq CXX)
@@ -25,7 +27,7 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND NOT "${_SoapySDR_ROOT}" STREQ
 endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
-find_package(Sidekiq)
+find_package(Sidekiq 4.26.0)
 
 if (NOT Sidekiq_FOUND)
     message(FATAL_ERROR
@@ -57,6 +59,15 @@ SOAPY_SDR_MODULE_UTIL(
     TARGET SidekiqSupport
     SOURCES
         SoapySidekiq.hpp
+        DeviceDiscovery.cpp
+        DeviceOptions.cpp
+        SensorReader.cpp
+        SidekiqSensorBackend.cpp
+        StreamConfiguration.cpp
+        # Thread-safe hardware-to-Soapy RX sample handoff.
+        RxSampleQueue.cpp
+        RxStreamSession.cpp
+        SidekiqRxBackend.cpp
         Registation.cpp
         Settings.cpp
         Streaming.cpp
@@ -65,3 +76,5 @@ SOAPY_SDR_MODULE_UTIL(
         ${Sidekiq_LIBRARIES}
 
 )
+
+target_include_directories(SidekiqSupport PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

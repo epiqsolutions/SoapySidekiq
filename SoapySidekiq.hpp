@@ -1,10 +1,15 @@
+/**
+ * @file SoapySidekiq.hpp
+ * @brief Declares the SoapySDR device implementation for Epiq Sidekiq radios.
+ */
+
 #pragma once
 
 #include <sidekiq_api.h>
 
-#include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -15,14 +20,13 @@
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
+#include <SoapySidekiq/RxStreamSession.hpp>
 
 
-#define DEFAULT_TOPOLOGY_ID 0
 #define DEFAULT_SAMPLE_RATE (20000000)
 #define DEFAULT_BANDWIDTH (18000000)
 #define DEFAULT_FREQUENCY (1000000000)
 #define DEFAULT_NUM_BUFFERS (30000)
-#define DEFAULT_TX_BUFFER_LENGTH (16380)
 #define DEFAULT_SLEEP_US (1)
 #define SLEEP_1SEC (1 * 1000000)
 #define NANOS_IN_SEC (1000000000ULL)
@@ -275,19 +279,17 @@ class SoapySidekiq : public SoapySDR::Device
         std::basic_string<char> serial{};
         std::basic_string<char> timeSource{};
         uint32_t resolution{};
-        double maxValue{};
+        double maxValue{}; // RX ADC full scale.
+        double txMaxValue{}; // TX host full scale accounts for DAC bit alignment.
 
         bool rxUseShort{};
         bool txUseShort{};
         uint32_t debug_ctr{};
 
-        //  rx
-        std::mutex rx_mutex;
-        std::condition_variable rx_cv;
+        // RX hardware adapter must outlive the session that references it.
         std::basic_string<char> timetype{};
-        bool rx_running{};
-        bool rx_start_signal{};
-        bool rx_receive_operation_exited_due_to_error{};
+        std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
+        std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
         StreamHandle *active_rx_stream{};
 
         uint8_t num_rx_channels{};
@@ -326,15 +328,6 @@ class SoapySidekiq : public SoapySDR::Device
         bool rfTimeSource{};
         uint64_t sys_freq{};
 
-        // RX buffer
-        skiq_rx_block_t *p_rx_block[DEFAULT_NUM_BUFFERS]{};
-        uint32_t rxReadIndex{};
-        uint32_t rxWriteIndex{};
-
-        // Buffer for leftover RX samples to allow readStream() to return arbitrary numElems
-        std::vector<int16_t> rx_fifo_buffer;
-        size_t rx_fifo_offset = 0;
-
         // TX buffer
         skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
         uint32_t currTXBuffIndex{};
@@ -361,12 +354,6 @@ class SoapySidekiq : public SoapySDR::Device
         };
 
         passedStruct *passedStructInstance;
-
-        //  receive thread
-        std::thread _rx_receive_thread;
-        void rx_receive_operation(skiq_rx_hdl_t rx_handle);
-        void rx_receive_operation_impl(skiq_rx_hdl_t rx_handle);
-        static std::vector<SoapySDR::Kwargs> sidekiq_devices;
 
         // tx thread
         std::thread _tx_streaming_thread;

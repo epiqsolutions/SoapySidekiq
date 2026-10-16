@@ -1,3 +1,8 @@
+/**
+ * @file Streaming.cpp
+ * @brief Implements SoapySDR stream setup, lifecycle, receive, and transmit I/O.
+ */
+
 #include <cstring>
 #include <unistd.h>
 #include <iostream>
@@ -6,9 +11,15 @@
 #include <string>
 #include <thread>
 #include <mutex>
+#include <new>
+#include <chrono>
+#include <limits>
 
 #include "SoapySidekiq.hpp"
 #include <SoapySDR/Formats.hpp>
+#include <SoapySidekiq/SampleConversion.hpp>
+#include <SoapySidekiq/StreamConfiguration.hpp>
+#include <SoapySidekiq/TimestampConversion.hpp>
 #include <sidekiq_types.h>
 
 namespace
@@ -16,9 +27,25 @@ namespace
 std::mutex g_instance_registry_mutex;
 std::unordered_map<uint8_t, SoapySidekiq *> g_instance_registry;
 
+/** Convert the opaque SoapySDR stream token back to its driver-owned handle. */
 SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
 {
     return reinterpret_cast<SoapySidekiq::StreamHandle *>(stream);
+}
+
+/** Translate a SoapySDR direction constant or reject an unknown value. */
+soapy_sidekiq::StreamDirection streamDirection(const int direction)
+{
+    // Reject unknown Soapy constants before selecting RX or TX device state.
+    if (direction == SOAPY_SDR_RX)
+    {
+        return soapy_sidekiq::StreamDirection::rx;
+    }
+    if (direction == SOAPY_SDR_TX)
+    {
+        return soapy_sidekiq::StreamDirection::tx;
+    }
+    throw std::invalid_argument("invalid stream direction " + std::to_string(direction));
 }
 }
 
@@ -66,13 +93,8 @@ void SoapySidekiq::tx_complete_callback(int32_t status,
 long long SoapySidekiq::convert_timestamp_to_nanos(
         const uint64_t timestamp, const uint64_t timestamp_freq) const
 {
-    const double nanos_per_tic = 1.0/timestamp_freq*1e9;
-    const uint64_t whole_nanos_per_tic = static_cast<uint64_t>(nanos_per_tic);
-    const double frac_nanos_per_tic = nanos_per_tic - whole_nanos_per_tic;
-    const long long nanos =
-        static_cast<long long>(timestamp * whole_nanos_per_tic) +
-        static_cast<long long>(timestamp * frac_nanos_per_tic);
-    return nanos;
+    // Central helper provides exact arithmetic plus zero/overflow validation.
+    return soapy_sidekiq::ticksToNanoseconds(timestamp, timestamp_freq);
 }
 
 
@@ -84,11 +106,7 @@ std::vector<std::string> SoapySidekiq::getStreamFormats(
     std::vector<std::string> formats;
 
     formats.push_back(SOAPY_SDR_CS16);
-
-    if (direction == SOAPY_SDR_RX)
-    {
-        formats.push_back(SOAPY_SDR_CF32);
-    }
+    formats.push_back(SOAPY_SDR_CF32);
 
     return formats;
 }
@@ -99,7 +117,9 @@ std::string SoapySidekiq::getNativeStreamFormat(const int    direction,
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "getNativeStreamFormat");
 
-    fullScale = this->maxValue;
+    const auto stream_direction = streamDirection(direction);
+    fullScale = stream_direction == soapy_sidekiq::StreamDirection::rx
+        ? this->maxValue : this->txMaxValue;
 
     return "CS16";
 }
@@ -162,108 +182,6 @@ void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
     tx_cv.notify_all();
 }
 /*******************************************************************
- * Sidekiq receive thread
- ******************************************************************/
-
-void SoapySidekiq::rx_receive_operation(skiq_rx_hdl_t rx_handle)
-{
-    try
-    {
-        rx_receive_operation_impl(rx_handle);
-    }
-    catch (const std::exception&)
-    {
-        SoapySDR_log(SOAPY_SDR_WARNING, "Exiting RX Sidekiq Thread due to error");
-        rx_receive_operation_exited_due_to_error = true;
-    }
-
-}
-void SoapySidekiq::rx_receive_operation_impl(skiq_rx_hdl_t rx_handle)
-{
-    int status = 0;
-
-    skiq_rx_block_t *tmp_p_rx_block;
-    uint32_t len;
-    bool first = true;
-    uint64_t last_timestamp = 0;
-    uint64_t overrun_counter = 0;
-    skiq_rx_hdl_t rcvd_hdl;
-
-    std::unique_lock<std::mutex> lock(rx_mutex);
-
-    // wait till called to start running
-    rx_cv.wait(lock, [this] { return rx_start_signal; });
-
-    //  loop until stream is deactivated
-    while (rx_running)
-    {
-        // --- Overrun detection: if buffer full, drop half ---
-        uint32_t nextWrite = (rxWriteIndex + 1) % DEFAULT_NUM_BUFFERS;
-        if (nextWrite == rxReadIndex)
-        {
-            SoapySDR_log(SOAPY_SDR_WARNING,
-                        "RX ring buffer overrun: client too slow, dropping half buffer");
-            rxReadIndex = (rxReadIndex + (DEFAULT_NUM_BUFFERS / 2)) % DEFAULT_NUM_BUFFERS;
-            overrun_counter++;
-        }
-
-        status = skiq_receive(card, &rcvd_hdl, &tmp_p_rx_block, &len);
-        if (status == skiq_rx_status_success)
-        {
-            if (rcvd_hdl == rx_handle)
-            {
-                if (len != rx_block_size_in_bytes)
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                                  "received length %d is not the correct block size %d\n",
-                                  len, rx_block_size_in_bytes);
-                    throw std::runtime_error("");
-                }
-
-                // --- Timestamp integrity check ---
-                uint64_t this_timestamp = tmp_p_rx_block->rf_timestamp;
-                if (!first)
-                {
-                    uint64_t expected_ts = last_timestamp + rx_payload_size_in_words;
-                    if (this_timestamp != expected_ts)
-                    {
-                        SoapySDR_log(SOAPY_SDR_WARNING,
-                                     "Detected timestamp overflow/missed samples"
-                                     " in RX Sidekiq Thread");
-                        SoapySDR_logf(SOAPY_SDR_DEBUG, "expected timestamp %lu, actual %lu",
-                                      expected_ts, this_timestamp);
-                        first = true; // restart
-                    }
-                }
-                if (first)
-                {
-                    first = false;
-                }
-                last_timestamp = this_timestamp;
-
-                // Copy into RAM ring buffer
-                memcpy(p_rx_block[rxWriteIndex], (void *)tmp_p_rx_block, len);
-                rxWriteIndex = (rxWriteIndex + 1) % DEFAULT_NUM_BUFFERS;
-            }
-        }
-        else if (status == skiq_rx_status_error_overrun)
-        {
-            SoapySDR_logf(SOAPY_SDR_WARNING, "overrun detected, (card %u)", card);
-        }
-        else
-        {
-            if (status != skiq_rx_status_no_data)
-            {
-                SoapySDR_logf(SOAPY_SDR_FATAL,
-                              "skiq_receive failed, (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
-            }
-        }
-    }
-}
-
-/*******************************************************************
  * Stream API
  ******************************************************************/
 
@@ -273,9 +191,19 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
                                             const SoapySDR::Kwargs &args)
 {
     int status = 0;
-    const size_t channel = channels.empty() ? 0 : channels.at(0);
-
     SoapySDR_logf(SOAPY_SDR_TRACE, "setupStream");
+
+    const auto stream_direction = streamDirection(direction);
+    const bool already_configured = stream_direction == soapy_sidekiq::StreamDirection::rx
+        ? active_rx_stream != nullptr
+        : active_tx_stream != nullptr;
+    const std::size_t available_channels =
+        stream_direction == soapy_sidekiq::StreamDirection::rx
+            ? num_rx_channels
+            : num_tx_channels;
+    const auto request = soapy_sidekiq::validateStreamRequest(
+        stream_direction, format, channels, available_channels, already_configured);
+    const std::size_t channel = request.channel;
 
     if (direction == SOAPY_SDR_RX)
     {
@@ -310,21 +238,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
                       rx_payload_size_in_words);
-
-        // allocate the RAM buffers
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-        {
-            p_rx_block[i] = (skiq_rx_block_t *)malloc(rx_block_size_in_bytes);
-            if (p_rx_block[i] == NULL)
-            {
-                SoapySDR_log(SOAPY_SDR_ERROR, "malloc failed to allocate memory ");
-                throw std::runtime_error("");
-            }
-
-            memset(p_rx_block[i], 0, rx_block_size_in_bytes);
-        }
-        rxWriteIndex = 0;
-        rxReadIndex  = 0;
 
         if (format == "CS16")
         {
@@ -378,13 +291,14 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error("");
         }
 
-        StreamHandle *stream_handle = new StreamHandle{};
+        // Keep the handle locally owned until RX setup is ready to publish it.
+        auto stream_handle = std::make_unique<StreamHandle>();
         stream_handle->direction = direction;
         stream_handle->channel = channel;
         stream_handle->rx_handle = rx_handle;
         stream_handle->tx_handle = skiq_tx_hdl_end;
-        active_rx_stream = stream_handle;
-        return reinterpret_cast<SoapySDR::Stream *>(stream_handle);
+        active_rx_stream = stream_handle.release();
+        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream);
     }
     else if (direction == SOAPY_SDR_TX)
     {
@@ -419,13 +333,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
                 "' -- Only CS16 is supported by SoapySidekiq TX module.");
         }
 
-        // Allocate buffers
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-        {
-            p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
-        }
-        currTXBuffIndex = 0;
-
         status = skiq_read_sys_timestamp_freq(this->card, &this->sys_freq);
         if (status != 0)
         {
@@ -435,13 +342,30 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error("");
         }
 
-        StreamHandle *stream_handle = new StreamHandle{};
+        // Timestamp setup must succeed before committing TX memory ownership.
+        auto stream_handle = std::make_unique<StreamHandle>();
         stream_handle->direction = direction;
         stream_handle->channel = channel;
         stream_handle->rx_handle = skiq_rx_hdl_end;
         stream_handle->tx_handle = tx_handle;
-        active_tx_stream = stream_handle;
-        return reinterpret_cast<SoapySDR::Stream *>(stream_handle);
+        for (int i = 0; i < DEFAULT_NUM_BUFFERS; ++i)
+        {
+            p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
+            if (p_tx_block[i] == nullptr)
+            {
+                // Free only the successfully allocated prefix on partial failure.
+                for (int allocated = 0; allocated < i; ++allocated)
+                {
+                    skiq_tx_block_free(p_tx_block[allocated]);
+                    p_tx_block[allocated] = nullptr;
+                }
+                throw std::bad_alloc();
+            }
+        }
+        currTXBuffIndex = 0;
+
+        active_tx_stream = stream_handle.release();
+        return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream);
     }
     else
     {
@@ -457,23 +381,21 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
 
     if (stream_handle->direction == SOAPY_SDR_RX)
     {
-        if (rx_running)
+        if (rx_session != nullptr && rx_session->running())
         {
             throw std::runtime_error("deactivate the RX stream before closing it");
+        }
+
+        // Preserve retryable hardware ownership if the backend stop fails.
+        if (rx_session != nullptr)
+        {
+            deactivateStream(stream, 0, 0);
         }
 
         if (active_rx_stream == stream_handle)
         {
             active_rx_stream = nullptr;
         }
-
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-        {
-            free(p_rx_block[i]);
-            p_rx_block[i] = nullptr;
-        }
-        rx_fifo_buffer.clear();
-        rx_fifo_offset = 0;
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
     {
@@ -538,24 +460,12 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         }
 
         const skiq_rx_hdl_t rx_handle = stream_handle->rx_handle;
-        rxWriteIndex = 0;
-        rxReadIndex  = 0;
-
-        //  start the receive thread
-        if (!_rx_receive_thread.joinable())
+        if (rx_session == nullptr)
         {
-            rx_running = true;
-            rx_start_signal = false;
-
-            _rx_receive_thread =
-                std::thread(&SoapySidekiq::rx_receive_operation, this, rx_handle);
+            return SOAPY_SDR_STREAM_ERROR;
         }
 
-        std::lock_guard<std::mutex> lock(rx_mutex);
-
-
-        /* start rx streaming */
-        if (flags == SOAPY_SDR_HAS_TIME)
+        if ((flags & SOAPY_SDR_HAS_TIME) != 0)
         {
             bool tx_start_pending;
             {
@@ -574,33 +484,23 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
                                                  " delayed 2 seconds");
 
             }
-
-            rx_streaming_on_1pps_started = true;
-            status = skiq_start_rx_streaming_on_1pps(card, rx_handle, 0);
-            if (status != 0)
-            {
-                SoapySDR_logf(SOAPY_SDR_ERROR,
-                              "skiq_start_rx_streaming_on_1pps failed, (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
-            }
-            rx_streaming_on_1pps_started = false;
         }
-        else
+
+        // The session starts hardware before publishing or creating a worker.
+        status = rx_session->activate({
+            static_cast<uint32_t>(rx_handle),
+            rx_payload_size_in_words,
+            rx_sample_rates.at(stream_handle->channel),
+            sys_freq,
+            rfTimeSource,
+            (flags & SOAPY_SDR_HAS_TIME) != 0});
+        if (status != 0)
         {
-            status = skiq_start_rx_streaming(card, rx_handle);
-            if (status !=0)
-            {
-                SoapySDR_logf(SOAPY_SDR_ERROR,
-                              "skiq_start_rx_streaming failed, (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
-            }
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                "starting RX streaming failed (card %u, handle %d), status %d",
+                card, rx_handle, status);
+            throw std::runtime_error("failed to start RX streaming");
         }
-
-        // Notify the thread to run
-        rx_start_signal = true;
-        rx_cv.notify_one();
 
         SoapySDR_logf(SOAPY_SDR_INFO,
                       "started receive streaming on handle: %u",
@@ -744,57 +644,22 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
         }
 
         const skiq_rx_hdl_t rx_handle = stream_handle->rx_handle;
-        // stop receive thread
-        rx_running = false;
-
-        /* stop rx streaming */
-        if (flags == SOAPY_SDR_HAS_TIME)
+        // RxStreamSession joins the worker even when the backend stop fails.
+        status = rx_session == nullptr
+            ? SOAPY_SDR_STREAM_ERROR
+            : rx_session->deactivate((flags & SOAPY_SDR_HAS_TIME) != 0);
+        if (status == -ENODEV)
         {
-            status = skiq_stop_rx_streaming_on_1pps(card, rx_handle, 0);
-            if (status != 0)
-            {
-                if (status == -ENODEV) // Handle not streaming
-                {
-                    SoapySDR_logf(SOAPY_SDR_WARNING,
-                        "skiq_stop_rx_streaming_on_1pps: handle not streaming"
-                        " (card %u, handle %d), ignoring",
-                        card, rx_handle);
-                }
-                else
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                        "skiq_stop_rx_streaming_on_1pps failed,"
-                        " (card %u) handle %d, status %d",
-                        card, rx_handle, status);
-                    throw std::runtime_error("");
-                }
-            }
+            SoapySDR_logf(SOAPY_SDR_WARNING,
+                "RX handle was not streaming while deactivating (card %u, handle %d)",
+                card, rx_handle);
         }
-        else
+        else if (status != 0)
         {
-            status = skiq_stop_rx_streaming(card, rx_handle);
-            if (status != 0)
-            {
-                if (status == -ENODEV) // Handle not streaming
-                {
-                    SoapySDR_logf(SOAPY_SDR_WARNING,
-                        "skiq_stop_rx_streaming: handle not streaming (card %u, handle %d), ignoring",
-                        card, rx_handle);
-                }
-                else
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                        "skiq_stop_rx_streaming failed, (card %u) handle %d, status %d",
-                        card, rx_handle, status);
-                    throw std::runtime_error("");
-                }
-            }
-        }
-
-        /* wait till the rx thread is done */
-        if (_rx_receive_thread.joinable())
-        {
-            _rx_receive_thread.join();
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                "stopping RX streaming failed (card %u, handle %d), status %d",
+                card, rx_handle, status);
+            throw std::runtime_error("failed to stop RX streaming");
         }
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
@@ -871,135 +736,65 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
     const StreamHandle *stream_handle = getStreamHandle(stream);
     if (stream_handle->direction != SOAPY_SDR_RX) return SOAPY_SDR_NOT_SUPPORTED;
     if (active_rx_stream != stream_handle) return SOAPY_SDR_STREAM_ERROR;
-    if (rx_receive_operation_exited_due_to_error) return SOAPY_SDR_STREAM_ERROR;
-
-    size_t samples_done = 0;
-    bool timestamp_set = false;
-    long waitTime = (timeoutUs == 0) ? SLEEP_1SEC : timeoutUs;
-
-    // Output pointer (void*, could be int16_t* or float*)
-    void *output_buf = buffs[0];
-
-    while (samples_done < numElems)
+    if (rx_session == nullptr) return SOAPY_SDR_STREAM_ERROR;
+    flags = 0;
+    timeNs = 0;
+    if (numElems > static_cast<size_t>(std::numeric_limits<int>::max()))
     {
-        // Consume any FIFO buffer leftovers first
-        size_t fifo_left = (rx_fifo_buffer.size() / 2) - rx_fifo_offset;
-        if (fifo_left > 0) {
-            size_t to_copy = std::min(fifo_left, numElems - samples_done);
+        return SOAPY_SDR_OVERFLOW;
+    }
+    if (timeoutUs < 0 ||
+        (numElems != 0 && (buffs == nullptr || buffs[0] == nullptr)))
+    {
+        return SOAPY_SDR_STREAM_ERROR;
+    }
 
-            if (rxUseShort)
-            {
-                int16_t *out_ptr = reinterpret_cast<int16_t *>(output_buf);
-                memcpy(
-                    out_ptr + samples_done * 2,
-                    rx_fifo_buffer.data() + rx_fifo_offset * 2,
-                    to_copy * 2 * sizeof(int16_t));
-            } else
-            {
-                float *out_ptr = reinterpret_cast<float *>(output_buf);
-                for (size_t i = 0; i < to_copy; ++i)
-                {
-                    out_ptr[(samples_done + i) * 2]
-                        = float(rx_fifo_buffer[(rx_fifo_offset + i) * 2]) /
-                                float(this->maxValue);
-
-                    out_ptr[(samples_done + i) * 2 + 1]
-                        = float(rx_fifo_buffer[(rx_fifo_offset + i) * 2 + 1]) /
-                                float(this->maxValue);
-                }
-            }
-            rx_fifo_offset += to_copy;
-            samples_done += to_copy;
-
-            if (rx_fifo_offset * 2 >= rx_fifo_buffer.size())
-            {
-                rx_fifo_buffer.clear();
-                rx_fifo_offset = 0;
-            }
-            continue;
-        }
-
-        // Wait for a new block in the ring buffer
-        while ((rxReadIndex == rxWriteIndex) && (waitTime > 0)) {
-            usleep(DEFAULT_SLEEP_US);
-            waitTime -= DEFAULT_SLEEP_US;
-        }
-        if (waitTime <= 0) {
-            return (samples_done > 0) ? samples_done : SOAPY_SDR_TIMEOUT;
-        }
-
-        skiq_rx_block_t *block_ptr = p_rx_block[rxReadIndex];
-        const volatile int16_t *block_data = block_ptr->data; // DO NOT cast away volatile
-        size_t block_complex = rx_payload_size_in_words;
-
-        // Set timestamp on first sample delivered
-        if (!timestamp_set)
+    // The queue stores native CS16; CF32 requests use a temporary conversion buffer.
+    std::vector<int16_t> converted_samples;
+    int16_t *queue_output = nullptr;
+    if (numElems != 0)
+    {
+        if (rxUseShort)
         {
-            if (this->rfTimeSource)
-                timeNs = convert_timestamp_to_nanos(block_ptr->rf_timestamp,
-                                                   rx_sample_rates.at(stream_handle->channel));
-            else
-                timeNs = convert_timestamp_to_nanos(block_ptr->sys_timestamp, sys_freq);
-            flags = SOAPY_SDR_HAS_TIME;
-            timestamp_set = true;
+            queue_output = static_cast<int16_t *>(buffs[0]);
         }
-
-        size_t needed = numElems - samples_done;
-
-        if (needed >= block_complex)
+        else
         {
-            if (rxUseShort)
-            {
-                int16_t *out_ptr = reinterpret_cast<int16_t *>(output_buf);
-                // Use memcpy, casting block_data to const void* is fine
-                memcpy(
-                    out_ptr + samples_done * 2,
-                    (const void *)block_data,
-                    block_complex * 2 * sizeof(int16_t));
-            } else
-            {
-                float *out_ptr = reinterpret_cast<float *>(output_buf);
-                for (size_t i = 0; i < block_complex; ++i)
-                {
-                    out_ptr[(samples_done + i) * 2] =
-                        float(block_data[i * 2]) / float(this->maxValue);
-
-                    out_ptr[(samples_done + i) * 2 + 1] =
-                        float(block_data[i * 2 + 1]) / float(this->maxValue);
-                }
-            }
-            samples_done += block_complex;
-            rxReadIndex = (rxReadIndex + 1) % DEFAULT_NUM_BUFFERS;
-        } else {
-            // Copy part of block, save leftovers for next call
-            if (rxUseShort) {
-                int16_t *out_ptr = reinterpret_cast<int16_t *>(output_buf);
-                memcpy(
-                    out_ptr + samples_done * 2,
-                    (const void *)block_data,
-                    needed * 2 * sizeof(int16_t));
-            } else
-            {
-                float *out_ptr = reinterpret_cast<float *>(output_buf);
-                for (size_t i = 0; i < needed; ++i) {
-                    out_ptr[(samples_done + i) * 2] =
-                        float(block_data[i * 2]) / float(this->maxValue);
-
-                    out_ptr[(samples_done + i) * 2 + 1] =
-                        float(block_data[i * 2 + 1]) / float(this->maxValue);
-                }
-            }
-            // Save leftovers for next call
-            size_t leftovers = block_complex - needed;
-            rx_fifo_buffer.resize(leftovers * 2);
-            for (size_t i = 0; i < leftovers * 2; ++i)
-                rx_fifo_buffer[i] = block_data[needed * 2 + i];
-            rx_fifo_offset = 0;
-            samples_done += needed;
-            rxReadIndex = (rxReadIndex + 1) % DEFAULT_NUM_BUFFERS;
+            converted_samples.resize(numElems * 2);
+            queue_output = converted_samples.data();
         }
     }
-    return samples_done;
+
+    // Session read honors the requested timeout and translates worker lifecycle
+    // transitions into stable queue statuses for the SoapySDR API.
+    const auto result = rx_session->read(
+        queue_output,
+        numElems,
+        std::chrono::microseconds(timeoutUs));
+    if (result.status == soapy_sidekiq::RxReadStatus::timeout)
+    {
+        return SOAPY_SDR_TIMEOUT;
+    }
+    if (result.status != soapy_sidekiq::RxReadStatus::samples)
+    {
+        return SOAPY_SDR_STREAM_ERROR;
+    }
+
+    if (!rxUseShort && result.samples != 0)
+    {
+        float *output = static_cast<float *>(buffs[0]);
+        for (size_t index = 0; index < result.samples * 2; ++index)
+        {
+            output[index] = static_cast<float>(converted_samples[index]) /
+                static_cast<float>(maxValue);
+        }
+    }
+    if (result.has_time)
+    {
+        flags |= SOAPY_SDR_HAS_TIME;
+        timeNs = result.time_ns;
+    }
+    return static_cast<int>(result.samples);
 }
 
 int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
@@ -1049,6 +844,9 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     // total number of bytes that need to be transmitted in this call
     uint32_t tx_block_bytes = current_tx_block_size * 4;
+    // Hardware payloads are CS16, but the caller's CF32 buffer uses wider samples.
+    const size_t input_block_bytes = current_tx_block_size * 2 *
+        (txUseShort ? sizeof(int16_t) : sizeof(float));
 
     while (curr_block < num_blocks)
     {
@@ -1064,21 +862,12 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         }
         else
         {
-            // float
-            float *  float_inbuff = (float *)inbuff_ptr;
-            uint32_t words_left = current_tx_block_size;
-            uint16_t * new_outbuff = (uint16_t *)outbuff_ptr;
-
-            int short_ctr = 0;
-            for (uint32_t i = 0; i < words_left; i++)
-            {
-                new_outbuff[short_ctr + 1] = (uint16_t)(float_inbuff[short_ctr + 1] *
-                                              this->maxValue);
-
-                new_outbuff[short_ctr] = (uint16_t)(float_inbuff[short_ctr] *
-                                          this->maxValue);
-                short_ctr += 2;
-            }
+            // Clip and normalize exceptional CF32 values before integer storage.
+            soapy_sidekiq::convertCf32ToCs16(
+                reinterpret_cast<const float *>(inbuff_ptr),
+                reinterpret_cast<std::int16_t *>(outbuff_ptr),
+                current_tx_block_size,
+                static_cast<float>(this->txMaxValue));
         }
 
 
@@ -1145,7 +934,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             currTXBuffIndex = (currTXBuffIndex + 1) % DEFAULT_NUM_BUFFERS;
 
             // move the pointer to the next block in the writeStream buffer
-            inbuff_ptr += (current_tx_block_size * 4);
+            inbuff_ptr += input_block_bytes;
 
         }
 
