@@ -38,10 +38,10 @@ endif()
 add_executable(discovery_tests
     support/TestMain.cpp
     component/DeviceDiscoveryTests.cpp
-    ../DeviceDiscovery.cpp)
+    ../../DeviceDiscovery.cpp)
 target_include_directories(discovery_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(discovery_tests PRIVATE non_hardware_test_options)
 
 add_test(NAME discovery.all COMMAND discovery_tests)
@@ -51,10 +51,10 @@ set_tests_properties(discovery.all PROPERTIES LABELS "component;non-hardware")
 add_executable(device_option_tests
     support/TestMain.cpp
     unit/DeviceOptionsTests.cpp
-    ../DeviceOptions.cpp)
+    ../../DeviceOptions.cpp)
 target_include_directories(device_option_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(device_option_tests PRIVATE non_hardware_test_options)
 
 add_test(NAME device-options.all COMMAND device_option_tests)
@@ -64,10 +64,10 @@ set_tests_properties(device-options.all PROPERTIES LABELS "unit;non-hardware")
 add_executable(sensor_tests
     support/TestMain.cpp
     unit/SensorReaderTests.cpp
-    ../SensorReader.cpp)
+    ../../SensorReader.cpp)
 target_include_directories(sensor_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(sensor_tests PRIVATE non_hardware_test_options)
 
 add_test(NAME sensors.all COMMAND sensor_tests)
@@ -78,10 +78,10 @@ add_executable(stream_configuration_tests
     support/TestMain.cpp
     unit/StreamConfigurationTests.cpp
     unit/SampleScaleTests.cpp
-    ../StreamConfiguration.cpp)
+    ../../StreamConfiguration.cpp)
 target_include_directories(stream_configuration_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(stream_configuration_tests PRIVATE non_hardware_test_options)
 
 add_test(NAME stream-configuration.all COMMAND stream_configuration_tests)
@@ -94,7 +94,7 @@ add_executable(stream_conversion_tests
     unit/TimestampConversionTests.cpp)
 target_include_directories(stream_conversion_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(stream_conversion_tests PRIVATE non_hardware_test_options)
 
 add_test(NAME stream-conversion.all COMMAND stream_conversion_tests)
@@ -104,10 +104,10 @@ set_tests_properties(stream-conversion.all PROPERTIES LABELS "unit;non-hardware"
 add_executable(rx_sample_queue_tests
     support/TestMain.cpp
     unit/RxSampleQueueTests.cpp
-    ../RxSampleQueue.cpp)
+    ../../RxSampleQueue.cpp)
 target_include_directories(rx_sample_queue_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(rx_sample_queue_tests PRIVATE
     non_hardware_test_options Threads::Threads)
 
@@ -118,20 +118,20 @@ set_tests_properties(rx-sample-queue.all PROPERTIES LABELS "unit;non-hardware")
 add_executable(rx_stream_session_tests
     support/TestMain.cpp
     component/RxStreamSessionTests.cpp
-    ../RxSampleQueue.cpp
-    ../RxStreamSession.cpp)
+    ../../RxSampleQueue.cpp
+    ../../RxStreamSession.cpp)
 target_include_directories(rx_stream_session_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(rx_stream_session_tests PRIVATE
     non_hardware_test_options Threads::Threads)
 
 add_test(NAME rx-stream-session.all COMMAND rx_stream_session_tests)
 set_tests_properties(rx-stream-session.all PROPERTIES LABELS "component;non-hardware")
 add_executable(rx_sample_queue_portable_tests
-    support/TestMain.cpp unit/RxSampleQueueTests.cpp ../RxSampleQueue.cpp)
+    support/TestMain.cpp unit/RxSampleQueueTests.cpp ../../RxSampleQueue.cpp)
 target_include_directories(rx_sample_queue_portable_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_compile_definitions(rx_sample_queue_portable_tests PRIVATE
     SOAPYSIDEKIQ_FORCE_PORTABLE_TIMESTAMP=1)
 target_link_libraries(rx_sample_queue_portable_tests PRIVATE
@@ -142,7 +142,7 @@ set_tests_properties(rx-sample-queue-portable.all PROPERTIES LABELS "unit;non-ha
 add_executable(timestamp_portable_tests
     support/TestMain.cpp unit/TimestampConversionTests.cpp)
 target_include_directories(timestamp_portable_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_compile_definitions(timestamp_portable_tests PRIVATE
     SOAPYSIDEKIQ_FORCE_PORTABLE_TIMESTAMP=1)
 target_link_libraries(timestamp_portable_tests PRIVATE non_hardware_test_options)
@@ -151,8 +151,8 @@ set_tests_properties(timestamp-portable.all PROPERTIES LABELS "unit;non-hardware
 
 # Compile the production writeStream body against a minimal device/SDK fixture.
 # Fail configuration if its boundaries change rather than testing a stale copy.
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../Streaming.cpp)
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../Streaming.cpp" streaming_source)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Streaming.cpp)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Streaming.cpp" streaming_source)
 string(FIND "${streaming_source}" "int SoapySidekiq::writeStream(" tx_write_start)
 string(FIND "${streaming_source}" "int SoapySidekiq::readStreamStatus(" tx_write_end)
 if(tx_write_start LESS 0 OR tx_write_end LESS tx_write_start)
@@ -175,7 +175,7 @@ find_package(Threads REQUIRED)
 add_executable(tx_write_tests support/TestMain.cpp component/TxWriteStreamTests.cpp)
 target_include_directories(tx_write_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(tx_write_tests PRIVATE non_hardware_test_options Threads::Threads)
 add_test(NAME tx-write.all COMMAND tx_write_tests)
 set_tests_properties(tx-write.all PROPERTIES LABELS "component;non-hardware")
@@ -205,9 +205,9 @@ string(SUBSTRING "${activate_method}" 0 ${tx_branch} rx_activate)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RxLifecycleMethods.inc"
     "${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
 add_executable(rx_lifecycle_tests
-    support/TestMain.cpp component/RxLifecycleTests.cpp ../RxSampleQueue.cpp ../RxStreamSession.cpp)
+    support/TestMain.cpp component/RxLifecycleTests.cpp ../../RxSampleQueue.cpp ../../RxStreamSession.cpp)
 target_include_directories(rx_lifecycle_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
     "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(rx_lifecycle_tests PRIVATE non_hardware_test_options Threads::Threads)
 add_test(NAME rx-lifecycle.all COMMAND rx_lifecycle_tests)

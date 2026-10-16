@@ -57,3 +57,5 @@ dkms.conf
 build/*
 *.json
 out.txt
+/logs/*
+!/logs/README.md

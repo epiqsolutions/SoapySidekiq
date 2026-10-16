@@ -1,24 +1,25 @@
 # Non-hardware tests
 
-These tests are separate from the hardware validation programs in `tests/`.
-They do not open a Sidekiq card or link to the Sidekiq SDK. Output from the
-repository runner is written to the ignored `out.txt` file.
+These tests do not open a Sidekiq card or link to the Sidekiq SDK. They live
+alongside the hardware validation programs under `tests/`.
 
 Configure and build:
 
 ```sh
-cmake -S non_hardware_tests -B build/non_hardware
+cmake -S tests/non_hardware -B build/non_hardware
 cmake --build build/non_hardware --parallel
 ```
 
 To watch a run, start `tail -F out.txt` in another terminal, then run:
 
 ```sh
-non_hardware_tests/run_suite.sh
+tests/run_logged.sh non_hardware_normal tests/non_hardware/run_suite.sh
 ```
 
-The final line reports the number of individual cases, rather than only the
-number of aggregate CTest executables.
+The live output is `out.txt`, which points to `logs/current.log`; the runner
+also keeps a per-run log in `logs/`. The suite writes its CTest output to
+`build/non_hardware/suite.log`. The final line reports the number of
+individual cases, rather than only the number of aggregate CTest executables.
 
 The TX write regression executable compiles the `writeStream` method body
 directly from `Streaming.cpp` against a minimal device and synchronous SDK
@@ -74,8 +75,9 @@ immediate stop; worker-creation failure is not injected by these tests.
 AddressSanitizer and UndefinedBehaviorSanitizer:
 
 ```sh
-cmake -S non_hardware_tests -B build/non_hardware-asan \
+cmake -S tests/non_hardware -B build/non_hardware-asan \
     -DSOAPYSIDEKIQ_TEST_ASAN=ON
 cmake --build build/non_hardware-asan --parallel
-ctest --test-dir build/non_hardware-asan --output-on-failure
+tests/run_logged.sh non_hardware_asan \
+    tests/non_hardware/run_suite.sh build/non_hardware-asan
 ```

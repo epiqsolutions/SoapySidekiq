@@ -6,7 +6,7 @@ set -o pipefail
 
 # Accept alternate build/output paths for sanitizer and local watch workflows.
 test_build_dir="${1:-build/non_hardware}"
-test_output="${2:-out.txt}"
+test_output="${2:-${test_build_dir}/suite.log}"
 
 ctest --test-dir "${test_build_dir}" --verbose 2>&1 | tee "${test_output}"
 ctest_status=${PIPESTATUS[0]}

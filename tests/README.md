@@ -1,10 +1,14 @@
 # Tests
 
-Automated tests that do not require a Sidekiq card live in
-[`non_hardware_tests`](../non_hardware_tests/).
+[`non_hardware/`](non_hardware/) contains automated unit and component tests.
+They do not need a Sidekiq card or link to the Sidekiq SDK. Its README has
+the normal and sanitizer build and run commands.
 
-Legacy programs that exercise real hardware have been collected in
-[`hardware`](hardware/). They are currently manual validation and stress
-programs rather than a uniform automated suite. Their existing behavior was
-preserved during the directory reorganization so hardware-test cleanup can be
-reviewed separately from the user-facing example cleanup.
+[`hardware/`](hardware/) contains bounded validators and diagnostics that use
+real cards. Some checks also need an RF path or external PPS source. Its README
+lists the programs; the [integration test plan](hardware/INTEGRATION_TEST_PLAN.md)
+and [validation record](hardware/INTEGRATION_VALIDATION.md) cover the combined
+branch.
+
+Run test commands through [`run_logged.sh`](run_logged.sh) to save a dated log
+in `logs/` and follow the current run through `out.txt`.

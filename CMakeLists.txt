@@ -27,7 +27,7 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND NOT "${_SoapySDR_ROOT}" STREQ
 endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
-find_package(Sidekiq)
+find_package(Sidekiq 4.26.0)
 
 if (NOT Sidekiq_FOUND)
     message(FATAL_ERROR
