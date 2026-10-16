@@ -20,8 +20,8 @@
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
+#include <SoapySDR/Version.h>
 #include <SoapySidekiq/RxStreamSession.hpp>
-
 
 #define DEFAULT_SAMPLE_RATE (20000000)
 #define DEFAULT_BANDWIDTH (18000000)
@@ -31,335 +31,303 @@
 #define SLEEP_1SEC (1 * 1000000)
 #define NANOS_IN_SEC (1000000000ULL)
 
-
+/**
+ * @brief Owns a Sidekiq card's streams and callback state.
+ *
+ * Instances remain at a stable address while SDK callbacks and worker threads
+ * refer to them. Copying and moving are explicitly disabled so these references
+ * and the ownership of device resources cannot be transferred.
+ */
 class SoapySidekiq : public SoapySDR::Device
 {
-    public:
-        SoapySidekiq(const SoapySDR::Kwargs &args);
+  public:
+    SoapySidekiq(const SoapySDR::Kwargs &args);
 
-        ~SoapySidekiq(void);
+    ~SoapySidekiq(void) override;
 
-        /*******************************************************************
-         * Identification API
-         ******************************************************************/
+    SoapySidekiq(const SoapySidekiq &) = delete;
+    SoapySidekiq &operator=(const SoapySidekiq &) = delete;
+    SoapySidekiq(SoapySidekiq &&) = delete;
+    SoapySidekiq &operator=(SoapySidekiq &&) = delete;
 
-        std::string getDriverKey(void) const;
+    /*******************************************************************
+     * Identification API
+     ******************************************************************/
 
-        std::string getHardwareKey(void) const;
+    std::string getDriverKey(void) const override;
 
+    std::string getHardwareKey(void) const override;
 
-        SoapySDR::Kwargs getHardwareInfo(void) const;
+    SoapySDR::Kwargs getHardwareInfo(void) const override;
 
-        /*******************************************************************
-         * Channels API
-         ******************************************************************/
+    /*******************************************************************
+     * Channels API
+     ******************************************************************/
 
-        size_t getNumChannels(const int) const;
+    size_t getNumChannels(const int) const override;
 
-        /*******************************************************************
-         * Stream API
-         ******************************************************************/
+    /*******************************************************************
+     * Stream API
+     ******************************************************************/
 
-        std::vector<std::string> getStreamFormats(const int    direction,
-                const size_t channel) const;
+    std::vector<std::string> getStreamFormats(const int direction,
+                                              const size_t channel) const override;
 
-        std::string getNativeStreamFormat(const int direction, const size_t channel,
-                double &fullScale) const;
+    std::string getNativeStreamFormat(const int direction, const size_t channel,
+                                      double &fullScale) const override;
 
-        SoapySDR::ArgInfoList getStreamArgsInfo(const int    direction,
-                const size_t channel) const;
+    SoapySDR::ArgInfoList getStreamArgsInfo(const int direction,
+                                            const size_t channel) const override;
 
-        SoapySDR::Stream *setupStream(const int direction,
-                const std::string &format,
-                const std::vector<size_t> &channels = std::vector<size_t>(),
-                const SoapySDR::Kwargs &args = SoapySDR::Kwargs());
+    SoapySDR::Stream *setupStream(const int direction, const std::string &format,
+                                  const std::vector<size_t> &channels = std::vector<size_t>(),
+                                  const SoapySDR::Kwargs &args = SoapySDR::Kwargs()) override;
 
-        void closeStream(SoapySDR::Stream *stream);
+    void closeStream(SoapySDR::Stream *stream) override;
 
-        size_t getStreamMTU(SoapySDR::Stream *stream) const;
+    size_t getStreamMTU(SoapySDR::Stream *stream) const override;
 
-        int activateStream(SoapySDR::Stream *stream,
-                const int flags = 0,
-                const long long timeNs = 0,
-                const size_t numElems = 0);
+    int activateStream(SoapySDR::Stream *stream, const int flags = 0, const long long timeNs = 0,
+                       const size_t numElems = 0) override;
 
-        int deactivateStream(SoapySDR::Stream *stream,
-                const int flags = 0,
-                const long long timeNs = 0);
+    int deactivateStream(SoapySDR::Stream *stream, const int flags = 0,
+                         const long long timeNs = 0) override;
 
-        int readStream(SoapySDR::Stream *stream,
-                void *const *buffs,
-                const size_t numElems,
-                int &flags,
-                long long &timeNs,
-                const long timeoutUs = 100000);
+    int readStream(SoapySDR::Stream *stream, void *const *buffs, const size_t numElems, int &flags,
+                   long long &timeNs, const long timeoutUs = 100000) override;
 
-        int writeStream(SoapySDR::Stream *stream,
-                const void *const *buffs,
-                const size_t numElems,
-                int &flags,
-                const long long timeNs = 0,
-                const long timeoutUs = 100000);
+    int writeStream(SoapySDR::Stream *stream, const void *const *buffs, const size_t numElems,
+                    int &flags, const long long timeNs = 0, const long timeoutUs = 100000) override;
 
-        int readStreamStatus(SoapySDR::Stream *stream,
-                size_t &chanMask,
-                int &flags,
-                long long &timeNs,
-                const long timeoutUs = 100000);
+    int readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, int &flags, long long &timeNs,
+                         const long timeoutUs = 100000) override;
 
+    /*******************************************************************
+     * Antenna API
+     ******************************************************************/
 
-        /*******************************************************************
-         * Antenna API
-         ******************************************************************/
+    std::vector<std::string> listAntennas(const int direction, const size_t channel) const override;
 
-        std::vector<std::string> listAntennas(const int direction,
-                const size_t channel  ) const;
+    /*******************************************************************
+     * Frontend corrections API
+     ******************************************************************/
 
+    bool hasDCOffsetMode(const int direction, const size_t channel) const override;
 
-        /*******************************************************************
-         * Frontend corrections API
-         ******************************************************************/
+    void setDCOffsetMode(const int direction, const size_t channel, const bool automatic) override;
 
-        bool hasDCOffsetMode(const int direction,
-                const size_t channel) const;
+    bool getDCOffsetMode(const int direction, const size_t channel) const override;
 
-        void setDCOffsetMode(const int direction,
-                const size_t channel,
-                const bool automatic);
+    /*******************************************************************
+     * Gain API
+     ******************************************************************/
 
-        bool getDCOffsetMode(const int direction,
-                const size_t channel) const;
+    std::vector<std::string> listGains(const int direction, const size_t channel) const override;
 
-        /*******************************************************************
-         * Gain API
-         ******************************************************************/
+    bool hasGainMode(const int direction, const size_t channel) const override;
 
-        std::vector<std::string> listGains(const int direction,
-                const size_t channel) const;
+    void setGainMode(const int direction, const size_t channel, const bool automatic) override;
 
-        bool hasGainMode(const int direction,
-                const size_t channel) const;
+    bool getGainMode(const int direction, const size_t channel) const override;
 
-        void setGainMode(const int direction,
-                const size_t channel,
-                const bool automatic);
+    void setGain(const int direction, const size_t channel, const std::string &name,
+                 const double value) override;
 
-        bool getGainMode(const int direction,
-                const size_t channel) const;
+    void setGain(const int direction, const size_t channel, const double value) override;
 
-        void setGain(const int direction,
-                const size_t channel,
-                const std::string &name,
-                const double value);
+    double getGain(const int direction, const size_t channel,
+                   const std::string &name) const override;
 
-        void setGain(const int direction,
-                const size_t channel,
-                const double value) override;
+    double getGain(const int direction, const size_t channel) const override;
 
-        double getGain(const int direction,
-                const size_t channel,
-                const std::string &name) const override;
+    SoapySDR::Range getGainRange(const int direction, const size_t channel,
+                                 const std::string &name) const override;
 
-        double getGain(const int direction,
-                const size_t channel) const;
+    SoapySDR::Range getGainRange(const int direction, const size_t channel) const override;
 
-        SoapySDR::Range getGainRange(const int direction,
-                const size_t channel,
-                const std::string & name) const;
+    /*******************************************************************
+     * Frequency API
+     ******************************************************************/
+    void setFrequency(const int direction, const size_t channel, const double frequency,
+                      const SoapySDR::Kwargs &args = SoapySDR::Kwargs()) override;
 
-        SoapySDR::Range getGainRange(const int    direction,
-                const size_t channel) const;
+    double getFrequency(const int direction, const size_t channel) const override;
 
-        /*******************************************************************
-         * Frequency API
-         ******************************************************************/
-        void setFrequency(const int direction, const size_t channel,
-                const double frequency,
-                const SoapySDR::Kwargs &args = SoapySDR::Kwargs());
+    SoapySDR::RangeList getFrequencyRange(const int direction, const size_t channel) const override;
 
-        double getFrequency(const int direction,
-                const size_t channel) const;
+    /*******************************************************************
+     * Sample Rate API
+     ******************************************************************/
 
-        SoapySDR::RangeList getFrequencyRange(const int direction,
-                const size_t channel) const;
+    void setSampleRate(const int direction, const size_t channel, const double rate) override;
 
-        /*******************************************************************
-         * Sample Rate API
-         ******************************************************************/
+    double getSampleRate(const int direction, const size_t channel) const override;
 
-        void setSampleRate(const int direction,
-                const size_t channel,
-                const double rate);
+    // Older supported SoapySDR APIs do not declare this virtual method.
+#ifdef SOAPY_SDR_API_HAS_GET_SAMPLE_RATE_RANGE
+    SoapySDR::RangeList getSampleRateRange(const int direction,
+                                           const size_t channel) const override;
+#else
+    SoapySDR::RangeList getSampleRateRange(const int direction, const size_t channel) const;
+#endif
 
-        double getSampleRate(const int direction,
-                const size_t channel) const;
+    std::vector<double> listSampleRates(const int direction, const size_t channel) const override;
 
-        SoapySDR::RangeList getSampleRateRange(const int    direction,
-                const size_t channel) const;
+    void setBandwidth(const int direction, const size_t channel, const double bw) override;
 
-        std::vector<double> listSampleRates(const int direction,
-                const size_t channel) const override;
+    double getBandwidth(const int direction, const size_t channel) const override;
 
-        void setBandwidth(const int direction,
-                const size_t channel,
-                const double bw);
+    /*******************************************************************
+     * Sensor API
+     ******************************************************************/
+    std::vector<std::string> listSensors(void) const override;
+    std::string readSensor(const std::string &key) const override;
 
-        double getBandwidth(const int direction,
-                const size_t channel) const;
+    /*******************************************************************
+     * Settings API
+     ******************************************************************/
 
-        /*******************************************************************
-         * Sensor API
-         ******************************************************************/
-        std::vector<std::string> listSensors(void) const;
-        std::string readSensor(const std::string &key) const;
+    SoapySDR::ArgInfoList getSettingInfo(void) const override;
 
-        /*******************************************************************
-         * Settings API
-         ******************************************************************/
-
-        SoapySDR::ArgInfoList getSettingInfo(void) const;
-
-        void writeSetting(const std::string &key,
-                const std::string &value);
-
-        std::string readSetting(const std::string &key) const;
-
-        /*******************************************************************
-         * Time API
-         ******************************************************************/
-
-        std::vector<std::string> listTimeSources(void) const;
-
-        void setTimeSource(const std::string &source);
-
-        std::string getTimeSource(void) const;
-
-        bool hasHardwareTime(const std::string &) const;
-
-        long long getHardwareTime(const std::string &) const;
-
-        void setHardwareTime(const long long timeNs,
-                const std::string &what);
-
-        /*******************************************************************
-         * Clocking API
-         ******************************************************************/
-
-        std::vector<std::string> listClockSources(void) const;
-
-        void setClockSource(const std::string &source);
-
-        std::string getClockSource(void) const;
-
-        double getReferenceClockRate(void) const;
-
-        struct StreamHandle
-        {
-            int direction;
-            size_t channel;
-            skiq_rx_hdl_t rx_handle;
-            skiq_tx_hdl_t tx_handle;
-        };
-
-
-    private:
-        skiq_rx_hdl_t getRxHandle(const size_t channel) const;
-        skiq_tx_hdl_t getTxHandle(const size_t channel) const;
-        skiq_rx_hdl_t getFirstRxHandle(void) const;
-        skiq_tx_hdl_t getFirstTxHandle(void) const;
-
-        long long convert_timestamp_to_nanos(const uint64_t timestamp,
-                                             const uint64_t timestamp_freq) const;
-
-        //  sidekiq card
-        std::string part_str;
-        skiq_part_t part;
-        skiq_param_t param;
-        uint8_t card{};
-        std::basic_string<char> serial{};
-        std::basic_string<char> timeSource{};
-        uint32_t resolution{};
-        double maxValue{}; // RX ADC full scale.
-        double txMaxValue{}; // TX host full scale accounts for DAC bit alignment.
-
-        bool rxUseShort{};
-        bool txUseShort{};
-        uint32_t debug_ctr{};
-
-        // RX hardware adapter must outlive the session that references it.
-        std::basic_string<char> timetype{};
-        std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
-        std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
-        StreamHandle *active_rx_stream{};
-
-        uint8_t num_rx_channels{};
-        std::vector<uint32_t> rx_sample_rates;
-        std::vector<uint32_t> rx_bandwidths;
-        uint32_t rx_block_size_in_words{};
-        uint32_t rx_block_size_in_bytes{};
-        uint32_t rx_payload_size_in_bytes{};
-        uint32_t rx_payload_size_in_words{};
-
-        //  tx
-        std::mutex tx_mutex;
-        std::condition_variable tx_cv;
-        std::mutex tx_buf_mutex;
-        pthread_mutex_t space_avail_mutex;
-        pthread_cond_t space_avail_cond;
-        bool space_avail{};
-        bool tx_start_finished{};
-        int tx_start_status{};
-        bool tx_stream_active{};
-        int32_t *p_tx_status{};
-        bool first_transmit{};
-        StreamHandle *active_tx_stream{};
-
-        uint8_t  num_tx_channels{};
-        std::vector<uint32_t> tx_sample_rates;
-        std::vector<uint32_t> tx_bandwidths;
-        uint32_t tx_underruns{};
-        uint32_t complete_count{};
-        uint32_t current_tx_block_size{};
-
-        //  setting
-        bool iq_swap{};
-        bool counter{};
-        bool log{};
-        bool rfTimeSource{};
-        uint64_t sys_freq{};
-
-        // TX buffer
-        skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
-        uint32_t currTXBuffIndex{};
-        uint32_t p_tx_block_index{};
-
-
-        // TX callback static function
-        // The registration requires a static function instead of a method so
-        // this must be created to be able to register it.
-        // This function calls the tx_complete method.
-        static void tx_complete_callback(int32_t status,
-                                                skiq_tx_block_t *p_data,
-                                                void *p_user);
-
-        static void registerInstance(uint8_t card, SoapySidekiq *instance);
-        static void unregisterInstance(uint8_t card, SoapySidekiq *instance);
-        static SoapySidekiq *getInstanceForCard(uint8_t card);
-
-    public:
-        struct passedStruct
-        {
-            SoapySidekiq *classAddr;
-            uint32_t txIndex;
-        };
-
-        passedStruct *passedStructInstance;
-
-        // tx thread
-        std::thread _tx_streaming_thread;
-        void tx_streaming_start(skiq_tx_hdl_t tx_handle);
-
-        // tx callback method
-        void tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex);
-
+    void writeSetting(const std::string &key, const std::string &value) override;
+
+    std::string readSetting(const std::string &key) const override;
+
+    /*******************************************************************
+     * Time API
+     ******************************************************************/
+
+    std::vector<std::string> listTimeSources(void) const override;
+
+    void setTimeSource(const std::string &source) override;
+
+    std::string getTimeSource(void) const override;
+
+    bool hasHardwareTime(const std::string &) const override;
+
+    long long getHardwareTime(const std::string &) const override;
+
+    void setHardwareTime(const long long timeNs, const std::string &what) override;
+
+    /*******************************************************************
+     * Clocking API
+     ******************************************************************/
+
+    std::vector<std::string> listClockSources(void) const override;
+
+    void setClockSource(const std::string &source) override;
+
+    std::string getClockSource(void) const override;
+
+    // Reference clock access was introduced in the SoapySDR 0.8 API.
+#if defined(SOAPY_SDR_API_VERSION) && SOAPY_SDR_API_VERSION >= 0x00080000
+    double getReferenceClockRate(void) const override;
+#else
+    double getReferenceClockRate(void) const;
+#endif
+
+    struct StreamHandle
+    {
+        int direction;
+        size_t channel;
+        skiq_rx_hdl_t rx_handle;
+        skiq_tx_hdl_t tx_handle;
+    };
+
+  private:
+    skiq_rx_hdl_t getRxHandle(const size_t channel) const;
+    skiq_tx_hdl_t getTxHandle(const size_t channel) const;
+    skiq_rx_hdl_t getFirstRxHandle(void) const;
+    skiq_tx_hdl_t getFirstTxHandle(void) const;
+
+    long long convert_timestamp_to_nanos(const uint64_t timestamp,
+                                         const uint64_t timestamp_freq) const;
+
+    //  sidekiq card
+    std::string part_str;
+    skiq_part_t part;
+    skiq_param_t param;
+    uint8_t card{};
+    std::string serial{};
+    std::string timeSource{};
+    uint32_t resolution{};
+    double maxValue{};   // RX ADC full scale.
+    double txMaxValue{}; // TX host full scale accounts for DAC bit alignment.
+
+    bool rxUseShort{};
+    bool txUseShort{};
+    uint32_t debug_ctr{};
+
+    // RX hardware adapter must outlive the session that references it.
+    std::string timetype{};
+    std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
+    std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
+    StreamHandle *active_rx_stream{};
+
+    uint8_t num_rx_channels{};
+    std::vector<uint32_t> rx_sample_rates;
+    std::vector<uint32_t> rx_bandwidths;
+    uint32_t rx_block_size_in_words{};
+    uint32_t rx_block_size_in_bytes{};
+    uint32_t rx_payload_size_in_bytes{};
+    uint32_t rx_payload_size_in_words{};
+
+    //  tx
+    std::mutex tx_mutex;
+    std::condition_variable tx_cv;
+    std::mutex tx_buf_mutex;
+    pthread_mutex_t space_avail_mutex;
+    pthread_cond_t space_avail_cond;
+    bool space_avail{};
+    bool tx_start_finished{};
+    int tx_start_status{};
+    bool tx_stream_active{};
+    int32_t *p_tx_status{};
+    bool first_transmit{};
+    StreamHandle *active_tx_stream{};
+
+    uint8_t num_tx_channels{};
+    std::vector<uint32_t> tx_sample_rates;
+    std::vector<uint32_t> tx_bandwidths;
+    uint32_t tx_underruns{};
+    uint32_t complete_count{};
+    uint32_t current_tx_block_size{};
+
+    //  setting
+    bool iq_swap{};
+    bool counter{};
+    bool log{};
+    bool rfTimeSource{};
+    uint64_t sys_freq{};
+
+    // TX buffer
+    skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
+    uint32_t currTXBuffIndex{};
+    uint32_t p_tx_block_index{};
+
+    // TX callback static function
+    // The registration requires a static function instead of a method so
+    // this must be created to be able to register it.
+    // This function calls the tx_complete method.
+    static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data, void *p_user);
+
+    static void registerInstance(uint8_t card, SoapySidekiq *instance);
+    static void unregisterInstance(uint8_t card, SoapySidekiq *instance);
+    static SoapySidekiq *getInstanceForCard(uint8_t card);
+
+  public:
+    struct passedStruct
+    {
+        SoapySidekiq *classAddr;
+        uint32_t txIndex;
+    };
+
+    passedStruct *passedStructInstance;
+
+    // tx thread
+    std::thread _tx_streaming_thread;
+    void tx_streaming_start(skiq_tx_hdl_t tx_handle);
+
+    // tx callback method
+    void tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex);
 };
