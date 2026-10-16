@@ -94,13 +94,14 @@ void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t
     this->complete_count++;
 
     // update the in use status of the packet just completed
-    tx_buf_mutex.lock();
-    if (p_tx_status[txIndex] != 1)
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "status isn't 1");
+        std::lock_guard<std::mutex> lock(tx_buf_mutex);
+        if (p_tx_status[txIndex] != 1)
+        {
+            SoapySDR_logf(SOAPY_SDR_ERROR, "status isn't 1");
+        }
+        p_tx_status[txIndex] = 0;
     }
-    p_tx_status[txIndex] = 0;
-    tx_buf_mutex.unlock();
 
     // signal to the other thread that there may be space available now that a
     // packet send has completed
