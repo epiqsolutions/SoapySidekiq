@@ -87,6 +87,25 @@ target_link_libraries(sensor_tests PRIVATE non_hardware_test_options)
 add_test(NAME sensors.all COMMAND sensor_tests)
 set_tests_properties(sensors.all PROPERTIES LABELS "unit;non-hardware")
 
+# Exercise the advertised sensor metadata without constructing an SDK-owned device.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Sensor.cpp)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Sensor.cpp" sensor_source)
+string(FIND "${sensor_source}" "std::vector<std::string> SoapySidekiq::listSensors(" sensor_start)
+string(FIND "${sensor_source}" "std::string SoapySidekiq::readSensor(" sensor_end)
+if(sensor_start LESS 0 OR sensor_end LESS sensor_start)
+    message(FATAL_ERROR "Could not locate production sensor metadata methods")
+endif()
+math(EXPR sensor_length "${sensor_end} - ${sensor_start}")
+string(SUBSTRING "${sensor_source}" ${sensor_start} ${sensor_length} sensor_metadata)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/SensorMetadataMethods.inc" "${sensor_metadata}")
+add_executable(sensor_metadata_tests
+    support/TestMain.cpp component/SensorMetadataTests.cpp)
+target_include_directories(sensor_metadata_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(sensor_metadata_tests PRIVATE non_hardware_test_options)
+add_test(NAME sensor-metadata.all COMMAND sensor_metadata_tests)
+set_tests_properties(sensor-metadata.all PROPERTIES LABELS "component;non-hardware")
+
 # Validate stream requests without invoking SDK setup or allocating buffer pools.
 add_executable(stream_configuration_tests
     support/TestMain.cpp

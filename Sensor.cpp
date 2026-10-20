@@ -8,10 +8,42 @@
 #include <SoapySidekiq/SensorReader.hpp>
 #include <SoapySidekiq/SidekiqSensorBackend.hpp>
 
+#include <stdexcept>
+#include <string>
+#include <vector>
+
 std::vector<std::string> SoapySidekiq::listSensors(void) const
 {
     SoapySDR_log(SOAPY_SDR_TRACE, "listSensors");
     return {"temperature", "accelerometer"};
+}
+
+SoapySDR::ArgInfo SoapySidekiq::getSensorInfo(const std::string &key) const
+{
+    SoapySDR::ArgInfo info;
+    info.key = key;
+    if (key == "temperature")
+    {
+        info.name = "Card temperature";
+        info.description =
+            "Signed card temperature in degrees Celsius. Returns 0 on a logged SDK read failure.";
+        info.units = "C";
+        info.type = SoapySDR::ArgInfo::INT;
+    }
+    else if (key == "accelerometer")
+    {
+        info.name = "Accelerometer";
+        info.description =
+            "JSON object with signed integer x, y, z axes in thousandths of standard gravity (mg). "
+            "Returns {} when unsupported or on a logged SDK failure.";
+        info.units = "mg";
+        info.type = SoapySDR::ArgInfo::STRING;
+    }
+    else
+    {
+        throw std::invalid_argument("Unknown sensor: " + key);
+    }
+    return info;
 }
 
 std::string SoapySidekiq::readSensor(const std::string &key) const

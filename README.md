@@ -232,6 +232,27 @@ Absolute timed starts/stops, additional flags, and finite-burst activation
 timed writes, end-of-burst, and fragment flags are unsupported. As in the
 SoapySDR contract, `timeNs` is ignored when `HAS_TIME` is absent.
 
+## Sensors
+
+`listSensors()` exposes `temperature` and `accelerometer`. `getSensorInfo()`
+describes their types, units, and string formats without reading hardware.
+
+| Key | Type | Units | `readSensor()` value |
+| --- | --- | --- | --- |
+| `temperature` | Integer | Degrees Celsius (`C`) | Signed decimal, for example `-12` |
+| `accelerometer` | String | Thousandths of standard gravity (`mg`) | JSON object, for example `{"x":1,"y":-2,"z":1000}` |
+
+Accelerometer axes retain the SDK's signed integer values; `1000` represents
+one standard gravity. JSON uses `x`, `y`, and `z` numeric members and is independent
+of the application's locale. The SDK 4.26 sensor API reports these units for all
+supported products. Metadata does not imply that a card has an accelerometer:
+the read checks support and returns `{}` when it is absent.
+
+The existing read API logs SDK failures and returns `0` for temperature or `{}`
+for acceleration. A temperature value of `0` alone therefore cannot distinguish
+a valid reading from a failed read. Metadata requests for unknown keys raise
+an argument error.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
