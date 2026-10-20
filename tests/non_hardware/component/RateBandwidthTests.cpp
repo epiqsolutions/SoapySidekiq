@@ -29,7 +29,7 @@ struct FakeSdk
     std::array<Configuration, 10> state;
     unsigned reads{}, writes{}, handle{};
     int direction{}, write_status{};
-    unsigned fail_read{}, invalid_read{};
+    unsigned fail_read{}, invalid_read{}, omit_bandwidth_at{};
     bool coupled{}, omit_actual{};
     std::uint8_t card{};
     std::uint32_t written_rate{}, written_bw{};
@@ -68,10 +68,14 @@ int readConfiguration(int direction, std::uint8_t card, unsigned handle, std::ui
     const auto &current = sdk.state.at(handle);
     *rate = current.rate;
     *bandwidth = current.bandwidth;
-    *actual_bw = 777; // Model partial output even when the SDK returns failure.
+    const bool omit_bandwidth = sdk.reads == sdk.omit_bandwidth_at;
+    // Model partial output on error, or omitted actual bandwidth on success.
+    if (!omit_bandwidth)
+        *actual_bw = 777;
     if (sdk.reads == sdk.fail_read)
         return -EIO;
-    *actual_bw = current.actual_bandwidth;
+    if (!omit_bandwidth)
+        *actual_bw = current.actual_bandwidth;
     if (!sdk.omit_actual)
         *actual_rate = sdk.reads == sdk.invalid_read ? std::numeric_limits<double>::quiet_NaN()
                                                      : current.actual_rate;
@@ -316,4 +320,47 @@ TEST_CASE("zero bandwidth remains an SDK-decided request with actual readback")
     device.setBandwidth(SOAPY_SDR_TX, 0, 0);
     REQUIRE_EQ(sdk.written_bw, std::uint32_t{0});
     REQUIRE_EQ(device.tx_bandwidths[0], std::uint32_t{12345});
+}
+
+TEST_CASE("RF getters reject successful SDK calls that omit actual bandwidth")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+    {
+        SoapySidekiq device;
+        sdk.omit_bandwidth_at = 1;
+        REQUIRE_THROWS_AS(device.getBandwidth(direction, 0), std::runtime_error);
+        sdk.omit_bandwidth_at = 2;
+        REQUIRE_THROWS_AS(device.getSampleRate(direction, 0), std::runtime_error);
+        REQUIRE_EQ(sdk.writes, 0u);
+    }
+}
+
+TEST_CASE("missing actual bandwidth after an RF write leaves both cached fields intact")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (const bool bandwidth : {false, true})
+        {
+            SoapySidekiq device;
+            sdk.omit_bandwidth_at = 2;
+            if (bandwidth)
+                REQUIRE_THROWS_AS(device.setBandwidth(direction, 0, 1000000), std::runtime_error);
+            else
+                REQUIRE_THROWS_AS(device.setSampleRate(direction, 0, 10000000), std::runtime_error);
+            REQUIRE_EQ(sdk.writes, 1u);
+            REQUIRE_EQ(device.cachedRate(direction), std::uint32_t{20000000});
+            REQUIRE_EQ(device.cachedBandwidth(direction), std::uint32_t{18000000});
+        }
+}
+
+TEST_CASE("zero actual filter width is rejected before another RF configuration write")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+    {
+        SoapySidekiq device;
+        sdk.state[direction == SOAPY_SDR_RX ? 3u : 6u].actual_bandwidth = 0;
+        REQUIRE_THROWS_AS(device.getBandwidth(direction, 0), std::runtime_error);
+        REQUIRE_THROWS_AS(device.setSampleRate(direction, 0, 10000000), std::runtime_error);
+        REQUIRE_EQ(sdk.writes, 0u);
+        REQUIRE_EQ(device.cachedBandwidth(direction), std::uint32_t{18000000});
+    }
 }

@@ -1520,6 +1520,10 @@ SoapySidekiq::RateAndBandwidth SoapySidekiq::readRateAndBandwidth(const int dire
     if (configured_rate == 0 || !std::isfinite(actual_rate) || actual_rate < 1 ||
         actual_rate >= std::ldexp(1.0, 32))
         throw std::runtime_error(operation + " returned an invalid sample rate");
+    // Zero may request automatic bandwidth selection, but it is not a usable
+    // actual filter width. The zero initializer also detects omitted output.
+    if (actual_bw == 0)
+        throw std::runtime_error(operation + " returned missing or zero actual bandwidth");
     return {configured_rate, actual_rate, actual_bw};
 }
 
