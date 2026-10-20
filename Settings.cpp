@@ -1733,66 +1733,26 @@ long long SoapySidekiq::getHardwareTime(const std::string &what="") const
 
 void SoapySidekiq::setHardwareTime(const long long timeNs, const std::string &what="")
 {
-    int status = 0;
-    double double_timestamp = 0;
-    uint64_t new_timestamp = 0;
-    uint64_t current_sys_freq = 0;
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "setHardwareTime");
-
-    status = skiq_read_sys_timestamp_freq(card, &current_sys_freq);
+    const bool now = what.empty() || equalsIgnoreCase(what, "now");
+    const bool on_pps = equalsIgnoreCase(what, "1pps");
+    if (!now && !on_pps)
+        throw std::invalid_argument("Unknown hardware-time update: " + what);
+    if (timeNs < 0)
+        throw std::invalid_argument("Hardware time cannot be negative");
+    uint64_t frequency = 0;
+    const int read_status = skiq_read_sys_timestamp_freq(card, &frequency);
+    if (read_status != 0)
+        throw std::runtime_error("skiq_read_sys_timestamp_freq failed: " +
+                                 std::to_string(read_status));
+    const auto timestamp = soapy_sidekiq::nanosecondsToTicks(timeNs, frequency);
+    // Preserve SDK semantics: immediate updates set both counters to the same
+    // raw ticks; PPS updates set RF to zero and system to the requested ticks.
+    const int status = now ? skiq_update_timestamps(card, timestamp)
+                           : skiq_write_timestamp_update_on_1pps(card, 0, timestamp);
     if (status != 0)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR,
-                      "skiq_read_sys_timestamp_freq failed (card %u), status %d",
-                      card, status);
-        throw std::runtime_error("");
-    }
-
-    // convert timeNs to sys timestamp frequency
-    // we only care about setting the sys_timestamp but we have to set both
-    // given the API call
-    double_timestamp = static_cast<double>(timeNs) * static_cast<double>(current_sys_freq) /
-                       static_cast<double>(NANOS_IN_SEC);
-    new_timestamp = static_cast<uint64_t>(double_timestamp);
-
-    if (equalsIgnoreCase(what, "now"))
-    {
-        status = skiq_update_timestamps(card, new_timestamp);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_update_timestamps failed, (card %u), status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-
-        SoapySDR_logf(SOAPY_SDR_INFO, "card %u, updated both timestamps to %lld",
-                      card, new_timestamp);
-
-        return;
-    }
-    else if (equalsIgnoreCase(what, "1pps"))
-    {
-        status = skiq_write_timestamp_update_on_1pps(card, 0, new_timestamp);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_update_timestamp_on_1pps failed, (card %u), status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-        SoapySDR_logf(SOAPY_SDR_INFO, "card %d, updated timestamps to %lu on the next 1pps",
-                      card, new_timestamp);
-
-        return;
-    }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_WARNING, "invalid 'what' parameter %s", what.c_str());
-    }
-
-    return;
+        throw std::runtime_error(
+            std::string(now ? "skiq_update_timestamps" : "skiq_write_timestamp_update_on_1pps") +
+            " failed: " + std::to_string(status));
 }
 
 /*******************************************************************
