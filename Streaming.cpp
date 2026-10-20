@@ -836,7 +836,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
     }
 
     // Pointer to the location in the input buffer to transmit from
-    char *inbuff_ptr = (char *)(buffs[0]);
+    const char *inbuff_ptr = static_cast<const char *>(buffs[0]);
 
     uint32_t num_blocks = numElems / current_tx_block_size;
 
@@ -851,8 +851,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
     while (curr_block < num_blocks)
     {
         // Pointer to the location in the output buffer to copy to.
-        char *outbuff_ptr =
-                    (char *)p_tx_block[currTXBuffIndex]->data;
+        char *outbuff_ptr = reinterpret_cast<char *>(p_tx_block[currTXBuffIndex]->data);
 
         // determine if we received short or float
         if (txUseShort)
