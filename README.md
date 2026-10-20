@@ -160,6 +160,9 @@ Antenna APIs expose the currently configured RF port. Selecting that same
 port is supported; switching to another port is not yet implemented. Cards
 without RF-port reporting return no antenna names.
 
+Automatic gain control is exposed for RX. TX uses manual attenuation and
+reports `hasGainMode()` as false; requesting TX automatic mode raises an error.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
