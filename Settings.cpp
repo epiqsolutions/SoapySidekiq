@@ -16,6 +16,7 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 #include <vector>
 #include <string>
 #include <sidekiq_types.h>
@@ -254,6 +255,50 @@ skiq_rx_hdl_t SoapySidekiq::getFirstRxHandle(void) const
 skiq_tx_hdl_t SoapySidekiq::getFirstTxHandle(void) const
 {
     return getTxHandle(0);
+}
+
+// Acquire constructor callback resources as one transaction. No stream can be
+// active yet, so failed registration can be unwound before SDK initialization
+// is released by the constructor's outer rollback guard.
+void SoapySidekiq::initializeTxCallbacks()
+{
+    int status = pthread_mutex_init(&space_avail_mutex, nullptr);
+    if (status != 0)
+    {
+        throw std::system_error(status, std::generic_category(), "TX space mutex initialization");
+    }
+    soapy_sidekiq::ScopeExit mutex_rollback([this]() noexcept
+                                            { pthread_mutex_destroy(&space_avail_mutex); });
+
+    status = pthread_cond_init(&space_avail_cond, nullptr);
+    if (status != 0)
+    {
+        throw std::system_error(status, std::generic_category(),
+                                "TX space condition initialization");
+    }
+    soapy_sidekiq::ScopeExit condition_rollback([this]() noexcept
+                                                { pthread_cond_destroy(&space_avail_cond); });
+
+    registerInstance(card, this);
+    soapy_sidekiq::ScopeExit registry_rollback([this]() noexcept
+                                               { unregisterInstance(card, this); });
+
+    status = skiq_register_tx_complete_callback(card, &SoapySidekiq::tx_complete_callback);
+    if (status != 0)
+    {
+        throw std::runtime_error("skiq_register_tx_complete_callback failed (card " +
+                                 std::to_string(card) + ", status " + std::to_string(status) + ")");
+    }
+    soapy_sidekiq::ScopeExit callback_rollback(
+        [this]() noexcept { skiq_register_tx_complete_callback(card, nullptr); });
+
+    // A user-installed log sink may throw. Keep rollback armed through the
+    // final potentially throwing operation in the device constructor.
+    SoapySDR_logf(SOAPY_SDR_TRACE, "leaving constructor", card);
+    callback_rollback.release();
+    registry_rollback.release();
+    condition_rollback.release();
+    mutex_rollback.release();
 }
 
 // Constructor
@@ -522,25 +567,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     // The member owner also releases it if later constructor work throws.
     p_tx_status = std::make_unique<int32_t[]>(DEFAULT_NUM_BUFFERS);
 
-    // register the transmit complete callback
-    pthread_mutex_init(&space_avail_mutex, nullptr);
-    pthread_cond_init(&space_avail_cond, nullptr);
-    registerInstance(card, this);
-
-    status = skiq_register_tx_complete_callback(card,
-                                        &SoapySidekiq::tx_complete_callback);
-    if (status != 0)
-    {
-        unregisterInstance(card, this);
-        pthread_cond_destroy(&space_avail_cond);
-        pthread_mutex_destroy(&space_avail_mutex);
-        SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_register_tx_complete_callback failed, "
-                      "card: %u status: %d",
-                      card, status);
-        throw std::runtime_error("");
-    }
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "leaving constructor", card);
+    initializeTxCallbacks();
     rollback.release();
 }
 
