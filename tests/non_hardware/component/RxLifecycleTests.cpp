@@ -451,3 +451,28 @@ TEST_CASE("immediate RX activation ignores timeNs when HAS_TIME is absent")
     REQUIRE_EQ(device.activateStream(stream, 0, 123, 0), 0);
     REQUIRE_EQ(device.deactivateStream(stream, 0, 123), 0);
 }
+
+TEST_CASE("failed RX deactivation returns a stream error and preserves hardware stop retry")
+{
+    for (const int flags : {0, SOAPY_SDR_HAS_TIME})
+    {
+        SoapySidekiq device;
+        auto *stream = device.setupRx();
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+        device.awaitWorkerFailure();
+        auto *const owner = device.active_rx_stream;
+        sdk.stop_status = -EIO;
+        REQUIRE_EQ(device.deactivateStream(stream, flags, 0), SOAPY_SDR_STREAM_ERROR);
+        REQUIRE(device.active_rx_stream == owner);
+        REQUIRE(sdk.streaming);
+        REQUIRE_EQ(sdk.stop_on_pps, flags == SOAPY_SDR_HAS_TIME);
+        REQUIRE_THROWS_AS(device.closeStream(stream), std::runtime_error);
+        REQUIRE(device.active_rx_stream == owner);
+        REQUIRE(sdk.streaming);
+        sdk.stop_status = 0;
+        REQUIRE_EQ(device.deactivateStream(stream, flags, 0), 0);
+        REQUIRE(!sdk.streaming);
+        device.closeStream(stream);
+        REQUIRE(device.active_rx_stream == nullptr);
+    }
+}
