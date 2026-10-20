@@ -312,6 +312,17 @@ target_include_directories(gain_mode_tests PRIVATE
 target_link_libraries(gain_mode_tests PRIVATE non_hardware_test_options)
 add_test(NAME gain-mode.all COMMAND gain_mode_tests)
 set_tests_properties(gain-mode.all PROPERTIES LABELS "component;non-hardware")
+extract_settings_method(gain_profiles "SoapySidekiq::GainProfile SoapySidekiq::gainProfile("
+    "std::vector<std::string> SoapySidekiq::listGains(")
+extract_settings_method(gain_methods "void SoapySidekiq::setGain("
+    "void SoapySidekiq::setFrequency(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/GainMethods.inc" "${gain_profiles}\n${gain_methods}")
+add_executable(gain_tests support/TestMain.cpp component/GainTests.cpp)
+target_include_directories(gain_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(gain_tests PRIVATE non_hardware_test_options)
+add_test(NAME gain.all COMMAND gain_tests)
+set_tests_properties(gain.all PROPERTIES LABELS "component;non-hardware")
 extract_settings_method(rate_set "void SoapySidekiq::setSampleRate("
     "double SoapySidekiq::getSampleRate(")
 extract_settings_method(rate_get "double SoapySidekiq::getSampleRate("
@@ -383,7 +394,7 @@ add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
             channel_metadata_tests sample_rate_capability_tests frequency_tests
-            rate_bandwidth_tests gain_mode_tests
+            rate_bandwidth_tests gain_mode_tests gain_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
