@@ -169,6 +169,20 @@ The SDK can run selected calibrations during subsequent RX tuning operations.
 Automatic gain control is exposed for RX. TX uses manual attenuation and
 reports `hasGainMode()` as false; requesting TX automatic mode raises an error.
 
+PPS source selection rejects unknown names. If the SDK source API fails, the
+existing kernel PPS endpoint is used when available. Selecting external or
+internal PPS requires a timestamp transition across one one-second observation
+interval; missing edges, SDK errors, and interrupted waits raise an error.
+Source configuration can already have changed when pulse verification fails.
+The kernel fallback can select external/internal GPS, but cannot disable PPS.
+
+Clock selection accepts `internal_clock` or `external_clock` (case insensitive)
+and rejects other names before accessing the SDK. Actual source support is
+card dependent; SDK failures are returned to the caller. The SDK host reference
+retains the `internal_clock` alias. Reference rates describe configuration,
+not measured clock presence or lock; zero rates are rejected. External-rate
+readback depends on SDK/card support.
+
 Device setting keys are case insensitive. `iq_swap` and `counter` accept
 `true`/`false` (case insensitive) or `1`/`0`; other values raise an error.
 `sys_clock_freq`, `full_scale`, `overload`, and `cal_offset` are read only.
