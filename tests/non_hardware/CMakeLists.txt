@@ -168,6 +168,10 @@ set_tests_properties(timestamp-portable.all PROPERTIES LABELS "unit;non-hardware
 # Compile the production SDK log callback against a capturing log sink.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Settings.cpp)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Settings.cpp" settings_source)
+# RF methods remain production bodies after splitting their implementation unit.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../RFControls.cpp)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../RFControls.cpp" rf_controls_source)
+string(APPEND settings_source "\n${rf_controls_source}")
 string(FIND "${settings_source}" "void logging_handler(" log_start)
 string(FIND "${settings_source}" "void SoapySidekiq::tx_complete(" log_end)
 if(log_start LESS 0 OR log_end LESS log_start)
@@ -304,8 +308,8 @@ extract_settings_method(channel_validation "void SoapySidekiq::validateChannel("
     "skiq_rx_hdl_t SoapySidekiq::getRxHandle(")
 extract_settings_method(channel_mapping "skiq_rx_hdl_t SoapySidekiq::getRxHandle("
     "skiq_rx_hdl_t SoapySidekiq::getFirstRxHandle(")
-extract_settings_method(channel_count "size_t SoapySidekiq::getNumChannels("
-    "std::vector<std::string> SoapySidekiq::listAntennas(")
+extract_settings_method(channel_count "size_t SoapySidekiq::getNumChannels(" "\n}\n")
+string(APPEND channel_count "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelValidationMethods.inc"
     "${channel_count}\n${channel_validation}")
 extract_stream_method(stream_metadata "std::vector<std::string> SoapySidekiq::getStreamFormats("
@@ -432,8 +436,8 @@ extract_settings_method(rate_helpers "SoapySidekiq::RateAndBandwidth SoapySideki
     "void SoapySidekiq::setBandwidth(")
 extract_settings_method(bandwidth_set "void SoapySidekiq::setBandwidth("
     "std::vector<double> SoapySidekiq::listSampleRates(")
-extract_settings_method(bandwidth_get "double SoapySidekiq::getBandwidth("
-    "SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo(")
+extract_settings_method(bandwidth_get "double SoapySidekiq::getBandwidth(" "\n}\n")
+string(APPEND bandwidth_get "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RateBandwidthMethods.inc"
     "${rate_set}\n${rate_get}\n${rate_helpers}\n${bandwidth_set}\n${bandwidth_get}")
 add_executable(rate_bandwidth_tests support/TestMain.cpp component/RateBandwidthTests.cpp)
