@@ -11,6 +11,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <memory>
 #include <pthread.h>
 #include <stdexcept>
 #include <string>
@@ -50,7 +51,8 @@ public:
     double txMaxValue{32767};
     skiq_tx_block_t blocks[DEFAULT_NUM_BUFFERS];
     skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{&blocks[0], &blocks[1], &blocks[2]};
-    std::int32_t p_tx_status[DEFAULT_NUM_BUFFERS]{};
+    std::unique_ptr<std::int32_t[]> p_tx_status{
+        std::make_unique<std::int32_t[]>(DEFAULT_NUM_BUFFERS)};
     passedStruct *passedStructInstance{};
     std::mutex tx_buf_mutex;
     std::mutex tx_mutex;

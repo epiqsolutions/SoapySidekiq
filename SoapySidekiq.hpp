@@ -282,7 +282,8 @@ class SoapySidekiq : public SoapySDR::Device
     bool tx_start_finished{};
     int tx_start_status{};
     bool tx_stream_active{};
-    int32_t *p_tx_status{};
+    // Fixed-size status storage is allocated before callbacks are registered.
+    std::unique_ptr<int32_t[]> p_tx_status;
     bool first_transmit{};
     StreamHandle *active_tx_stream{};
 
