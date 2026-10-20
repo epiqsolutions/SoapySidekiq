@@ -152,6 +152,10 @@ prefix, advance the input by that many complex samples and retry the suffix.
 CF32 components clip to [-1, 1], infinities clip to the corresponding endpoint,
 and NaN converts to zero before scaling to the card's TX full scale.
 
+`listSampleRates()` retains a compatibility list spaced at 250 kHz within the
+SDK's reported bounds. It does not enumerate the exact profiles of cards with
+discrete rate support; the SDK validates each requested rate.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

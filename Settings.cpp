@@ -1472,32 +1472,21 @@ double SoapySidekiq::getSampleRate(const int direction, const size_t channel) co
 SoapySDR::RangeList SoapySidekiq::getSampleRateRange(const int direction,
                                                      const size_t channel) const
 {
-    int                 status = 0;
-    uint32_t            min_sample_rate;
-    uint32_t            max_sample_rate;
-    SoapySDR::RangeList ranges;
-
-    SoapySDR_log(SOAPY_SDR_TRACE, "getSampleRateRange");
-
-    status = skiq_read_min_sample_rate(card, &min_sample_rate);
+    validateChannel(direction, channel);
+    uint32_t minimum{}, maximum{};
+    const std::string context =
+        " (card " + std::to_string(card) + ", channel " + std::to_string(channel) + ")";
+    int status = skiq_read_min_sample_rate(card, &minimum);
     if (status != 0)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR,
-                      "skiq_read_min_sample_rate failed, (card %u), status %d",
-                      card, status);
-        throw std::runtime_error("");
-    }
-    status = skiq_read_max_sample_rate(card, &max_sample_rate);
+        throw std::runtime_error("skiq_read_min_sample_rate" + context + " failed, status " +
+                                 std::to_string(status));
+    status = skiq_read_max_sample_rate(card, &maximum);
     if (status != 0)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR,
-                      "skiq_read_max_sample_rate (card %u), status %d",
-                      card, status);
-        throw std::runtime_error("");
-    }
-    ranges.push_back(SoapySDR::Range(min_sample_rate, max_sample_rate));
-
-    return ranges;
+        throw std::runtime_error("skiq_read_max_sample_rate" + context + " failed, status " +
+                                 std::to_string(status));
+    if (minimum == 0 || minimum > maximum)
+        throw std::runtime_error("invalid SDK sample-rate bounds" + context);
+    return {SoapySDR::Range(minimum, maximum)};
 }
 
 SoapySidekiq::RateAndBandwidth SoapySidekiq::readRateAndBandwidth(const int direction,
@@ -1569,26 +1558,17 @@ void SoapySidekiq::setBandwidth(const int direction, const size_t channel, const
  * For other cards, there are profiles and there are only specific rates available
  * For now we will just give a list of min-max, with steps of 250k Hz.
  */
-std::vector<double> SoapySidekiq::listSampleRates(const int direction, const size_t channel) const {
-  std::vector<double> results;
-
-  uint32_t min_sample_rate;
-  if (skiq_read_min_sample_rate(card, &min_sample_rate) != 0) {
-    SoapySDR_logf(SOAPY_SDR_ERROR, "Failure: skiq_read_min_sample_rate (card %d)", card);
-  }
-  uint32_t max_sample_rate;
-  if (skiq_read_max_sample_rate(card, &max_sample_rate) != 0) {
-    SoapySDR_logf(SOAPY_SDR_ERROR, "Failure: skiq_read_min_sample_rate (card %d)", card);
-  }
-
-  //  iterate through all sample rates
-  uint32_t sample_rate = min_sample_rate;
-  while (sample_rate <= max_sample_rate) {
-    results.push_back(sample_rate);
-    sample_rate += 250000;
-  }
-
-  return results;
+std::vector<double> SoapySidekiq::listSampleRates(const int direction, const size_t channel) const
+{
+    const auto bounds = getSampleRateRange(direction, channel).front();
+    const auto minimum = static_cast<uint64_t>(bounds.minimum());
+    const auto maximum = static_cast<uint64_t>(bounds.maximum());
+    std::vector<double> rates;
+    // Keep the legacy compatibility grid. A wider counter prevents uint32
+    // wraparound at a large SDK maximum; this does not enumerate RF profiles.
+    for (uint64_t rate = minimum; rate <= maximum; rate += 250000)
+        rates.push_back(static_cast<double>(rate));
+    return rates;
 }
 
 double SoapySidekiq::getBandwidth(const int direction, const size_t channel) const
