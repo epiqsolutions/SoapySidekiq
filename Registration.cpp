@@ -1,7 +1,7 @@
 //  Copyright [2018] <Alexander Hurd>"
 
 /**
- * @file Registation.cpp
+ * @file Registration.cpp
  * @brief Connects Sidekiq discovery and construction to the SoapySDR registry.
  */
 
