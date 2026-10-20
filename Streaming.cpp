@@ -73,22 +73,26 @@ SoapySidekiq *SoapySidekiq::getInstanceForCard(uint8_t card)
     return (it != g_instance_registry.end()) ? it->second : nullptr;
 }
 
-void SoapySidekiq::tx_complete_callback(int32_t status,
-                                               skiq_tx_block_t *p_data,
-                                               void *p_user)
+void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
+                                        void *p_user) noexcept
 {
-    passedStruct *instance = static_cast<passedStruct *>(p_user);
-    if (instance == nullptr || instance->classAddr == nullptr)
+    // Completion owns the accepted submission's context, including on every
+    // diagnostic/exception path. Never unwind through the SDK's C boundary.
+    std::unique_ptr<passedStruct> instance(static_cast<passedStruct *>(p_user));
+    try
     {
-        SoapySDR_log(SOAPY_SDR_ERROR, "tx_complete callback received invalid user data");
-        delete instance;
-        return;
-    }
+        if (instance == nullptr || instance->classAddr == nullptr)
+        {
+            SoapySDR_log(SOAPY_SDR_ERROR, "tx_complete callback received invalid user data");
+            return;
+        }
 
-    SoapySidekiq *self = instance->classAddr;
-    const uint32_t txIndex = instance->txIndex;
-    self->tx_complete(status, p_data, txIndex);
-    delete instance;
+        instance->classAddr->tx_complete(status, p_data, instance->txIndex);
+    }
+    catch (...)
+    {
+        // A failing log sink must not escape or be retried from this callback.
+    }
 }
 
 long long SoapySidekiq::convert_timestamp_to_nanos(

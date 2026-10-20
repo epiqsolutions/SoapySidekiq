@@ -36,7 +36,14 @@
 #define SOAPY_SDR_TIMEOUT -3
 #define SKIQ_TX_ASYNC_SEND_QUEUE_FULL 1
 #define DEFAULT_NUM_BUFFERS 3
-#define SoapySDR_logf(...) ((void)0)
+std::function<void()> log_hook;
+static void completionLog()
+{
+    if (log_hook)
+        log_hook();
+}
+#define SoapySDR_logf(...) completionLog()
+#define SoapySDR_log(...) completionLog()
 
 namespace SoapySDR { struct Stream {}; }
 struct skiq_tx_block_t { std::int16_t data[504]{}; };
@@ -147,9 +154,11 @@ public:
     int writeStream(SoapySDR::Stream *, const void *const *, std::size_t,
                     int &, long long, long);
     void tx_complete(int32_t, skiq_tx_block_t *, uint32_t);
+    static void tx_complete_callback(int32_t, skiq_tx_block_t *, void *) noexcept;
 };
 
 #include "TxCompletionMethod.inc"
+#include "TxCompletionCallback.inc"
 
 /** Capture each accepted packet and complete its ownership synchronously. */
 int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *context)
@@ -191,18 +200,16 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
                 if (lock.owns_lock())
                 {
                     lock.unlock();
-                    device.tx_complete(0, block, context->txIndex);
+                    device.tx_complete_callback(0, block, context);
                     completed = true;
                 }
             });
         completion.join();
-        delete context;
         REQUIRE(completed);
     }
     else
     {
-        device.tx_complete(0, block, context->txIndex);
-        delete context;
+        device.tx_complete_callback(0, block, context);
     }
     return 0;
 }
@@ -699,4 +706,52 @@ TEST_CASE("TX buffer completion wakes the maximum timeout without overflow")
                                   std::numeric_limits<long>::max()),
                static_cast<int>(device.current_tx_block_size));
     REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+}
+
+TEST_CASE("TX callback releases context after throwing diagnostics and publishes completion first")
+{
+    SoapySidekiq device;
+    auto *context = new passedStruct;
+    context->classAddr = &device;
+    context->txIndex = 0;
+    // An unexpected prior status exercises the diagnostic path.
+    device.p_tx_status[0] = 0;
+    bool published = false, unlocked = false;
+    log_hook = [&]
+    {
+        std::unique_lock<std::mutex> lock(device.tx_buf_mutex, std::try_to_lock);
+        unlocked = lock.owns_lock();
+        published = unlocked && device.p_tx_status[0] == 0 && device.complete_count == 1;
+        throw std::runtime_error("injected log failure");
+    };
+    soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
+    static_assert(noexcept(SoapySidekiq::tx_complete_callback(0, nullptr, nullptr)));
+    SoapySidekiq::tx_complete_callback(0, &device.blocks[0], context);
+    REQUIRE(published);
+    REQUIRE(unlocked);
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("TX callback contains invalid-user diagnostics and frees ownerless contexts")
+{
+    log_hook = [] { throw std::runtime_error("injected log failure"); };
+    soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
+    SoapySidekiq::tx_complete_callback(0, nullptr, nullptr);
+    SoapySidekiq::tx_complete_callback(0, nullptr, new passedStruct);
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("TX callback rejects out-of-range indices without touching status storage")
+{
+    SoapySidekiq device;
+    auto *context = new passedStruct;
+    context->classAddr = &device;
+    context->txIndex = DEFAULT_NUM_BUFFERS;
+    log_hook = [] { throw std::runtime_error("injected log failure"); };
+    soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
+    SoapySidekiq::tx_complete_callback(0, nullptr, context);
+    REQUIRE_EQ(device.complete_count, std::uint64_t{0});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    for (int i = 0; i < DEFAULT_NUM_BUFFERS; ++i)
+        REQUIRE_EQ(device.p_tx_status[i], 0);
 }
