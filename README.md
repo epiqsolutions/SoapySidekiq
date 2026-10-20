@@ -206,6 +206,12 @@ deactivation, I/O, and status calls. `closeStream` and `getStreamMTU` raise
 an argument error for an unknown token; MTU failures never return an unsigned
 version of a negative error code.
 
+RX activation reads the current actual sample rate and, when selected, the
+current system timestamp frequency. Fractional sample rates retain their exact
+binary value through the worker and partial-read timestamp calculation.
+Configure rates, clocks, and timestamp selection before activating RX; stop
+and reactivate RX after changing them so it captures a fresh timing snapshot.
+
 `getHardwareTime` uses system time for the empty selector or `sys_timestamp`.
 Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle
 with the SDK's current actual rate, preserving fractional Hz. Missing rates,

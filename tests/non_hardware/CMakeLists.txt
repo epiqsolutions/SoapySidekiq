@@ -105,7 +105,8 @@ set_tests_properties(stream-configuration.all PROPERTIES LABELS "unit;non-hardwa
 add_executable(stream_conversion_tests
     support/TestMain.cpp
     unit/SampleConversionTests.cpp
-    unit/TimestampConversionTests.cpp)
+    unit/TimestampConversionTests.cpp
+    unit/TimestampRateTests.cpp)
 target_include_directories(stream_conversion_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
@@ -154,7 +155,8 @@ add_test(NAME rx-sample-queue-portable.all COMMAND rx_sample_queue_portable_test
 set_tests_properties(rx-sample-queue-portable.all PROPERTIES LABELS "unit;non-hardware")
 # Exercise the integer fallback on hosts that normally select __int128.
 add_executable(timestamp_portable_tests
-    support/TestMain.cpp unit/TimestampConversionTests.cpp)
+    support/TestMain.cpp unit/TimestampConversionTests.cpp
+    unit/TimestampRateTests.cpp)
 target_include_directories(timestamp_portable_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_compile_definitions(timestamp_portable_tests PRIVATE

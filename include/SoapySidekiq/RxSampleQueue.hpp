@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <SoapySidekiq/TimestampRate.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -88,11 +89,8 @@ public:
      * @return Whether the block was accepted, displaced old data, or was stopped.
      * @throws std::invalid_argument for a nonempty null buffer or zero rate.
      */
-    RxPushStatus push(
-        const std::int16_t *samples,
-        std::size_t complex_samples,
-        std::int64_t time_ns,
-        std::uint64_t sample_rate);
+    RxPushStatus push(const std::int16_t *samples, std::size_t complex_samples,
+                      std::int64_t time_ns, TimestampRate sample_rate);
 
     /**
      * Move one owned interleaved CS16 hardware block into the queue.
@@ -102,10 +100,8 @@ public:
      * @return Whether the block was accepted, displaced old data, or was stopped.
      * @throws std::invalid_argument for empty/odd sample data or a zero rate.
      */
-    RxPushStatus push(
-        std::vector<std::int16_t> samples,
-        std::int64_t time_ns,
-        std::uint64_t sample_rate);
+    RxPushStatus push(std::vector<std::int16_t> samples, std::int64_t time_ns,
+                      TimestampRate sample_rate);
 
     /**
      * Queue samples with their unrounded hardware timestamp.
@@ -119,8 +115,8 @@ public:
      * @throws std::overflow_error when the initial timestamp cannot fit int64_t.
      */
     RxPushStatus pushTicks(const std::int16_t *samples, std::size_t complex_samples,
-                          std::uint64_t timestamp, std::uint64_t timestamp_frequency,
-                          std::uint64_t sample_rate);
+                           std::uint64_t timestamp, TimestampRate timestamp_frequency,
+                           TimestampRate sample_rate);
 
     /**
      * Move a block while retaining its exact hardware timestamp phase.
@@ -133,7 +129,7 @@ public:
      * @throws std::overflow_error when the timestamp cannot fit int64_t.
      */
     RxPushStatus pushTicks(std::vector<std::int16_t> samples, std::uint64_t timestamp,
-                          std::uint64_t timestamp_frequency, std::uint64_t sample_rate);
+                           TimestampRate timestamp_frequency, TimestampRate sample_rate);
 
     /**
      * Read up to requested_samples interleaved complex samples.
@@ -169,16 +165,16 @@ private:
         std::vector<std::int16_t> samples;
         std::size_t offset{};
         std::int64_t time_ns{};
-        std::uint64_t sample_rate{};
+        TimestampRate sample_rate{};
         // Fractional nanosecond phase lost by the integer time_ns conversion.
         std::uint64_t time_remainder{};
         std::uint64_t time_denominator{1};
     };
 
     /** Move and enqueue a block while preserving its fractional timestamp phase. */
-    RxPushStatus pushWithPhase(std::vector<std::int16_t> samples,
-                              std::int64_t time_ns, std::uint64_t sample_rate,
-                              std::uint64_t remainder, std::uint64_t denominator);
+    RxPushStatus pushWithPhase(std::vector<std::int16_t> samples, std::int64_t time_ns,
+                               TimestampRate sample_rate, std::uint64_t remainder,
+                               std::uint64_t denominator);
 
     /**
      * Calculate the timestamp of the next unread sample in a block.
