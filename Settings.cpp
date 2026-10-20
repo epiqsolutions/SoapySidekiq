@@ -26,56 +26,52 @@ static_assert(soapy_sidekiq::maxTxBlockSize == SKIQ_MAX_TX_BLOCK_SIZE_IN_WORDS);
 static_assert(soapy_sidekiq::txHeaderWords == SKIQ_TX_HEADER_SIZE_IN_WORDS);
 static_assert(soapy_sidekiq::txPacketIncrementWords == SKIQ_TX_PACKET_SIZE_INCREMENT_IN_WORDS);
 
-/******************************************************************************/
-/** This is the custom logging handler.  If there were custom handling
-    required for logging messages, it should be handled here.
-
-    @param signum: the signal number that occurred
-    @return void
-*/
-void logging_handler( int32_t priority, const char *message )
+/**
+ * Forward an SDK diagnostic to SoapySDR without taking ownership of its text.
+ * @param priority SDK log priority, mapped to the corresponding Soapy level.
+ * @param message Borrowed, null-terminated SDK text; null is treated as empty.
+ *
+ * Remove at most one trailing LF and then one CR, preserving the historical
+ * line-ending behavior. Diagnostics must not propagate C++ exceptions through
+ * the SDK's C callback boundary, even if allocation or a log sink fails.
+ */
+void logging_handler(int32_t priority, const char *message) noexcept
 {
-    //printf("<PRIORITY %" PRIi32 "> custom logger: %s", priority, message);
-
-    char* new_message = (char *)malloc(strlen(message) + 1);
-    strcpy(new_message, message);
-
-    // remove newline and or cr
-    size_t len = strlen(new_message);  // Get the length of the string
-
-    if (len > 0 && new_message[len - 1] == '\n') {
-        new_message[len - 1] = '\0';  // Replace newline with null terminator
-    }
-
-    len = strlen(new_message);  // Get the length of the string
-                            //
-    if (len > 0 && new_message[len - 1] == '\r') {
-        new_message[len - 1] = '\0';  // Replace newline with null terminator
-    }
-
-    switch (priority)
+    try
     {
+        std::string text(message != nullptr ? message : "");
+        if (!text.empty() && text.back() == '\n')
+        {
+            text.pop_back();
+        }
+        if (!text.empty() && text.back() == '\r')
+        {
+            text.pop_back();
+        }
+
+        switch (priority)
+        {
         case SKIQ_LOG_DEBUG:
-            SoapySDR_logf(SOAPY_SDR_DEBUG, "epiq-log: %s", new_message);
+            SoapySDR_logf(SOAPY_SDR_DEBUG, "epiq-log: %s", text.c_str());
             break;
-
         case SKIQ_LOG_INFO:
-            SoapySDR_logf(SOAPY_SDR_INFO, "epiq-log: %s", new_message);
+            SoapySDR_logf(SOAPY_SDR_INFO, "epiq-log: %s", text.c_str());
             break;
-
         case SKIQ_LOG_WARNING:
-            SoapySDR_logf(SOAPY_SDR_WARNING, "epiq-log: %s", new_message);
+            SoapySDR_logf(SOAPY_SDR_WARNING, "epiq-log: %s", text.c_str());
             break;
-
         case SKIQ_LOG_ERROR:
-            SoapySDR_logf(SOAPY_SDR_ERROR, "epiq-log: %s", new_message);
+            SoapySDR_logf(SOAPY_SDR_ERROR, "epiq-log: %s", text.c_str());
             break;
-
         default:
-            SoapySDR_logf(SOAPY_SDR_TRACE, "epiq-log undefined %s", new_message);
+            SoapySDR_logf(SOAPY_SDR_TRACE, "epiq-log undefined %s", text.c_str());
+        }
     }
-
-    free(new_message);
+    catch (...)
+    {
+        // Drop a failed diagnostic. Retrying the sink could recurse or throw
+        // again while the SDK is already reporting an error.
+    }
 }
 
 /*****************************************************************************/
