@@ -138,39 +138,14 @@ std::string SoapySidekiq::getNativeStreamFormat(const int    direction,
     return "CS16";
 }
 
-SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(
-            const int direction, const size_t channel) const
+SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(const int direction,
+                                                      const size_t channel) const
 {
     validateChannel(direction, channel);
-    SoapySDR::ArgInfoList streamArgs;
-
-    SoapySDR::ArgInfo bufflenArg;
-    bufflenArg.key = "bufflen";
-
     SoapySDR_logf(SOAPY_SDR_TRACE, "getStreamArgsInfo");
-
-    if (direction == SOAPY_SDR_RX)
-    {
-        bufflenArg.name        = "Buffer Sample Count";
-        bufflenArg.description = "Number of IQ samples per buffer.";
-        bufflenArg.units       = "(int16_t * 2) samples";
-        bufflenArg.type        = SoapySDR::ArgInfo::INT;
-        bufflenArg.value       = std::to_string(rx_payload_size_in_words);
-
-        streamArgs.push_back(bufflenArg);
-    }
-    else
-    {
-        bufflenArg.name        = "Buffer Sample Count";
-        bufflenArg.description = "Number of IQ samples per buffer.";
-        bufflenArg.units       = "(int16_t * 2) samples";
-        bufflenArg.value       = std::to_string(current_tx_block_size);
-        bufflenArg.type        = SoapySDR::ArgInfo::INT;
-
-        streamArgs.push_back(bufflenArg);
-    }
-
-    return streamArgs;
+    // setupStream has no per-stream options. Buffer sizes are reported by
+    // getStreamMTU; TX payload size is selected at device construction.
+    return {};
 }
 
 void SoapySidekiq::stopTxWrites()
