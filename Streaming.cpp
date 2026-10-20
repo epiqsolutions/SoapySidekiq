@@ -505,9 +505,18 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             }
         }
 
-        // Coupled RX/TX clocks may have changed since the last RX setter.
-        const auto sample_rate = soapy_sidekiq::TimestampRate::fromActualRate(
-            getSampleRate(SOAPY_SDR_RX, stream_handle->channel));
+        // Coupled clocks may have changed since the last RX setter. Timestamp
+        // setup needs only the actual rate, not configured rate or bandwidth.
+        uint32_t configured_rate{}, configured_bandwidth{}, actual_bandwidth{};
+        double actual_rate = std::numeric_limits<double>::quiet_NaN();
+        const int rate_status =
+            skiq_read_rx_sample_rate_and_bandwidth(card, rx_handle, &configured_rate, &actual_rate,
+                                                   &configured_bandwidth, &actual_bandwidth);
+        if (rate_status != 0)
+            throw std::runtime_error(
+                "RX activation rate read failed (card " + std::to_string(card) + ", handle " +
+                std::to_string(rx_handle) + "): " + std::to_string(rate_status));
+        const auto sample_rate = soapy_sidekiq::TimestampRate::fromActualRate(actual_rate);
         uint64_t system_frequency = rfTimeSource ? sys_freq : 0;
         if (!rfTimeSource)
         {
