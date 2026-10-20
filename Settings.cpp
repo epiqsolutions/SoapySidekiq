@@ -168,8 +168,7 @@ bool readKernel1PpsSource(skiq_1pps_source_t &source)
 
     if (active_source.empty())
     {
-        SoapySDR_logf(SOAPY_SDR_WARNING,
-                      "no active kernel 1pps source found in '%s'",
+        SoapySDR_logf(SOAPY_SDR_WARNING, "no active kernel 1pps source found in '%s'",
                       value.c_str());
         return false;
     }
@@ -202,16 +201,16 @@ bool writeKernel1PpsSource(const skiq_1pps_source_t source)
 
     switch (source)
     {
-        case skiq_1pps_source_external:
-            value = "external";
-            break;
+    case skiq_1pps_source_external:
+        value = "external";
+        break;
 
-        case skiq_1pps_source_host:
-            value = "internal-gps";
-            break;
+    case skiq_1pps_source_host:
+        value = "internal-gps";
+        break;
 
-        default:
-            return false;
+    default:
+        return false;
     }
 
     std::ofstream output(KERNEL_1PPS_SOURCE_PATH);
@@ -868,14 +867,12 @@ std::string SoapySidekiq::getTimeSource(void) const
     {
         if (readKernel1PpsSource(pps_source))
         {
-            SoapySDR_logf(SOAPY_SDR_INFO,
-                          "using kernel 1pps source fallback value %d for card %u",
+            SoapySDR_logf(SOAPY_SDR_INFO, "using kernel 1pps source fallback value %d for card %u",
                           pps_source, card);
         }
         else
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_read_1pps_source failed, (card %u), status %d",
+            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_read_1pps_source failed, (card %u), status %d",
                           card, status);
             throw std::runtime_error(
                 "skiq_read_1pps_source failed and kernel fallback unavailable: " +
@@ -885,21 +882,21 @@ std::string SoapySidekiq::getTimeSource(void) const
 
     switch (pps_source)
     {
-        case skiq_1pps_source_unavailable:
-            return SOURCE_1PPS_UNAVAILABLE;
-            break;
+    case skiq_1pps_source_unavailable:
+        return SOURCE_1PPS_UNAVAILABLE;
+        break;
 
-        case skiq_1pps_source_external:
-            return SOURCE_1PPS_EXTERNAL;
-            break;
+    case skiq_1pps_source_external:
+        return SOURCE_1PPS_EXTERNAL;
+        break;
 
-        case skiq_1pps_source_host:
-            return SOURCE_1PPS_INTERNAL;
-            break;
+    case skiq_1pps_source_host:
+        return SOURCE_1PPS_INTERNAL;
+        break;
 
-        default:
-            throw std::runtime_error("Invalid PPS source readback: " +
-                                     std::to_string(static_cast<int>(pps_source)));
+    default:
+        throw std::runtime_error("Invalid PPS source readback: " +
+                                 std::to_string(static_cast<int>(pps_source)));
     }
 }
 
@@ -958,8 +955,7 @@ void SoapySidekiq::setTimeSource(const std::string &source)
         }
         else
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_write_1pps_source %d failed, (card %u), status %d",
+            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_write_1pps_source %d failed, (card %u), status %d",
                           pps_source, card, status);
             throw std::runtime_error(
                 "skiq_write_1pps_source failed and kernel fallback unavailable: " +
@@ -974,8 +970,7 @@ void SoapySidekiq::setTimeSource(const std::string &source)
     return;
 }
 
-
-bool SoapySidekiq::hasHardwareTime(const std::string &what="") const
+bool SoapySidekiq::hasHardwareTime(const std::string &what = "") const
 {
     if (what.empty() || equalsIgnoreCase(what, "sys_timestamp"))
         return true;
@@ -986,7 +981,7 @@ bool SoapySidekiq::hasHardwareTime(const std::string &what="") const
     return false;
 }
 
-long long SoapySidekiq::getHardwareTime(const std::string &what="") const
+long long SoapySidekiq::getHardwareTime(const std::string &what = "") const
 {
     uint64_t timestamp = 0;
     if (what.empty() || equalsIgnoreCase(what, "sys_timestamp"))
@@ -1032,7 +1027,7 @@ long long SoapySidekiq::getHardwareTime(const std::string &what="") const
     return soapy_sidekiq::ticksToNanosecondsAtRate(timestamp, actual_rate);
 }
 
-void SoapySidekiq::setHardwareTime(const long long timeNs, const std::string &what="")
+void SoapySidekiq::setHardwareTime(const long long timeNs, const std::string &what = "")
 {
     const bool now = what.empty() || equalsIgnoreCase(what, "now");
     const bool on_pps = equalsIgnoreCase(what, "1pps");
