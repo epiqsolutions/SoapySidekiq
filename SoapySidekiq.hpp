@@ -15,7 +15,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <pthread.h>
 
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
@@ -280,9 +279,6 @@ class SoapySidekiq : public SoapySDR::Device
     std::condition_variable tx_cv;
     std::mutex tx_buf_mutex;
     std::condition_variable tx_buf_cv;
-    pthread_mutex_t space_avail_mutex;
-    pthread_cond_t space_avail_cond;
-    bool space_avail{};
     bool tx_start_finished{};
     int tx_start_status{};
     bool tx_stream_active{};

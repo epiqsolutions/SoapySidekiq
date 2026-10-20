@@ -16,7 +16,6 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
-#include <system_error>
 #include <vector>
 #include <string>
 #include <sidekiq_types.h>
@@ -100,15 +99,6 @@ void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t
     }
     tx_buf_cv.notify_all();
 
-    // signal to the other thread that there may be space available now that a
-    // packet send has completed
-    {
-        // Signal the condition variable
-        pthread_mutex_lock(&space_avail_mutex);
-        space_avail = true;
-        pthread_cond_signal(&space_avail_cond);
-        pthread_mutex_unlock(&space_avail_mutex);
-    }
 //    SoapySDR_logf(SOAPY_SDR_TRACE, "leaving tx_complete");
 
 }
@@ -262,28 +252,12 @@ skiq_tx_hdl_t SoapySidekiq::getFirstTxHandle(void) const
 // is released by the constructor's outer rollback guard.
 void SoapySidekiq::initializeTxCallbacks()
 {
-    int status = pthread_mutex_init(&space_avail_mutex, nullptr);
-    if (status != 0)
-    {
-        throw std::system_error(status, std::generic_category(), "TX space mutex initialization");
-    }
-    soapy_sidekiq::ScopeExit mutex_rollback([this]() noexcept
-                                            { pthread_mutex_destroy(&space_avail_mutex); });
-
-    status = pthread_cond_init(&space_avail_cond, nullptr);
-    if (status != 0)
-    {
-        throw std::system_error(status, std::generic_category(),
-                                "TX space condition initialization");
-    }
-    soapy_sidekiq::ScopeExit condition_rollback([this]() noexcept
-                                                { pthread_cond_destroy(&space_avail_cond); });
-
     registerInstance(card, this);
     soapy_sidekiq::ScopeExit registry_rollback([this]() noexcept
                                                { unregisterInstance(card, this); });
 
-    status = skiq_register_tx_complete_callback(card, &SoapySidekiq::tx_complete_callback);
+    const int status =
+        skiq_register_tx_complete_callback(card, &SoapySidekiq::tx_complete_callback);
     if (status != 0)
     {
         throw std::runtime_error("skiq_register_tx_complete_callback failed (card " +
@@ -297,8 +271,6 @@ void SoapySidekiq::initializeTxCallbacks()
     SoapySDR_logf(SOAPY_SDR_TRACE, "leaving constructor", card);
     callback_rollback.release();
     registry_rollback.release();
-    condition_rollback.release();
-    mutex_rollback.release();
 }
 
 // Constructor
@@ -588,9 +560,6 @@ SoapySidekiq::~SoapySidekiq(void)
 
     unregisterInstance(card, this);
     skiq_register_tx_complete_callback(card, nullptr);
-
-    pthread_cond_destroy(&space_avail_cond);
-    pthread_mutex_destroy(&space_avail_mutex);
 
     p_tx_status.reset();
 
