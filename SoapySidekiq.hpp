@@ -273,6 +273,8 @@ class SoapySidekiq : public SoapySDR::Device
         double actual_rate;
         uint32_t actual_bandwidth;
     };
+    /** Populate all initial RF caches only after every SDK readback is validated. */
+    void initializeRateCaches();
     RateAndBandwidth readRateAndBandwidth(int direction, size_t channel) const;
     void applyRateAndBandwidth(int direction, size_t channel, uint32_t rate, uint32_t bandwidth);
     skiq_rx_hdl_t getRxHandle(const size_t channel) const;
