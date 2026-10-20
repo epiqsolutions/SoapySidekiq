@@ -156,6 +156,9 @@ and NaN converts to zero before scaling to the card's TX full scale.
 SDK's reported bounds. It does not enumerate the exact profiles of cards with
 discrete rate support; the SDK validates each requested rate.
 
+Automatic gain control is exposed for RX. TX uses manual attenuation and
+reports `hasGainMode()` as false; requesting TX automatic mode raises an error.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
