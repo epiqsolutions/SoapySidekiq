@@ -95,6 +95,13 @@ class SoapySidekiq : public SoapySDR::Device
     int readStream(SoapySDR::Stream *stream, void *const *buffs, const size_t numElems, int &flags,
                    long long &timeNs, const long timeoutUs = 100000) override;
 
+    /**
+     * Submit CS16 or normalized CF32 samples in whole TX MTUs, without staging.
+     * numElems must fit int; invalid counts/buffers return SOAPY_SDR_STREAM_ERROR.
+     * A zero-length write returns zero without accessing buffs. Back-pressure
+     * returns an accepted sample prefix or SOAPY_SDR_TIMEOUT; callers retry
+     * only the unaccepted suffix, advancing by two format components per sample.
+     */
     int writeStream(SoapySDR::Stream *stream, const void *const *buffs, const size_t numElems,
                     int &flags, const long long timeNs = 0, const long timeoutUs = 100000) override;
 

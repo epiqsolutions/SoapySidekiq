@@ -820,6 +820,20 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         return SOAPY_SDR_STREAM_ERROR;
     }
 
+    // TX has no partial-block staging. Reject malformed requests before PPS
+    // waits, pointer access, reservations, or submission. The API return type
+    // must be able to represent every accepted sample count.
+    if (current_tx_block_size == 0 ||
+        numElems > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+        numElems % current_tx_block_size != 0)
+    {
+        return SOAPY_SDR_STREAM_ERROR;
+    }
+    if (numElems == 0)
+        return 0;
+    if (buffs == nullptr || buffs[0] == nullptr)
+        return SOAPY_SDR_STREAM_ERROR;
+
     // Clamp the deadline so even LONG_MAX microseconds cannot overflow
     // the clock's (typically nanosecond) representation.
     using Clock = std::chrono::steady_clock;
@@ -845,14 +859,6 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             return SOAPY_SDR_STREAM_ERROR;
         }
         first_transmit = false;
-    }
-
-    if (numElems % current_tx_block_size != 0)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "numElems must be a multiple of the TX MTU size "
-                     " numElems %d, block size %u",
-                     numElems, current_tx_block_size);
-        throw std::runtime_error("");
     }
 
     // Pointer to the location in the input buffer to transmit from
@@ -961,7 +967,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     }
 
-    return numElems;
+    return static_cast<int>(numElems);
 }
 
 int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream,
