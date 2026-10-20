@@ -274,6 +274,23 @@ TEST_CASE("unknown and read only setting writes are rejected")
     REQUIRE_EQ(device.readSetting("overload"), std::string{"1"});
     REQUIRE_EQ(device.readSetting("cal_offset"), std::to_string(-2.5));
     sdk.scalar_status = -5;
-    REQUIRE_THROWS_AS(device.readSetting("overload"), std::runtime_error);
-    REQUIRE_THROWS_AS(device.readSetting("cal_offset"), std::runtime_error);
+    for (const auto &key : {"overload", "cal_offset"})
+    {
+        try
+        {
+            (void)device.readSetting(key);
+            REQUIRE(false);
+        }
+        catch (const std::runtime_error &error)
+        {
+            const std::string message = error.what();
+            const std::string operation = std::string(key) == "overload"
+                                              ? "skiq_read_rx_overload_state"
+                                              : "skiq_read_rx_cal_offset";
+            REQUIRE(message.find(operation) != std::string::npos);
+            REQUIRE(message.find("card 5") != std::string::npos);
+            REQUIRE(message.find("channel 0, handle 3") != std::string::npos);
+            REQUIRE(message.find("status -5") != std::string::npos);
+        }
+    }
 }
