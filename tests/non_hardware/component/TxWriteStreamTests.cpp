@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <SoapySidekiq/SampleScale.hpp>
 #include <SoapySidekiq/SampleConversion.hpp>
 #include <SoapySidekiq/StreamConfiguration.hpp>
@@ -59,6 +60,7 @@ public:
     pthread_mutex_t space_avail_mutex{};
     pthread_cond_t space_avail_cond{};
     std::vector<std::vector<std::int16_t>> transmitted;
+    bool complete_on_worker{};
 
     std::string getNativeStreamFormat(int, std::size_t, double &) const;
     int writeStream(SoapySDR::Stream *, const void *const *, std::size_t,
@@ -70,8 +72,31 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
 {
     auto &device = *context->classAddr;
     device.transmitted.emplace_back(block->data, block->data + 2 * device.current_tx_block_size);
-    device.p_tx_status[context->txIndex] = 0;
-    delete context;
+    if (device.complete_on_worker)
+    {
+        // A different SDK thread must be able to acquire the status lock while
+        // transmit is in progress. try_to_lock makes a bad lock scope fail
+        // this test instead of deadlocking the suite.
+        bool completed = false;
+        std::thread completion(
+            [&]
+            {
+                std::unique_lock<std::mutex> lock(device.tx_buf_mutex, std::try_to_lock);
+                if (lock.owns_lock())
+                {
+                    device.p_tx_status[context->txIndex] = 0;
+                    completed = true;
+                }
+            });
+        completion.join();
+        delete context;
+        REQUIRE(completed);
+    }
+    else
+    {
+        device.p_tx_status[context->txIndex] = 0;
+        delete context;
+    }
     return 0;
 }
 
@@ -90,6 +115,20 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
 
 // Generated directly from Streaming.cpp by CMake, including the input advance.
 #include "TxWriteMethod.inc"
+
+TEST_CASE("TX completion can release status from another thread during submission")
+{
+    SoapySidekiq device;
+    device.complete_on_worker = true;
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+    REQUIRE_EQ(device.p_tx_status[0], 0);
+}
 
 TEST_CASE("failed PPS startup rejects every write without submitting packets")
 {

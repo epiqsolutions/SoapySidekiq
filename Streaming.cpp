@@ -873,24 +873,26 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
         // need to make sure that we don't update the timestamp of a packet
         // that is already in use
-        tx_buf_mutex.lock();
-        if (p_tx_status[currTXBuffIndex] == 0)
         {
-            p_tx_status[currTXBuffIndex] = 1;
-        }
-        else
-        {
-            tx_buf_mutex.unlock();
-            pthread_mutex_lock(&space_avail_mutex);
-            // wait for a packet to complete
-            space_avail = false;
-            pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
-            pthread_mutex_unlock(&space_avail_mutex);
+            std::unique_lock<std::mutex> lock(tx_buf_mutex);
+            if (p_tx_status[currTXBuffIndex] == 0)
+            {
+                p_tx_status[currTXBuffIndex] = 1;
+            }
+            else
+            {
+                // Completion needs this mutex to release a busy block.
+                lock.unlock();
+                pthread_mutex_lock(&space_avail_mutex);
+                // wait for a packet to complete
+                space_avail = false;
+                pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
+                pthread_mutex_unlock(&space_avail_mutex);
 
-            // space available so try again
-            continue;
+                // space available so try again
+                continue;
+            }
         }
-        tx_buf_mutex.unlock();
 
         // Create the structure that is passed in p_user
         passedStructInstance = new passedStruct;
@@ -905,9 +907,10 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
         {
             // update the in use status since we didn't actually send it yet
-            tx_buf_mutex.lock();
-            p_tx_status[currTXBuffIndex] = 0;
-            tx_buf_mutex.unlock();
+            {
+                std::lock_guard<std::mutex> lock(tx_buf_mutex);
+                p_tx_status[currTXBuffIndex] = 0;
+            }
 
             // if there's no space left to send, wait until there should be space available
             pthread_mutex_lock(&space_avail_mutex);
