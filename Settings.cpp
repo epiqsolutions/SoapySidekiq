@@ -689,134 +689,111 @@ std::vector<std::string> SoapySidekiq::listAntennas(const int direction, const s
  * Frontend corrections API
  ******************************************************************/
 
-bool SoapySidekiq::hasDCOffsetMode(const int direction,
-                                   const size_t channel) const
+bool SoapySidekiq::hasDCOffsetMode(const int direction, const size_t channel) const
 {
-    int status = 0;
-    uint32_t mask = 0;
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "hasDCOffsetMode");
-
-    if (direction == SOAPY_SDR_RX)
-    {
-        skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
-        status = skiq_read_rx_cal_types_avail(card, rx_hdl, &mask);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_read_rx_rx_cal_types_avail failed, "
-                          "(card %u, handle %u, mask %d), status %d",
-                          card, rx_hdl, mask, status);
-            throw std::runtime_error("");
-        }
-
-        if ((mask & skiq_rx_cal_type_dc_offset) == skiq_rx_cal_type_dc_offset)
-        {
-            SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, handle %u, has DC Offest correction, "
-                          "mask is: %d",
-                          card, rx_hdl, mask);
-            return true;
-        }
-        else
-        {
-            SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, handle %u, does not have DC Offest correction, "
-                          "mask is: %d",
-                          card, rx_hdl, mask);
-            return false;
-        }
-    }
-    else if (direction == SOAPY_SDR_TX)
-    {
-        // Tx has quadcal only
-        SoapySDR_logf(SOAPY_SDR_WARNING, "TX does not have DC offset mode");
-    }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid Direction %d", direction);
-        throw std::runtime_error("");
-    }
-
-    return false;
-}
-
-void SoapySidekiq::setDCOffsetMode(const int direction,
-                                   const size_t channel,
-                                   const bool automatic)
-{
-    int status = 0;
-    SoapySDR_logf(SOAPY_SDR_TRACE, "setDCOffsetMode");
-
-    if (direction == SOAPY_SDR_RX)
-    {
-        skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
-
-        skiq_rx_cal_mode_t cal_mode = skiq_rx_cal_mode_auto;
-
-        // if automatic is false, then we need to set the mode to manual
-        // otherwise set the mode to automatic
-        if (!automatic)
-        {
-            cal_mode = skiq_rx_cal_mode_manual;
-        }
-
-        status = skiq_write_rx_cal_mode(card, rx_hdl, cal_mode);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_write_rx_cal_mode failed "
-                          "(card %u, cal_mode %d), status %d",
-                          card, cal_mode, status);
-            throw std::runtime_error("");
-        }
-
-        SoapySDR_logf(SOAPY_SDR_INFO, "channel: %u, setting DC offset correction to %s mode",
-                      channel, static_cast<bool>(cal_mode) ? "automatic" : "manual");
-    }
-    else if (direction == SOAPY_SDR_TX)
-    {
-        // Tx has quadcal only
-        SoapySDR_logf(SOAPY_SDR_WARNING, "TX does not have DC offset mode");
-    }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
-    }
-}
-
-bool SoapySidekiq::getDCOffsetMode(const int direction,
-                                   const size_t channel) const
-{
-    skiq_rx_cal_mode_t cal_mode;
-    int  status = 0;
-    SoapySDR_logf(SOAPY_SDR_TRACE, "getDCOffsetMode");
-
-    if (direction == SOAPY_SDR_RX)
-    {
-        skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
-        status = skiq_read_rx_cal_mode(card, rx_hdl, &cal_mode);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_read_rx_cal_mode failure "
-                          "(card %u, mode %d), status %d",
-                          card, cal_mode, status);
-        throw std::runtime_error("");
-        }
-
-        SoapySDR_logf(SOAPY_SDR_INFO, "Channel %d, DC offest mode is %s", channel,
-                      static_cast<bool>(cal_mode) ? "automatic" : "manual");
-    }
-    else if (direction == SOAPY_SDR_TX)
-    {
-        // Tx has quadcal only
-        SoapySDR_logf(SOAPY_SDR_WARNING, "TX does not have DC offset mode");
+    validateChannel(direction, channel);
+    if (direction == SOAPY_SDR_TX)
         return false;
-    }
-    else
+    const auto handle = getRxHandle(channel);
+    uint32_t available{};
+    const int status = skiq_read_rx_cal_types_avail(card, handle, &available);
+    if (status != 0)
+        throw std::runtime_error("skiq_read_rx_cal_types_avail failed (card " +
+                                 std::to_string(card) + ", channel " + std::to_string(channel) +
+                                 ", handle " + std::to_string(handle) + ", status " +
+                                 std::to_string(status) + ")");
+    return (available & skiq_rx_cal_type_dc_offset) != 0;
+}
+
+void SoapySidekiq::setDCOffsetMode(const int direction, const size_t channel, const bool automatic)
+{
+    validateChannel(direction, channel);
+    if (!hasDCOffsetMode(direction, channel))
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
+        if (automatic)
+            throw std::invalid_argument("automatic DC-offset correction is unavailable (card " +
+                                        std::to_string(card) + ", direction " +
+                                        std::to_string(direction) + ", channel " +
+                                        std::to_string(channel) + ")");
+        return;
+    }
+    const auto handle = getRxHandle(channel);
+    const auto context = " (card " + std::to_string(card) + ", channel " + std::to_string(channel) +
+                         ", handle " + std::to_string(handle) + ")";
+    const auto check = [&](const int status, const char *operation)
+    {
+        if (status != 0)
+            throw std::runtime_error(std::string(operation) + context + " failed, status " +
+                                     std::to_string(status));
+    };
+    uint32_t original_mask{};
+    check(skiq_read_rx_cal_type_mask(card, handle, &original_mask), "skiq_read_rx_cal_type_mask");
+    const uint32_t desired_mask =
+        automatic ? original_mask | skiq_rx_cal_type_dc_offset
+                  : original_mask & ~static_cast<uint32_t>(skiq_rx_cal_type_dc_offset);
+    skiq_rx_cal_mode_t original_mode = skiq_rx_cal_mode_manual;
+    if (automatic)
+    {
+        check(skiq_read_rx_cal_mode(card, handle, &original_mode), "skiq_read_rx_cal_mode");
+        if (original_mode != skiq_rx_cal_mode_manual && original_mode != skiq_rx_cal_mode_auto)
+            throw std::runtime_error("unsupported RX calibration mode" + context);
+    }
+    if (desired_mask != original_mask)
+    {
+        const int status = skiq_write_rx_cal_type_mask(card, handle, desired_mask);
+        if (status != 0)
+        {
+            const int restore = skiq_write_rx_cal_type_mask(card, handle, original_mask);
+            throw std::runtime_error("skiq_write_rx_cal_type_mask" + context + " failed, status " +
+                                     std::to_string(status) + "; rollback mask status " +
+                                     std::to_string(restore));
+        }
     }
 
-    return static_cast<bool>(cal_mode);
+    // Disable only the DC bit: the shared calibration mode and other selected
+    // algorithms belong to the rest of the RF configuration too.
+    if (!automatic || original_mode == skiq_rx_cal_mode_auto)
+        return;
+    const int status = skiq_write_rx_cal_mode(card, handle, skiq_rx_cal_mode_auto);
+    if (status != 0)
+    {
+        // Restore the snapshot after a failed second configuration step. SDK
+        // errors cannot guarantee atomic hardware updates, so report failed
+        // compensation as well as the original failure.
+        const int mode_restore = skiq_write_rx_cal_mode(card, handle, original_mode);
+        const int mask_restore = desired_mask == original_mask
+                                     ? 0
+                                     : skiq_write_rx_cal_type_mask(card, handle, original_mask);
+        throw std::runtime_error("skiq_write_rx_cal_mode" + context + " failed, status " +
+                                 std::to_string(status) + "; rollback mode status " +
+                                 std::to_string(mode_restore) + ", mask status " +
+                                 std::to_string(mask_restore));
+    }
+}
+
+bool SoapySidekiq::getDCOffsetMode(const int direction, const size_t channel) const
+{
+    validateChannel(direction, channel);
+    if (!hasDCOffsetMode(direction, channel))
+        return false;
+    const auto handle = getRxHandle(channel);
+    const auto context = " (card " + std::to_string(card) + ", channel " + std::to_string(channel) +
+                         ", handle " + std::to_string(handle) + ")";
+    uint32_t mask{};
+    int status = skiq_read_rx_cal_type_mask(card, handle, &mask);
+    if (status != 0)
+        throw std::runtime_error("skiq_read_rx_cal_type_mask" + context + " failed, status " +
+                                 std::to_string(status));
+    if ((mask & skiq_rx_cal_type_dc_offset) == 0)
+        return false;
+    skiq_rx_cal_mode_t mode = skiq_rx_cal_mode_manual;
+    status = skiq_read_rx_cal_mode(card, handle, &mode);
+    if (status != 0)
+        throw std::runtime_error("skiq_read_rx_cal_mode" + context + " failed, status " +
+                                 std::to_string(status));
+    if (mode != skiq_rx_cal_mode_auto && mode != skiq_rx_cal_mode_manual)
+        throw std::runtime_error("unsupported RX calibration mode" + context);
+    return mode == skiq_rx_cal_mode_auto;
 }
 
 /*******************************************************************
