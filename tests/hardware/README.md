@@ -46,7 +46,9 @@ Current programs:
 - `paired_retune_validate.py` holds a selected peer TX active in a separate
   process while PCIe RX retunes and checks both captured tone frequencies.
 - `pps_lifecycle_validate.py` checks external-PPS RX/TX timed starts and stops,
-  immediate cleanup after timed activation, and stream reuse.
+  immediate cleanup after timed activation, and stream reuse. Its first timed
+  TX write retries per-call timeouts for up to five seconds while PPS startup
+  is pending.
 - `test_api.py` interactively exercises device-control APIs.
 
 The full-duplex detector searches actual spectral peaks within the larger of
