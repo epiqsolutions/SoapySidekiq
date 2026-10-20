@@ -46,7 +46,8 @@ build directory reselects `sidekiq-config` without clearing its cache manually.
 For cross-compilation, supply your toolchain file and a compatible SDK build
 configuration through the SDK's `SIDEKIQ_CONFIG_BUILD_CONFIG` environment
 variable. The ARM compiler/sysroot and SDK binaries must match; a host build
-does not validate that combination.
+does not validate that combination. See the tested [AArch64 cross-build
+workflow](docs/AARCH64_BUILD.md) and optional GNU toolchain file.
 
 ### Presets
 
