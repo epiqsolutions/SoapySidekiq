@@ -262,7 +262,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     int status = 0;
     uint8_t channels = 0;
     skiq_iq_order_t iq_order;
-    int i;
     // Reject all malformed constructor input before registering or opening SDK state.
     const auto options = soapy_sidekiq::parseDeviceOptions(args);
 
@@ -306,11 +305,12 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
     // A throwing constructor never runs the device destructor. Only arm this
     // rollback after this call successfully acquires SDK initialization.
-    soapy_sidekiq::ScopeExit rollback([this]() noexcept {
-        free(p_tx_status);
-        p_tx_status = nullptr;
-        skiq_exit();
-    });
+    soapy_sidekiq::ScopeExit rollback(
+        [this]() noexcept
+        {
+            p_tx_status.reset();
+            skiq_exit();
+        });
     // The backend owns no hardware resource; the session owns its worker.
     rx_backend = std::make_unique<soapy_sidekiq::SidekiqRxBackend>(card);
     rx_session = std::make_unique<soapy_sidekiq::RxStreamSession>(*rx_backend);
@@ -518,18 +518,9 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         setTimeSource(*options.time_source);
     }
 
-    // allocate for # blocks
-    p_tx_status = static_cast<int32_t*>(calloc(DEFAULT_NUM_BUFFERS, sizeof(*p_tx_status)));
-    if (p_tx_status == nullptr)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "failed to allocate memory for TX status");
-        throw std::runtime_error("");
-    }
-
-    for (i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-    {
-        p_tx_status[i] = 0;
-    }
+    // Value-initialize every entry before making storage visible to callbacks.
+    // The member owner also releases it if later constructor work throws.
+    p_tx_status = std::make_unique<int32_t[]>(DEFAULT_NUM_BUFFERS);
 
     // register the transmit complete callback
     pthread_mutex_init(&space_avail_mutex, nullptr);
@@ -574,11 +565,7 @@ SoapySidekiq::~SoapySidekiq(void)
     pthread_cond_destroy(&space_avail_cond);
     pthread_mutex_destroy(&space_avail_mutex);
 
-    if (p_tx_status != nullptr)
-    {
-        free(p_tx_status);
-        p_tx_status = nullptr;
-    }
+    p_tx_status.reset();
 
     skiq_exit();
 }
