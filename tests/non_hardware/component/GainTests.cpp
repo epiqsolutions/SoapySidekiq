@@ -416,3 +416,18 @@ TEST_CASE("TX conversion safely spans the entire SDK uint16 attenuation field")
     REQUIRE_EQ(sdk.state[6].attenuation, std::numeric_limits<std::uint16_t>::max());
     REQUIRE_EQ(device.getGain(SOAPY_SDR_TX, 0), 0.0);
 }
+
+TEST_CASE("RX gain readback rejects indices outside the SDK range and metadata failures")
+{
+    for (const auto &profile : profiles)
+    {
+        SoapySidekiq device;
+        device.configure(profile);
+        sdk.state[3].gain =
+            static_cast<std::uint8_t>(profile.offset == 0 ? 77 : profile.offset - 1);
+        REQUIRE_THROWS_AS(device.getGain(SOAPY_SDR_RX, 0), std::runtime_error);
+        sdk.fail_on = 'R';
+        REQUIRE_THROWS_AS(device.getGain(SOAPY_SDR_RX, 0), std::runtime_error);
+        REQUIRE_EQ(sdk.events.back(), 'R');
+    }
+}

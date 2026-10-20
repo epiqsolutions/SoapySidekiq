@@ -1036,10 +1036,20 @@ double SoapySidekiq::getGain(const int direction, const size_t channel) const
     {
         const auto profile = gainProfile();
         uint8_t index{};
-        const int status = skiq_read_rx_gain(card, getRxHandle(channel), &index);
+        const auto handle = getRxHandle(channel);
+        uint8_t minimum{}, maximum{};
+        int status = skiq_read_rx_gain_index_range(card, handle, &minimum, &maximum);
+        if (status != 0)
+            throw std::runtime_error("skiq_read_rx_gain_index_range" + context +
+                                     " failed, status " + std::to_string(status));
+        if (minimum > maximum)
+            throw std::runtime_error("invalid RX gain index range" + context);
+        status = skiq_read_rx_gain(card, handle, &index);
         if (status != 0)
             throw std::runtime_error("skiq_read_rx_gain" + context + " failed, status " +
                                      std::to_string(status));
+        if (index < minimum || index > maximum)
+            throw std::runtime_error("RX gain readback is outside its index range" + context);
         return (index - profile.rx_offset) / profile.rx_steps_per_db;
     }
     uint16_t index{};
