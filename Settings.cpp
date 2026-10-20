@@ -8,12 +8,15 @@
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySidekiq/SidekiqRxBackend.hpp>
 #include <SoapySidekiq/SampleScale.hpp>
+#include <SoapySidekiq/NumericConversion.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <cinttypes>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -1275,6 +1278,7 @@ SoapySDR::Range SoapySidekiq::getGainRange(const int    direction,
 void SoapySidekiq::setFrequency(const int direction, const size_t channel,
                   const double frequency, const SoapySDR::Kwargs &args)
 {
+    validateChannel(direction, channel);
     int status = 0;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "setFrequency");
@@ -1282,7 +1286,8 @@ void SoapySidekiq::setFrequency(const int direction, const size_t channel,
     if (direction == SOAPY_SDR_RX)
     {
         skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
-        const uint64_t requested_frequency = static_cast<uint64_t>(frequency);
+        const uint64_t requested_frequency =
+            soapy_sidekiq::checkedUnsigned<uint64_t>(frequency, "setFrequency RX");
 
         SoapySDR_logf(SOAPY_SDR_INFO, "Setting rx center freq: %lu",
                       requested_frequency);
@@ -1305,7 +1310,8 @@ void SoapySidekiq::setFrequency(const int direction, const size_t channel,
     else if (direction == SOAPY_SDR_TX)
     {
         skiq_tx_hdl_t tx_hdl = getTxHandle(channel);
-        const uint64_t requested_frequency = static_cast<uint64_t>(frequency);
+        const uint64_t requested_frequency =
+            soapy_sidekiq::checkedUnsigned<uint64_t>(frequency, "setFrequency TX");
 
         SoapySDR_logf(SOAPY_SDR_INFO, "Setting tx center freq: %lu",
                       requested_frequency);
@@ -1334,14 +1340,15 @@ void SoapySidekiq::setFrequency(const int direction, const size_t channel,
 
 double SoapySidekiq::getFrequency(const int direction, const size_t channel) const
 {
+    validateChannel(direction, channel);
     int status = 0;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "getFrequency");
 
     if (direction == SOAPY_SDR_RX)
     {
-        uint64_t freq;
-        double   tuned_freq;
+        uint64_t freq{};
+        double tuned_freq = std::numeric_limits<double>::quiet_NaN();
         skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
         status = skiq_read_rx_LO_freq(card, rx_hdl, &freq, &tuned_freq);
         if (status != 0)
@@ -1349,14 +1356,19 @@ double SoapySidekiq::getFrequency(const int direction, const size_t channel) con
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_read_rx_LO_freq (card %u), status %d",
                           card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_rx_LO_freq failed (card " + std::to_string(card) +
+                                     ", channel " + std::to_string(channel) + ", handle " +
+                                     std::to_string(rx_hdl) + ", status " + std::to_string(status) +
+                                     ")");
         }
-        return static_cast<double>(freq);
+        if (!std::isfinite(tuned_freq) || tuned_freq < 0 || tuned_freq >= std::ldexp(1.0, 64))
+            throw std::runtime_error("skiq_read_rx_LO_freq returned invalid tuned frequency");
+        return tuned_freq;
     }
     else if (direction == SOAPY_SDR_TX)
     {
-        uint64_t freq;
-        double   tuned_freq;
+        uint64_t freq{};
+        double tuned_freq = std::numeric_limits<double>::quiet_NaN();
         skiq_tx_hdl_t tx_hdl = getTxHandle(channel);
         status = skiq_read_tx_LO_freq(card, tx_hdl, &freq, &tuned_freq);
         if (status != 0)
@@ -1364,9 +1376,14 @@ double SoapySidekiq::getFrequency(const int direction, const size_t channel) con
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_read_tx_LO_freq (card %u), status %d",
                           card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_tx_LO_freq failed (card " + std::to_string(card) +
+                                     ", channel " + std::to_string(channel) + ", handle " +
+                                     std::to_string(tx_hdl) + ", status " + std::to_string(status) +
+                                     ")");
         }
-        return static_cast<double>(freq);
+        if (!std::isfinite(tuned_freq) || tuned_freq < 0 || tuned_freq >= std::ldexp(1.0, 64))
+            throw std::runtime_error("skiq_read_tx_LO_freq returned invalid tuned frequency");
+        return tuned_freq;
     }
     else
     {
@@ -1380,12 +1397,13 @@ double SoapySidekiq::getFrequency(const int direction, const size_t channel) con
 SoapySDR::RangeList SoapySidekiq::getFrequencyRange(const int direction,
                                                     const size_t channel) const
 {
+    validateChannel(direction, channel);
     SoapySDR::RangeList results;
 
     SoapySDR_log(SOAPY_SDR_TRACE, "getFrequencyRange");
 
-    uint64_t max;
-    uint64_t min;
+    uint64_t max{};
+    uint64_t min{};
     int      status = 0;
 
     if (direction == SOAPY_SDR_RX)
@@ -1396,8 +1414,12 @@ SoapySDR::RangeList SoapySidekiq::getFrequencyRange(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_read_rx_LO_freq_range failed,(card %u), status %d",
                           card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_rx_LO_freq_range failed (card " +
+                                     std::to_string(card) + ", channel " + std::to_string(channel) +
+                                     ", status " + std::to_string(status) + ")");
         }
+        if (min > max)
+            throw std::runtime_error("skiq_read_rx_LO_freq_range returned an inverted range");
         results.push_back(SoapySDR::Range(min, max));
     }
     else if (direction == SOAPY_SDR_TX)
@@ -1409,8 +1431,12 @@ SoapySDR::RangeList SoapySidekiq::getFrequencyRange(const int direction,
                 SOAPY_SDR_ERROR,
                 "skiq_read_tx_LO_freq_range failed (card %u), status %d",
                 card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_tx_LO_freq_range failed (card " +
+                                     std::to_string(card) + ", channel " + std::to_string(channel) +
+                                     ", status " + std::to_string(status) + ")");
         }
+        if (min > max)
+            throw std::runtime_error("skiq_read_tx_LO_freq_range returned an inverted range");
         results.push_back(SoapySDR::Range(min, max));
     }
     else
