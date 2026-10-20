@@ -8,6 +8,8 @@
 #include <array>
 #include <cerrno>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -28,6 +30,8 @@ struct FakeSdk
 {
     std::array<Configuration, 10> state;
     unsigned reads{}, writes{}, handle{};
+    std::vector<unsigned> read_handles;
+    std::vector<int> read_directions;
     int direction{}, write_status{};
     unsigned fail_read{}, invalid_read{}, omit_bandwidth_at{};
     bool coupled{}, omit_actual{};
@@ -62,6 +66,8 @@ int readConfiguration(int direction, std::uint8_t card, unsigned handle, std::ui
                       double *actual_rate, std::uint32_t *bandwidth, std::uint32_t *actual_bw)
 {
     ++sdk.reads;
+    sdk.read_handles.push_back(handle);
+    sdk.read_directions.push_back(direction);
     sdk.direction = direction;
     sdk.card = card;
     sdk.handle = handle;
@@ -141,6 +147,7 @@ class SoapySidekiq
     double getSampleRate(int, std::size_t) const;
     void setBandwidth(int, std::size_t, double);
     double getBandwidth(int, std::size_t) const;
+    void initializeRateCaches();
     RateAndBandwidth readRateAndBandwidth(int, std::size_t) const;
     void applyRateAndBandwidth(int, std::size_t, std::uint32_t, std::uint32_t);
     std::uint32_t cachedRate(int direction, std::size_t channel = 0) const
@@ -362,5 +369,100 @@ TEST_CASE("zero actual filter width is rejected before another RF configuration 
         REQUIRE_THROWS_AS(device.setSampleRate(direction, 0, 10000000), std::runtime_error);
         REQUIRE_EQ(sdk.writes, 0u);
         REQUIRE_EQ(device.cachedBandwidth(direction), std::uint32_t{18000000});
+    }
+}
+
+TEST_CASE("initial RF caches use every mapped RX and TX handle and actual outputs")
+{
+    SoapySidekiq device;
+    device.rx_sample_rates.clear();
+    device.rx_bandwidths.clear();
+    device.tx_sample_rates.clear();
+    device.tx_bandwidths.clear();
+    for (const unsigned handle : {3u, 7u, 6u, 2u})
+    {
+        sdk.state[handle].actual_rate = 1000000.75 + handle;
+        sdk.state[handle].actual_bandwidth = 900000 + handle;
+    }
+    device.initializeRateCaches();
+    REQUIRE(sdk.read_handles == std::vector<unsigned>({3, 7, 6, 2}));
+    REQUIRE(sdk.read_directions ==
+            std::vector<int>({SOAPY_SDR_RX, SOAPY_SDR_RX, SOAPY_SDR_TX, SOAPY_SDR_TX}));
+    REQUIRE(device.rx_sample_rates == std::vector<std::uint32_t>({1000003, 1000007}));
+    REQUIRE(device.tx_sample_rates == std::vector<std::uint32_t>({1000006, 1000002}));
+    REQUIRE(device.rx_bandwidths == std::vector<std::uint32_t>({900003, 900007}));
+    REQUIRE(device.tx_bandwidths == std::vector<std::uint32_t>({900006, 900002}));
+    REQUIRE_EQ(sdk.writes, 0u);
+}
+
+TEST_CASE("initial RF cache validation rejects unsafe floating point rates before conversion")
+{
+    const double invalid_rates[] = {0,
+                                    -1,
+                                    0.5,
+                                    std::ldexp(1.0, 32),
+                                    std::numeric_limits<double>::infinity(),
+                                    -std::numeric_limits<double>::infinity(),
+                                    std::numeric_limits<double>::quiet_NaN()};
+    for (const unsigned handle : {7u, 2u})
+        for (const auto rate : invalid_rates)
+        {
+            SoapySidekiq device;
+            const auto rx_rates = device.rx_sample_rates, tx_rates = device.tx_sample_rates;
+            const auto rx_widths = device.rx_bandwidths, tx_widths = device.tx_bandwidths;
+            sdk.state[handle].actual_rate = rate;
+            REQUIRE_THROWS_AS(device.initializeRateCaches(), std::runtime_error);
+            REQUIRE(device.rx_sample_rates == rx_rates);
+            REQUIRE(device.tx_sample_rates == tx_rates);
+            REQUIRE(device.rx_bandwidths == rx_widths);
+            REQUIRE(device.tx_bandwidths == tx_widths);
+            REQUIRE_EQ(sdk.writes, 0u);
+        }
+}
+
+TEST_CASE("initial RF caches reject missing rates and bandwidth outputs")
+{
+    for (const bool omit_rate : {false, true})
+    {
+        SoapySidekiq device;
+        sdk.omit_actual = omit_rate;
+        sdk.omit_bandwidth_at = omit_rate ? 0 : 4;
+        REQUIRE_THROWS_AS(device.initializeRateCaches(), std::runtime_error);
+        REQUIRE_EQ(device.cachedRate(SOAPY_SDR_RX), std::uint32_t{20000000});
+        REQUIRE_EQ(device.cachedBandwidth(SOAPY_SDR_TX, 1), std::uint32_t{18000000});
+    }
+}
+
+TEST_CASE("failed initial SDK snapshots leave all caches intact")
+{
+    for (unsigned failure = 1; failure <= 4; ++failure)
+    {
+        SoapySidekiq device;
+        const auto rx_rates = device.rx_sample_rates, tx_rates = device.tx_sample_rates;
+        const auto rx_widths = device.rx_bandwidths, tx_widths = device.tx_bandwidths;
+        sdk.state[3].actual_rate = 1234567;
+        sdk.fail_read = failure;
+        REQUIRE_THROWS_AS(device.initializeRateCaches(), std::runtime_error);
+        REQUIRE(device.rx_sample_rates == rx_rates);
+        REQUIRE(device.tx_sample_rates == tx_rates);
+        REQUIRE(device.rx_bandwidths == rx_widths);
+        REQUIRE(device.tx_bandwidths == tx_widths);
+        REQUIRE_EQ(sdk.reads, failure);
+    }
+}
+
+TEST_CASE("initial RF snapshots skip absent directions and support empty devices")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX, -1})
+    {
+        SoapySidekiq device;
+        device.num_rx_channels = direction == SOAPY_SDR_RX ? 2 : 0;
+        device.num_tx_channels = direction == SOAPY_SDR_TX ? 2 : 0;
+        device.initializeRateCaches();
+        REQUIRE_EQ(device.rx_sample_rates.size(), std::size_t{device.num_rx_channels});
+        REQUIRE_EQ(device.tx_sample_rates.size(), std::size_t{device.num_tx_channels});
+        REQUIRE_EQ(device.rx_bandwidths.size(), std::size_t{device.num_rx_channels});
+        REQUIRE_EQ(device.tx_bandwidths.size(), std::size_t{device.num_tx_channels});
+        REQUIRE_EQ(sdk.reads, direction < 0 ? 0u : 2u);
     }
 }

@@ -614,6 +614,30 @@ SoapySDR::RangeList SoapySidekiq::getSampleRateRange(const int direction,
     return {SoapySDR::Range(minimum, maximum)};
 }
 
+void SoapySidekiq::initializeRateCaches()
+{
+    // A constructor may encounter partial SDK outputs or a failure on a later
+    // handle. Validate into local storage before exposing any initial snapshot.
+    std::vector<uint32_t> rx_rates(num_rx_channels), rx_widths(num_rx_channels);
+    std::vector<uint32_t> tx_rates(num_tx_channels), tx_widths(num_tx_channels);
+    for (size_t channel = 0; channel < num_rx_channels; ++channel)
+    {
+        const auto observed = readRateAndBandwidth(SOAPY_SDR_RX, channel);
+        rx_rates[channel] = static_cast<uint32_t>(observed.actual_rate);
+        rx_widths[channel] = observed.actual_bandwidth;
+    }
+    for (size_t channel = 0; channel < num_tx_channels; ++channel)
+    {
+        const auto observed = readRateAndBandwidth(SOAPY_SDR_TX, channel);
+        tx_rates[channel] = static_cast<uint32_t>(observed.actual_rate);
+        tx_widths[channel] = observed.actual_bandwidth;
+    }
+    rx_sample_rates.swap(rx_rates);
+    rx_bandwidths.swap(rx_widths);
+    tx_sample_rates.swap(tx_rates);
+    tx_bandwidths.swap(tx_widths);
+}
+
 SoapySidekiq::RateAndBandwidth SoapySidekiq::readRateAndBandwidth(const int direction,
                                                                   const size_t channel) const
 {

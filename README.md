@@ -237,6 +237,12 @@ Absolute timed starts/stops, additional flags, and finite-burst activation
 timed writes, end-of-burst, and fragment flags are unsupported. As in the
 SoapySDR contract, `timeNs` is ignored when `HAS_TIME` is absent.
 
+SDK stop failures from `deactivateStream()` return `SOAPY_SDR_STREAM_ERROR` and
+retain stream ownership so the caller can retry. TX stops keep new writes
+blocked after failure. `closeStream()` raises an exception if RX hardware
+cannot be stopped and retains the stream for recovery; active TX must be
+deactivated successfully before it can be closed.
+
 ## Sensors
 
 `listSensors()` exposes `temperature` and `accelerometer`. `getSensorInfo()`
