@@ -481,6 +481,12 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
     if (stream_handle == nullptr)
         return SOAPY_SDR_STREAM_ERROR;
 
+    // Only continuous operation and the legacy next-PPS convention exist.
+    // Reject options before any SDK call or asynchronous startup state change.
+    if ((flags & ~SOAPY_SDR_HAS_TIME) != 0 || numElems != 0 ||
+        ((flags & SOAPY_SDR_HAS_TIME) != 0 && timeNs != 0))
+        return SOAPY_SDR_NOT_SUPPORTED;
+
     SoapySDR_logf(SOAPY_SDR_TRACE, "activateStream");
 
     if (stream_handle->direction == SOAPY_SDR_RX)
@@ -687,6 +693,8 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
     StreamHandle *stream_handle = findStreamHandle(stream);
     if (stream_handle == nullptr)
         return SOAPY_SDR_STREAM_ERROR;
+    if ((flags & ~SOAPY_SDR_HAS_TIME) != 0 || ((flags & SOAPY_SDR_HAS_TIME) != 0 && timeNs != 0))
+        return SOAPY_SDR_NOT_SUPPORTED;
     SoapySDR_logf(SOAPY_SDR_TRACE, "deactivateStream");
 
     if (stream_handle->direction == SOAPY_SDR_RX)
@@ -873,6 +881,11 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
     {
         return SOAPY_SDR_STREAM_ERROR;
     }
+
+    // TX is continuous/immediate. Timed writes and burst/fragment flags
+    // cannot be honored by the current SDK data-flow configuration.
+    if (flags != 0)
+        return SOAPY_SDR_NOT_SUPPORTED;
 
     if (timeoutUs < 0)
     {

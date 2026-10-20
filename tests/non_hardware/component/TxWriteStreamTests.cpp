@@ -1035,6 +1035,39 @@ TEST_CASE("deactivation drains a submission before calling SDK stop")
     REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
 }
 
+TEST_CASE("unsupported TX write flags are rejected before waits and submissions")
+{
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    device.first_transmit = true;
+    device.tx_start_finished = false;
+    for (const int requested : {1, 2, SOAPY_SDR_HAS_TIME, SOAPY_SDR_HAS_TIME | 2, -1})
+    {
+        int flags = requested;
+        REQUIRE_EQ(device.writeStream(stream, nullptr, device.current_tx_block_size, flags,
+                                      1000000000, 1000000),
+                   SOAPY_SDR_NOT_SUPPORTED);
+        REQUIRE_EQ(flags, requested);
+    }
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE(device.tx_cv.deadlines.empty());
+    REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+    REQUIRE(device.first_transmit);
+}
+TEST_CASE("TX stop rejects unsupported flags and times without closing write admission")
+{
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    stop_calls = 0;
+    for (const int flags : {1, SOAPY_SDR_HAS_TIME | 2, -1})
+        REQUIRE_EQ(device.deactivateStream(stream, flags, 0), SOAPY_SDR_NOT_SUPPORTED);
+    REQUIRE_EQ(device.deactivateStream(stream, SOAPY_SDR_HAS_TIME, 1000000000),
+               SOAPY_SDR_NOT_SUPPORTED);
+    REQUIRE_EQ(stop_calls, 0);
+    REQUIRE(device.tx_stream_active);
+    REQUIRE(!device.tx_writes_stopping);
+}
+
 TEST_CASE("TX APIs reject unowned tokens before writes status reads or shutdown")
 {
     SoapySidekiq device;
