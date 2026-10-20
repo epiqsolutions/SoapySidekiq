@@ -245,6 +245,9 @@ class SoapySidekiq : public SoapySDR::Device
     };
 
   private:
+    /** Throwing activation implementation behind the public stream-status boundary. */
+    int activateStreamImpl(SoapySDR::Stream *stream, int flags, long long timeNs, size_t numElems);
+
     /** Resolve only this device's currently owned opaque stream tokens. */
     StreamHandle *findStreamHandle(SoapySDR::Stream *stream) const noexcept;
 
