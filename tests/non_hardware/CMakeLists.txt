@@ -163,6 +163,24 @@ target_link_libraries(timestamp_portable_tests PRIVATE non_hardware_test_options
 add_test(NAME timestamp-portable.all COMMAND timestamp_portable_tests)
 set_tests_properties(timestamp-portable.all PROPERTIES LABELS "unit;non-hardware")
 
+# Compile the production SDK log callback against a capturing log sink.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Settings.cpp)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Settings.cpp" settings_source)
+string(FIND "${settings_source}" "void logging_handler(" log_start)
+string(FIND "${settings_source}" "void SoapySidekiq::tx_complete(" log_end)
+if(log_start LESS 0 OR log_end LESS log_start)
+    message(FATAL_ERROR "Could not locate the production SDK logging callback")
+endif()
+math(EXPR log_length "${log_end} - ${log_start}")
+string(SUBSTRING "${settings_source}" ${log_start} ${log_length} log_callback)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/SdkLogCallback.inc" "${log_callback}")
+add_executable(sdk_logging_tests support/TestMain.cpp component/SdkLoggingTests.cpp)
+target_include_directories(sdk_logging_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(sdk_logging_tests PRIVATE non_hardware_test_options)
+add_test(NAME sdk-logging.all COMMAND sdk_logging_tests)
+set_tests_properties(sdk-logging.all PROPERTIES LABELS "component;non-hardware")
+
 # Compile the production writeStream body against a minimal device/SDK fixture.
 # Fail configuration if its boundaries change rather than testing a stale copy.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Streaming.cpp)
@@ -241,7 +259,7 @@ endif()
 
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests stream_configuration_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
     USES_TERMINAL)
