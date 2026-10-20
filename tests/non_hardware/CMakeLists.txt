@@ -181,6 +181,24 @@ target_link_libraries(sdk_logging_tests PRIVATE non_hardware_test_options)
 add_test(NAME sdk-logging.all COMMAND sdk_logging_tests)
 set_tests_properties(sdk-logging.all PROPERTIES LABELS "component;non-hardware")
 
+# Exercise the actual constructor registration transaction with failing APIs.
+string(FIND "${settings_source}" "void SoapySidekiq::initializeTxCallbacks(" callback_start)
+string(FIND "${settings_source}" "SoapySidekiq::SoapySidekiq(" callback_end)
+if(callback_start LESS 0 OR callback_end LESS callback_start)
+    message(FATAL_ERROR "Could not locate the production TX callback initialization method")
+endif()
+math(EXPR callback_length "${callback_end} - ${callback_start}")
+string(SUBSTRING "${settings_source}" ${callback_start} ${callback_length} callback_init)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxCallbackInitialization.inc" "${callback_init}")
+add_executable(tx_callback_initialization_tests
+    support/TestMain.cpp component/TxCallbackInitializationTests.cpp)
+target_include_directories(tx_callback_initialization_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(tx_callback_initialization_tests PRIVATE non_hardware_test_options)
+add_test(NAME tx-callback-initialization.all COMMAND tx_callback_initialization_tests)
+set_tests_properties(tx-callback-initialization.all PROPERTIES LABELS "component;non-hardware")
+
 # Compile the production writeStream body against a minimal device/SDK fixture.
 # Fail configuration if its boundaries change rather than testing a stale copy.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Streaming.cpp)
@@ -259,7 +277,8 @@ endif()
 
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests stream_configuration_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
+            tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
     USES_TERMINAL)

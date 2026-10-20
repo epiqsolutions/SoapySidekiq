@@ -235,6 +235,9 @@ class SoapySidekiq : public SoapySDR::Device
     };
 
   private:
+    /** Acquire TX callback resources; unwind acquired state on any failure. */
+    void initializeTxCallbacks();
+
     skiq_rx_hdl_t getRxHandle(const size_t channel) const;
     skiq_tx_hdl_t getTxHandle(const size_t channel) const;
     skiq_rx_hdl_t getFirstRxHandle(void) const;
