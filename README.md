@@ -217,6 +217,13 @@ Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle
 with the SDK's current actual rate, preserving fractional Hz. Missing rates,
 unsupported directions, unknown selectors, and nanosecond overflow raise errors.
 
+TX `readStreamStatus` waits for a new underrun count or returns
+`SOAPY_SDR_TIMEOUT`. An underrun reports stream channel mask `1`, flags `0`,
+and no timestamp. SDK errors, failed PPS startup, and shutdown return
+`SOAPY_SDR_STREAM_ERROR`. Shutdown wakes status waiters and drains admitted
+status calls before allowing stream cleanup. Each successful TX start resets
+the host underrun baseline to match the SDK.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

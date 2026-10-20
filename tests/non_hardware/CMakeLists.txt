@@ -276,6 +276,9 @@ if(status_start LESS 0)
 endif()
 string(SUBSTRING "${streaming_source}" ${status_start} -1 stream_status)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamStatusMethod.inc" "${stream_status}")
+extract_stream_method(tx_start "void SoapySidekiq::tx_streaming_start("
+    "/*******************************************************************\n * Stream API")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxStartMethod.inc" "${tx_start}")
 extract_stream_method(rx_close "void SoapySidekiq::closeStream("
     "size_t SoapySidekiq::getStreamMTU(")
 extract_stream_method(rx_deactivate "int SoapySidekiq::deactivateStream("

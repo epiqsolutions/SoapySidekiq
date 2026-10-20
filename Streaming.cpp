@@ -182,7 +182,8 @@ void SoapySidekiq::stopTxWrites()
     tx_cv.notify_all();
     tx_buf_cv.notify_all();
     std::unique_lock<std::mutex> lock(tx_buf_mutex);
-    tx_buf_cv.wait(lock, [this] { return active_tx_writers == 0; });
+    tx_buf_cv.wait(lock,
+                   [this] { return active_tx_writers == 0 && active_tx_status_readers == 0; });
 }
 
 void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
@@ -201,7 +202,9 @@ void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
     }
 
     {
-        std::lock_guard<std::mutex> lock(tx_mutex);
+        std::scoped_lock lock(tx_mutex, tx_status_mutex);
+        if (status == 0)
+            tx_underruns = 0; // SDK resets its counter on start.
         tx_start_status = status;
         tx_start_finished = true;
     }
@@ -664,6 +667,10 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
                               card, status);
                 throw std::runtime_error("");
             }
+            {
+                std::lock_guard<std::timed_mutex> lock(tx_status_mutex);
+                tx_underruns = 0;
+            }
             SoapySDR_logf(SOAPY_SDR_INFO,
                     "started transmit streaming on handle: %u",
                     tx_handle);
@@ -1058,50 +1065,93 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
     return static_cast<int>(numElems);
 }
 
-int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream,
-                                  size_t &chanMask,
-                                  int &flags,
-                                  long long &timeNs,
-                                  const long timeoutUs)
+int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, int &flags,
+                                   long long &timeNs, const long timeoutUs)
 {
-    int status = 0;
-    uint32_t errors = 0;
     const StreamHandle *stream_handle = findStreamHandle(stream);
     if (stream_handle == nullptr)
         return SOAPY_SDR_STREAM_ERROR;
-
     if (stream_handle->direction != SOAPY_SDR_TX)
-    {
         return SOAPY_SDR_NOT_SUPPORTED;
-    }
     if (active_tx_stream != stream_handle)
-    {
         return SOAPY_SDR_STREAM_ERROR;
-    }
+    chanMask = 0;
+    flags = 0;
+    timeNs = 0;
+    if (timeoutUs < 0)
+        return SOAPY_SDR_STREAM_ERROR;
 
-    /* This call will return a cumulative number of underruns since start
-     * streaming */
-    status = skiq_read_tx_num_underruns(this->card, stream_handle->tx_handle, &errors);
-    if (status != 0)
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR,
-                      "skiq_read_tx_num_underruns failed, (card %u) status %d",
-                      this->card, status);
-        throw std::runtime_error("");
+        std::lock_guard<std::mutex> lock(tx_buf_mutex);
+        if (tx_writes_stopping)
+            return SOAPY_SDR_STREAM_ERROR;
+        ++active_tx_status_readers;
     }
+    soapy_sidekiq::ScopeExit reader(
+        [this]() noexcept
+        {
+            {
+                std::lock_guard<std::mutex> lock(tx_buf_mutex);
+                --active_tx_status_readers;
+            }
+            tx_buf_cv.notify_all();
+        });
 
-    // if the total changed since last call indicate UNDERFLOW
-    if (errors > this->tx_underruns)
+    using Clock = std::chrono::steady_clock;
+    const auto start = Clock::now();
+    const auto budget = std::chrono::microseconds(timeoutUs);
+    const auto maximum =
+        std::chrono::duration_cast<std::chrono::microseconds>(Clock::time_point::max() - start);
+    const auto deadline = budget >= maximum ? Clock::time_point::max() : start + budget;
+    for (;;)
     {
-        SoapySDR_logf(SOAPY_SDR_INFO,
-                      "Number of underruns %u",
-                      errors);
-        this->tx_underruns = errors;
-        return SOAPY_SDR_UNDERFLOW;
+        {
+            // One poller consumes each counter increase. Completion callbacks
+            // do not acquire this mutex; never hold their TX locks across SDK IO.
+            std::unique_lock<std::timed_mutex> status_lock(tx_status_mutex, std::defer_lock);
+            if (!status_lock.try_lock_until(deadline))
+                return SOAPY_SDR_TIMEOUT;
+            bool pending = false;
+            {
+                std::scoped_lock lock(tx_mutex, tx_buf_mutex);
+                if (tx_writes_stopping)
+                    return SOAPY_SDR_STREAM_ERROR;
+                pending = first_transmit && !tx_start_finished;
+                if (first_transmit && tx_start_finished && tx_start_status != 0)
+                    return SOAPY_SDR_STREAM_ERROR;
+            }
+            if (!pending)
+            {
+                uint32_t errors = 0;
+                const int status =
+                    skiq_read_tx_num_underruns(card, stream_handle->tx_handle, &errors);
+                if (status != 0)
+                {
+                    status_lock.unlock();
+                    SoapySDR_logf(
+                        SOAPY_SDR_ERROR,
+                        "skiq_read_tx_num_underruns failed (card %u, handle %u), status %d", card,
+                        stream_handle->tx_handle, status);
+                    return SOAPY_SDR_STREAM_ERROR;
+                }
+                const bool increased = errors > tx_underruns;
+                // Rebase after resets/decreases so future increments remain visible.
+                tx_underruns = errors;
+                if (increased)
+                {
+                    chanMask = 1; // Only stream channel zero exists, regardless of SDK handle.
+                    return SOAPY_SDR_UNDERFLOW;
+                }
+            }
+        }
+        const auto now = Clock::now();
+        if (now >= deadline)
+            return SOAPY_SDR_TIMEOUT;
+        // The SDK exposes a counter, not an event wait. Bound polling and let
+        // stopTxWrites wake this call promptly without consuming the timeout.
+        std::unique_lock<std::mutex> lock(tx_buf_mutex);
+        const auto wake = std::min(deadline, now + std::chrono::milliseconds(1));
+        if (tx_buf_cv.wait_until(lock, wake, [this] { return tx_writes_stopping; }))
+            return SOAPY_SDR_STREAM_ERROR;
     }
-    else
-    {
-        return 0;
-    }
-
 }
