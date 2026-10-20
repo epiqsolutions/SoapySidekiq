@@ -87,20 +87,24 @@ void logging_handler(int32_t priority, const char *message) noexcept
  */
 void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex)
 {
+    if (txIndex >= DEFAULT_NUM_BUFFERS || !p_tx_status)
+    {
+        SoapySDR_logf(SOAPY_SDR_ERROR, "TX completion received invalid buffer index %u", txIndex);
+        return;
+    }
     // update the in use status of the packet just completed
+    bool unexpected_status;
     {
         std::lock_guard<std::mutex> lock(tx_buf_mutex);
-        if (p_tx_status[txIndex] != 1)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "status isn't 1");
-        }
+        unexpected_status = p_tx_status[txIndex] != 1;
         p_tx_status[txIndex] = 0;
         ++complete_count;
     }
     tx_buf_cv.notify_all();
-
-//    SoapySDR_logf(SOAPY_SDR_TRACE, "leaving tx_complete");
-
+    // Publish completion before diagnostics, and never call a log sink with
+    // the status mutex held: user logging code may throw or re-enter.
+    if (unexpected_status)
+        SoapySDR_logf(SOAPY_SDR_ERROR, "TX completion received a buffer that was not reserved");
 }
 
 

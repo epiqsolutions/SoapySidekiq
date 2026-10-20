@@ -322,7 +322,8 @@ class SoapySidekiq : public SoapySDR::Device
     // The registration requires a static function instead of a method so
     // this must be created to be able to register it.
     // This function calls the tx_complete method.
-    static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data, void *p_user);
+    static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
+                                     void *p_user) noexcept;
 
     static void registerInstance(uint8_t card, SoapySidekiq *instance);
     static void unregisterInstance(uint8_t card, SoapySidekiq *instance);
