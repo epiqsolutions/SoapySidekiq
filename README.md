@@ -224,6 +224,13 @@ and no timestamp. SDK errors, failed PPS startup, and shutdown return
 status calls before allowing stream cleanup. Each successful TX start resets
 the host underrun baseline to match the SDK.
 
+Stream activation/deactivation accepts flags `0` for immediate operation, or
+`SOAPY_SDR_HAS_TIME` with `timeNs=0` for the driver's existing next-PPS behavior.
+Absolute timed starts/stops, additional flags, and finite-burst activation
+(`numElems != 0`) return `SOAPY_SDR_NOT_SUPPORTED`. TX writes accept flags `0`;
+timed writes, end-of-burst, and fragment flags are unsupported. As in the
+SoapySDR contract, `timeNs` is ignored when `HAS_TIME` is absent.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
