@@ -247,6 +247,15 @@ class SoapySidekiq : public SoapySDR::Device
 
     /** Reject invalid directions/channels before metadata or SDK operations. */
     void validateChannel(int direction, size_t channel) const;
+    /** Existing card-specific RX index conversion. */
+    struct GainProfile
+    {
+        double rx_offset;
+        double rx_steps_per_db;
+        double rx_maximum;
+    };
+    GainProfile gainProfile() const;
+    double txGainMaximum(size_t channel) const;
     skiq_rx_hdl_t getRxHandle(const size_t channel) const;
     skiq_tx_hdl_t getTxHandle(const size_t channel) const;
     skiq_rx_hdl_t getFirstRxHandle(void) const;
