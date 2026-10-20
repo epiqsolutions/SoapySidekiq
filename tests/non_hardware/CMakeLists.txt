@@ -191,6 +191,9 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Settings.cpp" settings_source)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../RFControls.cpp)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../RFControls.cpp" rf_controls_source)
 string(APPEND settings_source "\n${rf_controls_source}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../TimeClock.cpp)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../TimeClock.cpp" time_clock_source)
+string(APPEND settings_source "\n${time_clock_source}")
 string(FIND "${settings_source}" "void logging_handler(" log_start)
 string(FIND "${settings_source}" "void SoapySidekiq::tx_complete(" log_end)
 if(log_start LESS 0 OR log_end LESS log_start)
@@ -357,7 +360,8 @@ add_test(NAME antenna.all COMMAND antenna_tests)
 set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
 
 extract_settings_method(time_set "void SoapySidekiq::setHardwareTime(" "\n}\n")
-extract_settings_method(time_case_fold "bool equalsIgnoreCase(" "namespace\n{")
+extract_settings_method(time_case_fold "bool equalsIgnoreCase(" "\n}\n")
+string(APPEND time_case_fold "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TimeSettingMethods.inc" "${time_case_fold}\n${time_set}\n}\n")
 add_executable(time_setting_tests support/TestMain.cpp component/TimeSettingTests.cpp)
 target_include_directories(time_setting_tests PRIVATE
@@ -369,9 +373,12 @@ set_tests_properties(time-setting.all PROPERTIES LABELS "component;non-hardware"
 
 extract_settings_method(pps_methods "std::vector<std::string> SoapySidekiq::listTimeSources("
     "bool SoapySidekiq::hasHardwareTime(")
-extract_settings_method(pps_kernel "bool readKernel1PpsSource("
-    "void SoapySidekiq::validateChannel(")
-extract_settings_method(pps_case_fold "bool equalsIgnoreCase(" "namespace\n{")
+extract_settings_method(pps_kernel_read "bool readKernel1PpsSource("
+    "bool writeKernel1PpsSource(")
+extract_settings_method(pps_kernel_write "bool writeKernel1PpsSource(" "\n}\n")
+set(pps_kernel "${pps_kernel_read}\n${pps_kernel_write}\n}\n")
+extract_settings_method(pps_case_fold "bool equalsIgnoreCase(" "\n}\n")
+string(APPEND pps_case_fold "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/PpsMethods.inc"
     "${pps_case_fold}\n${pps_kernel}\n${pps_methods}")
 add_executable(pps_source_tests support/TestMain.cpp component/PpsSourceTests.cpp)
@@ -385,7 +392,8 @@ extract_settings_method(clock_list "std::vector<std::string> SoapySidekiq::listC
 extract_settings_method(clock_get "std::string SoapySidekiq::getClockSource(" "\n}\n")
 extract_settings_method(clock_set "void SoapySidekiq::setClockSource(" "\n}\n")
 extract_settings_method(clock_rate "double SoapySidekiq::getReferenceClockRate(" "\n}\n")
-extract_settings_method(clock_case_fold "bool equalsIgnoreCase(" "namespace\n{")
+extract_settings_method(clock_case_fold "bool equalsIgnoreCase(" "\n}\n")
+string(APPEND clock_case_fold "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ClockMethods.inc"
     "${clock_case_fold}\n${clock_list}\n}\n${clock_get}\n}\n${clock_set}\n}\n${clock_rate}\n}\n")
 add_executable(clock_tests support/TestMain.cpp component/ClockTests.cpp)
@@ -395,9 +403,12 @@ target_link_libraries(clock_tests PRIVATE non_hardware_test_options)
 add_test(NAME clock.all COMMAND clock_tests)
 set_tests_properties(clock.all PROPERTIES LABELS "component;non-hardware")
 
-extract_settings_method(settings_methods "SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo("
-    "std::vector<std::string> SoapySidekiq::listTimeSources(")
-extract_settings_method(case_fold "bool equalsIgnoreCase(" "namespace\n{")
+extract_settings_method(settings_prefix "SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo("
+    "std::string SoapySidekiq::readSetting(")
+extract_settings_method(settings_read "std::string SoapySidekiq::readSetting(" "\n}\n")
+set(settings_methods "${settings_prefix}\n${settings_read}\n}\n")
+extract_settings_method(case_fold "bool equalsIgnoreCase(" "\n}\n")
+string(APPEND case_fold "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/SettingsMethods.inc" "${case_fold}\n${settings_methods}")
 add_executable(settings_tests support/TestMain.cpp component/SettingsTests.cpp)
 target_include_directories(settings_tests PRIVATE
@@ -408,7 +419,8 @@ set_tests_properties(settings.all PROPERTIES LABELS "component;non-hardware")
 
 extract_settings_method(time_read "bool SoapySidekiq::hasHardwareTime("
     "void SoapySidekiq::setHardwareTime(")
-extract_settings_method(time_read_case_fold "bool equalsIgnoreCase(" "namespace\n{")
+extract_settings_method(time_read_case_fold "bool equalsIgnoreCase(" "\n}\n")
+string(APPEND time_read_case_fold "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TimeReadbackMethods.inc" "${time_read_case_fold}\n${time_read}")
 add_executable(time_readback_tests support/TestMain.cpp component/TimeReadbackTests.cpp)
 target_include_directories(time_readback_tests PRIVATE
