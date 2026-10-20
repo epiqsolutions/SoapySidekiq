@@ -295,7 +295,6 @@ class SoapySidekiq : public SoapySDR::Device
 
     bool rxUseShort{};
     bool txUseShort{};
-    uint32_t debug_ctr{};
 
     // RX hardware adapter must outlive the session that references it.
     std::string timetype{};

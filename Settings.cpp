@@ -304,7 +304,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     txUseShort  = true;
     iq_swap   = true;
     counter   = false;
-    debug_ctr = 0;
     card      = 0;
     rx_block_size_in_words = 0;
     rx_block_size_in_bytes = 0;
