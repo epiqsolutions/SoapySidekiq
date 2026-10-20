@@ -246,7 +246,7 @@ target_include_directories(tx_write_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(tx_write_tests PRIVATE non_hardware_test_options Threads::Threads)
 add_test(NAME tx-write.all COMMAND tx_write_tests)
-set_tests_properties(tx-write.all PROPERTIES LABELS "component;non-hardware")
+set_tests_properties(tx-write.all PROPERTIES LABELS "component;non-hardware" TIMEOUT 30)
 
 # Reuse production lifecycle methods with a fake SDK, as in the TX write fixture.
 function(extract_stream_method output start_marker end_marker)
@@ -263,6 +263,10 @@ extract_stream_method(rx_close "void SoapySidekiq::closeStream("
     "size_t SoapySidekiq::getStreamMTU(")
 extract_stream_method(rx_deactivate "int SoapySidekiq::deactivateStream("
     "int SoapySidekiq::readStream(")
+extract_stream_method(tx_stop_writes "void SoapySidekiq::stopTxWrites("
+    "void SoapySidekiq::tx_streaming_start(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxStopWritesMethod.inc" "${tx_stop_writes}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxDeactivateMethod.inc" "${rx_deactivate}")
 extract_stream_method(activate_method "int SoapySidekiq::activateStream("
     "int SoapySidekiq::deactivateStream(")
 string(FIND "${activate_method}" "    else if (stream_handle->direction == SOAPY_SDR_TX)" tx_branch)
