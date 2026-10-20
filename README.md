@@ -176,6 +176,16 @@ retains the `internal_clock` alias. Reference rates describe configuration,
 not measured clock presence or lock; zero rates are rejected. External-rate
 readback depends on SDK/card support.
 
+Device setting keys are case insensitive. `iq_swap` and `counter` accept
+`true`/`false` (case insensitive) or `1`/`0`; other values raise an error.
+`sys_clock_freq`, `full_scale`, `overload`, and `cal_offset` are read only.
+Unknown keys raise an error. Metadata reports the current cached settings.
+Counter mode applies to all RX handles and, per SDK requirements, takes effect
+when RX streaming next starts. Failed multi-handle changes attempt to restore
+all affected handles; rollback failures are reported and require recovery.
+Timestamp selection accepts `rf_timestamp` or `sys_timestamp`; configure it
+before starting RX streaming.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
