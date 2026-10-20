@@ -169,6 +169,13 @@ The SDK can run selected calibrations during subsequent RX tuning operations.
 Automatic gain control is exposed for RX. TX uses manual attenuation and
 reports `hasGainMode()` as false; requesting TX automatic mode raises an error.
 
+`setHardwareTime` accepts nonnegative nanoseconds with an empty/`now` selector
+for an immediate update or `1pps` for the next PPS. Conversion uses the system
+clock frequency and truncates fractional ticks with checked integer arithmetic.
+The SDK immediate update sets both RF and system counters to the same raw tick
+value; the PPS update sets RF to zero and system to the requested tick value.
+The counters can therefore represent different times when their rates differ.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
