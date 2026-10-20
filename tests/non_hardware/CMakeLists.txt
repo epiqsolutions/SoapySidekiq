@@ -473,8 +473,10 @@ extract_settings_method(bandwidth_set "void SoapySidekiq::setBandwidth("
     "std::vector<double> SoapySidekiq::listSampleRates(")
 extract_settings_method(bandwidth_get "double SoapySidekiq::getBandwidth(" "\n}\n")
 string(APPEND bandwidth_get "\n}\n")
+extract_settings_method(rate_initialization "void SoapySidekiq::initializeRateCaches(" "\n}\n")
+string(APPEND rate_initialization "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RateBandwidthMethods.inc"
-    "${rate_set}\n${rate_get}\n${rate_helpers}\n${bandwidth_set}\n${bandwidth_get}")
+    "${rate_initialization}\n${rate_set}\n${rate_get}\n${rate_helpers}\n${bandwidth_set}\n${bandwidth_get}")
 add_executable(rate_bandwidth_tests support/TestMain.cpp component/RateBandwidthTests.cpp)
 target_include_directories(rate_bandwidth_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"

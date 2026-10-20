@@ -395,62 +395,8 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     }
     SoapySDR_logf(SOAPY_SDR_TRACE, "channel mode set to single");
 
-    /* cache the current sample rate and bandwidth */
-    rx_sample_rates.resize(num_rx_channels, 0);
-    rx_bandwidths.resize(num_rx_channels, 0);
-    for (size_t chan = 0; chan < num_rx_channels; chan++)
-    {
-        uint32_t configured_rate = 0;
-        double actual_rate = 0;
-        uint32_t configured_bw = 0;
-        uint32_t actual_bandwidth = 0;
-
-        status =
-            skiq_read_rx_sample_rate_and_bandwidth(card, getRxHandle(chan), &configured_rate,
-                                                   &actual_rate, &configured_bw, &actual_bandwidth);
-        if (status != 0)
-        {
-            SoapySDR_logf(
-                SOAPY_SDR_ERROR,
-                "skiq_read_rx_sample_rate_and_bandwidth failed (card %u, channel %zu), status %d",
-                card, chan, status);
-            throw std::runtime_error("skiq_read_rx_sample_rate_and_bandwidth failed (card " +
-                                     std::to_string(card) + ", channel " + std::to_string(chan) +
-                                     ", handle " + std::to_string(getRxHandle(chan)) + ", status " +
-                                     std::to_string(status) + ")");
-        }
-
-        rx_sample_rates[chan] = static_cast<uint32_t>(actual_rate);
-        rx_bandwidths[chan] = actual_bandwidth;
-    }
-
-    tx_sample_rates.resize(num_tx_channels, 0);
-    tx_bandwidths.resize(num_tx_channels, 0);
-    for (size_t chan = 0; chan < num_tx_channels; chan++)
-    {
-        uint32_t configured_rate = 0;
-        double actual_rate = 0;
-        uint32_t configured_bw = 0;
-        uint32_t actual_bandwidth = 0;
-
-        status =
-            skiq_read_tx_sample_rate_and_bandwidth(card, getTxHandle(chan), &configured_rate,
-                                                   &actual_rate, &configured_bw, &actual_bandwidth);
-        if (status != 0)
-        {
-            SoapySDR_logf(
-                SOAPY_SDR_ERROR,
-                "skiq_read_tx_sample_rate_and_bandwidth failed (card %u, channel %zu), status %d",
-                card, chan, status);
-            throw std::runtime_error("skiq_read_tx_sample_rate_and_bandwidth failed (card " +
-                                     std::to_string(card) + ", channel " + std::to_string(chan) +
-                                     ", handle " + std::to_string(getTxHandle(chan)) + ", status " +
-                                     std::to_string(status) + ")");
-        }
-
-        tx_sample_rates[chan] = static_cast<uint32_t>(actual_rate);
-        tx_bandwidths[chan] = actual_bandwidth;
-    }
+    // Apply the same checked SDK readback contract used by RF configuration.
+    initializeRateCaches();
 
     // Source setters require initialized hardware, so apply validated names last.
     if (options.clock_source.has_value())
