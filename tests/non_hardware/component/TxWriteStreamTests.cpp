@@ -19,7 +19,6 @@
 #include <cstring>
 #include <mutex>
 #include <memory>
-#include <pthread.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -114,7 +113,7 @@ public:
     struct StreamHandle { int direction{SOAPY_SDR_TX}; unsigned tx_handle{}; };
     StreamHandle handle;
     StreamHandle *active_tx_stream{&handle};
-    bool first_transmit{false}, txUseShort{false}, space_avail{false};
+    bool first_transmit{false}, txUseShort{false};
     std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
     std::uint8_t card{};
     double maxValue{32767};
@@ -130,8 +129,6 @@ public:
     std::uint64_t complete_count{};
     bool tx_start_finished{};
     int tx_start_status{};
-    pthread_mutex_t space_avail_mutex{};
-    pthread_cond_t space_avail_cond{};
     std::vector<std::vector<std::int16_t>> transmitted;
     bool complete_on_worker{};
     bool defer_completion{};
@@ -140,22 +137,10 @@ public:
     std::size_t attempts{};
     bool reject_notifies{true};
 
-    SoapySidekiq()
-    {
-        if (pthread_mutex_init(&space_avail_mutex, nullptr) != 0)
-            throw std::runtime_error("fixture mutex initialization");
-        if (pthread_cond_init(&space_avail_cond, nullptr) != 0)
-        {
-            pthread_mutex_destroy(&space_avail_mutex);
-            throw std::runtime_error("fixture condition initialization");
-        }
-    }
     ~SoapySidekiq()
     {
         for (auto *context : pending)
             delete context;
-        pthread_cond_destroy(&space_avail_cond);
-        pthread_mutex_destroy(&space_avail_mutex);
     }
 
     std::string getNativeStreamFormat(int, std::size_t, double &) const;

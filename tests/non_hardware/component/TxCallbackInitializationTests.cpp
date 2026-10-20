@@ -5,12 +5,9 @@
 #include "TestHarness.hpp"
 #include <SoapySidekiq/ScopeExit.hpp>
 
-#include <cerrno>
 #include <cstdint>
 #include <new>
-#include <pthread.h>
 #include <string>
-#include <system_error>
 
 struct skiq_tx_block_t
 {
@@ -20,8 +17,6 @@ namespace
 enum class Failure
 {
     none,
-    mutex,
-    condition,
     registry,
     sdk,
     logging
@@ -29,41 +24,11 @@ enum class Failure
 struct State
 {
     Failure fail{};
-    bool mutex{}, condition{}, registry{}, callback{};
+    bool registry{}, callback{};
     bool invalid_cleanup{};
     std::string events;
 } state;
 
-int fake_mutex_init(pthread_mutex_t *, const pthread_mutexattr_t *)
-{
-    state.events += "M";
-    if (state.fail == Failure::mutex)
-        return EAGAIN;
-    state.mutex = true;
-    return 0;
-}
-int fake_cond_init(pthread_cond_t *, const pthread_condattr_t *)
-{
-    state.events += "C";
-    if (state.fail == Failure::condition)
-        return EINVAL;
-    state.condition = true;
-    return 0;
-}
-int fake_mutex_destroy(pthread_mutex_t *)
-{
-    state.events += "m";
-    state.invalid_cleanup |= !state.mutex || state.condition || state.registry || state.callback;
-    state.mutex = false;
-    return 0;
-}
-int fake_cond_destroy(pthread_cond_t *)
-{
-    state.events += "c";
-    state.invalid_cleanup |= !state.condition || state.registry || state.callback;
-    state.condition = false;
-    return 0;
-}
 using Callback = void (*)(int32_t, skiq_tx_block_t *, void *);
 int skiq_register_tx_complete_callback(std::uint8_t, Callback callback)
 {
@@ -98,7 +63,7 @@ void reset(Failure failure)
 void requireReleased(const std::string &events)
 {
     REQUIRE_EQ(state.events, events);
-    REQUIRE(!state.mutex && !state.condition && !state.registry && !state.callback);
+    REQUIRE(!state.registry && !state.callback);
     REQUIRE(!state.invalid_cleanup);
 }
 } // namespace
@@ -107,8 +72,6 @@ class SoapySidekiq
 {
   public:
     std::uint8_t card{3};
-    pthread_mutex_t space_avail_mutex{};
-    pthread_cond_t space_avail_cond{};
     static void tx_complete_callback(int32_t, skiq_tx_block_t *, void *) {}
     static void registerInstance(std::uint8_t, SoapySidekiq *)
     {
@@ -127,55 +90,17 @@ class SoapySidekiq
 };
 
 // Only the API calls are replaced; execute the actual production method body.
-#define pthread_mutex_init fake_mutex_init
-#define pthread_cond_init fake_cond_init
-#define pthread_mutex_destroy fake_mutex_destroy
-#define pthread_cond_destroy fake_cond_destroy
 #include "TxCallbackInitialization.inc"
 
-TEST_CASE("TX callback setup stops immediately when mutex initialization fails")
-{
-    reset(Failure::mutex);
-    SoapySidekiq device;
-    try
-    {
-        device.initializeTxCallbacks();
-        REQUIRE(false);
-    }
-    catch (const std::system_error &error)
-    {
-        REQUIRE_EQ(error.code().value(), EAGAIN);
-        REQUIRE(std::string(error.what()).find("mutex") != std::string::npos);
-    }
-    requireReleased("M");
-}
-
-TEST_CASE("TX callback setup releases its mutex when condition initialization fails")
-{
-    reset(Failure::condition);
-    SoapySidekiq device;
-    try
-    {
-        device.initializeTxCallbacks();
-        REQUIRE(false);
-    }
-    catch (const std::system_error &error)
-    {
-        REQUIRE_EQ(error.code().value(), EINVAL);
-        REQUIRE(std::string(error.what()).find("condition") != std::string::npos);
-    }
-    requireReleased("MCm");
-}
-
-TEST_CASE("TX callback setup releases pthread resources when registry allocation throws")
+TEST_CASE("TX callback setup acquires no registration when registry allocation throws")
 {
     reset(Failure::registry);
     SoapySidekiq device;
     REQUIRE_THROWS_AS(device.initializeTxCallbacks(), std::bad_alloc);
-    requireReleased("MCRcm");
+    requireReleased("R");
 }
 
-TEST_CASE("TX callback setup releases registry and pthread resources on SDK failure")
+TEST_CASE("TX callback setup releases registry ownership on SDK failure")
 {
     reset(Failure::sdk);
     SoapySidekiq device;
@@ -188,7 +113,7 @@ TEST_CASE("TX callback setup releases registry and pthread resources on SDK fail
     {
         REQUIRE(std::string(error.what()).find("card 3, status -17") != std::string::npos);
     }
-    requireReleased("MCRSrcm");
+    requireReleased("RSr");
 }
 
 TEST_CASE("TX callback setup unregisters the callback if final logging throws")
@@ -196,7 +121,7 @@ TEST_CASE("TX callback setup unregisters the callback if final logging throws")
     reset(Failure::logging);
     SoapySidekiq device;
     REQUIRE_THROWS_AS(device.initializeTxCallbacks(), std::runtime_error);
-    requireReleased("MCRSLsrcm");
+    requireReleased("RSLsr");
 }
 
 TEST_CASE("successful TX callback setup transfers resources to the device")
@@ -204,8 +129,8 @@ TEST_CASE("successful TX callback setup transfers resources to the device")
     reset(Failure::none);
     SoapySidekiq device;
     device.initializeTxCallbacks();
-    REQUIRE_EQ(state.events, std::string("MCRSL"));
-    REQUIRE(state.mutex && state.condition && state.registry && state.callback);
+    REQUIRE_EQ(state.events, std::string("RSL"));
+    REQUIRE(state.registry && state.callback);
     REQUIRE(!state.invalid_cleanup);
 }
 
@@ -214,11 +139,11 @@ TEST_CASE("failed TX callback setup can be retried without leftover registration
     reset(Failure::logging);
     SoapySidekiq device;
     REQUIRE_THROWS_AS(device.initializeTxCallbacks(), std::runtime_error);
-    requireReleased("MCRSLsrcm");
+    requireReleased("RSLsr");
     state.events.clear();
     state.fail = Failure::none;
     device.initializeTxCallbacks();
-    REQUIRE_EQ(state.events, std::string("MCRSL"));
-    REQUIRE(state.mutex && state.condition && state.registry && state.callback);
+    REQUIRE_EQ(state.events, std::string("RSL"));
+    REQUIRE(state.registry && state.callback);
     REQUIRE(!state.invalid_cleanup);
 }
