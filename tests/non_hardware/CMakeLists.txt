@@ -299,6 +299,25 @@ target_include_directories(frequency_tests PRIVATE
 target_link_libraries(frequency_tests PRIVATE non_hardware_test_options)
 add_test(NAME frequency.all COMMAND frequency_tests)
 set_tests_properties(frequency.all PROPERTIES LABELS "component;non-hardware")
+extract_settings_method(rate_set "void SoapySidekiq::setSampleRate("
+    "double SoapySidekiq::getSampleRate(")
+extract_settings_method(rate_get "double SoapySidekiq::getSampleRate("
+    "SoapySDR::RangeList SoapySidekiq::getSampleRateRange(")
+extract_settings_method(rate_helpers "SoapySidekiq::RateAndBandwidth SoapySidekiq::readRateAndBandwidth("
+    "void SoapySidekiq::setBandwidth(")
+extract_settings_method(bandwidth_set "void SoapySidekiq::setBandwidth("
+    "std::vector<double> SoapySidekiq::listSampleRates(")
+extract_settings_method(bandwidth_get "double SoapySidekiq::getBandwidth("
+    "SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RateBandwidthMethods.inc"
+    "${rate_set}\n${rate_get}\n${rate_helpers}\n${bandwidth_set}\n${bandwidth_get}")
+add_executable(rate_bandwidth_tests support/TestMain.cpp component/RateBandwidthTests.cpp)
+target_include_directories(rate_bandwidth_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(rate_bandwidth_tests PRIVATE non_hardware_test_options)
+add_test(NAME rate-bandwidth.all COMMAND rate_bandwidth_tests)
+set_tests_properties(rate-bandwidth.all PROPERTIES LABELS "component;non-hardware")
 add_executable(channel_metadata_tests support/TestMain.cpp component/ChannelMetadataTests.cpp)
 target_include_directories(channel_metadata_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
@@ -336,7 +355,7 @@ endif()
 
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests channel_metadata_tests frequency_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests channel_metadata_tests frequency_tests rate_bandwidth_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
