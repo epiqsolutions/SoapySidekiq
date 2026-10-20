@@ -176,6 +176,16 @@ The SDK immediate update sets both RF and system counters to the same raw tick
 value; the PPS update sets RF to zero and system to the requested tick value.
 The counters can therefore represent different times when their rates differ.
 
+Device setting keys are case insensitive. `iq_swap` and `counter` accept
+`true`/`false` (case insensitive) or `1`/`0`; other values raise an error.
+`sys_clock_freq`, `full_scale`, `overload`, and `cal_offset` are read only.
+Unknown keys raise an error. Metadata reports the current cached settings.
+Counter mode applies to all RX handles and, per SDK requirements, takes effect
+when RX streaming next starts. Failed multi-handle changes attempt to restore
+all affected handles; rollback failures are reported and require recovery.
+Timestamp selection accepts `rf_timestamp` or `sys_timestamp`; configure it
+before starting RX streaming.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
