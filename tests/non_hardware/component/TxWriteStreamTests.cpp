@@ -69,6 +69,44 @@ struct passedStruct
 };
 int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *, passedStruct *);
 
+// Observe wait boundaries without sleeps; injected completion runs under the
+// same locking protocol as a real SDK callback, on another thread.
+std::function<void()> wait_hook;
+class FixtureCondition
+{
+    std::condition_variable condition;
+
+  public:
+    std::vector<std::chrono::steady_clock::time_point> deadlines;
+    void notify_all()
+    {
+        condition.notify_all();
+    }
+    template <typename Predicate>
+    bool wait_until(std::unique_lock<std::mutex> &lock,
+                    std::chrono::steady_clock::time_point deadline, Predicate ready)
+    {
+        deadlines.push_back(deadline);
+        if (!wait_hook || ready())
+            return condition.wait_until(lock, deadline, ready);
+        auto hook = std::move(wait_hook);
+        wait_hook = {};
+        std::thread completion(
+            [&, hook = std::move(hook)]
+            {
+                hook();
+                condition.notify_all();
+            });
+        const bool result = condition.wait_until(lock, deadline, ready);
+        // A timeout may race the completion acquiring this mutex. Let it finish
+        // before joining, then restore the condition-variable lock contract.
+        lock.unlock();
+        completion.join();
+        lock.lock();
+        return result;
+    }
+};
+
 /** Minimal device fixture supplying the state accessed by the production method. */
 class SoapySidekiq
 {
@@ -87,7 +125,9 @@ public:
         std::make_unique<std::int32_t[]>(DEFAULT_NUM_BUFFERS)};
     std::mutex tx_buf_mutex;
     std::mutex tx_mutex;
-    std::condition_variable tx_cv;
+    FixtureCondition tx_cv;
+    FixtureCondition tx_buf_cv;
+    std::uint64_t complete_count{};
     bool tx_start_finished{};
     int tx_start_status{};
     pthread_mutex_t space_avail_mutex{};
@@ -98,6 +138,7 @@ public:
     std::vector<passedStruct *> pending;
     std::vector<int> send_results;
     std::size_t attempts{};
+    bool reject_notifies{true};
 
     SoapySidekiq()
     {
@@ -120,7 +161,10 @@ public:
     std::string getNativeStreamFormat(int, std::size_t, double &) const;
     int writeStream(SoapySDR::Stream *, const void *const *, std::size_t,
                     int &, long long, long);
+    void tx_complete(int32_t, skiq_tx_block_t *, uint32_t);
 };
+
+#include "TxCompletionMethod.inc"
 
 /** Capture each accepted packet and complete its ownership synchronously. */
 int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *context)
@@ -130,10 +174,17 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
     const int status = attempt < device.send_results.size() ? device.send_results[attempt] : 0;
     if (status != 0)
     {
-        // Rejected sends never acquire the caller's context. Model an available
-        // queue slot so a queue-full test can retry without a real SDK worker.
-        if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
-            device.space_avail = true;
+        // Rejected sends never acquire this context. Optionally model an
+        // earlier queued packet completing during this SDK call.
+        if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL && device.reject_notifies)
+        {
+            const auto prior_index = (context->txIndex + 1) % DEFAULT_NUM_BUFFERS;
+            {
+                std::lock_guard<std::mutex> lock(device.tx_buf_mutex);
+                device.p_tx_status[prior_index] = 1;
+            }
+            device.tx_complete(0, device.p_tx_block[prior_index], prior_index);
+        }
         return status;
     }
     device.transmitted.emplace_back(block->data, block->data + 2 * device.current_tx_block_size);
@@ -154,7 +205,8 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
                 std::unique_lock<std::mutex> lock(device.tx_buf_mutex, std::try_to_lock);
                 if (lock.owns_lock())
                 {
-                    device.p_tx_status[context->txIndex] = 0;
+                    lock.unlock();
+                    device.tx_complete(0, block, context->txIndex);
                     completed = true;
                 }
             });
@@ -164,7 +216,7 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
     }
     else
     {
-        device.p_tx_status[context->txIndex] = 0;
+        device.tx_complete(0, block, context->txIndex);
         delete context;
     }
     return 0;
@@ -182,21 +234,6 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
     throw std::invalid_argument("invalid stream direction");
 }
 #include "NativeStreamFormat.inc"
-
-// Inject a completion at the busy-buffer wait boundary without timing sleeps.
-std::function<void()> wait_hook;
-int fixture_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex)
-{
-    if (wait_hook)
-    {
-        auto hook = std::move(wait_hook);
-        wait_hook = {};
-        hook();
-        return 0;
-    }
-    return pthread_cond_wait(condition, mutex);
-}
-#define pthread_cond_wait fixture_cond_wait
 
 // Generated directly from Streaming.cpp by CMake, including the input advance.
 #include "TxWriteMethod.inc"
@@ -376,13 +413,12 @@ TEST_CASE("TX never overwrites a busy SDK block before completion")
         original_payload_preserved =
             std::all_of(std::begin(device.blocks[0].data), std::end(device.blocks[0].data),
                         [](auto sample) { return sample == 123; });
-        std::lock_guard<std::mutex> lock(device.tx_buf_mutex);
-        device.p_tx_status[0] = 0;
+        device.tx_complete(0, device.p_tx_block[0], 0);
     };
     const void *buffers[]{input.data()};
     int flags = 0;
     REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
-                                  device.current_tx_block_size, flags, 0, 0),
+                                  device.current_tx_block_size, flags, 0, 1000000),
                static_cast<int>(device.current_tx_block_size));
     REQUIRE(original_payload_preserved);
     REQUIRE(device.transmitted[0] == input);
@@ -398,7 +434,7 @@ TEST_CASE("queue-full TX retries release context and retain the input block")
     const void *buffers[]{input.data()};
     int flags = 0;
     REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
-                                  device.current_tx_block_size, flags, 0, 0),
+                                  device.current_tx_block_size, flags, 0, 1000000),
                static_cast<int>(device.current_tx_block_size));
     REQUIRE_EQ(device.attempts, std::size_t{3});
     REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
@@ -476,8 +512,7 @@ TEST_CASE("accepted TX contexts survive submission until out-of-order completion
     for (auto it = device.pending.rbegin(); it != device.pending.rend(); ++it)
     {
         auto *context = *it;
-        std::lock_guard<std::mutex> lock(device.tx_buf_mutex);
-        device.p_tx_status[context->txIndex] = 0;
+        device.tx_complete(0, device.p_tx_block[context->txIndex], context->txIndex);
         delete context;
     }
     device.pending.clear();
@@ -551,5 +586,132 @@ TEST_CASE("PPS completion wakes a write with the maximum timeout safely")
     completion.join();
     REQUIRE_EQ(result, static_cast<int>(device.current_tx_block_size));
     REQUIRE(!device.first_transmit);
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+}
+
+TEST_CASE("busy TX blocks respect zero and finite timeouts without payload writes")
+{
+    SoapySidekiq device;
+    device.p_tx_status[0] = 1;
+    std::fill(std::begin(device.blocks[0].data), std::end(device.blocks[0].data), 123);
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    for (long timeout : {0L, 1000L})
+    {
+        REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                      device.current_tx_block_size, flags, 0, timeout),
+                   SOAPY_SDR_TIMEOUT);
+        REQUIRE_EQ(device.attempts, std::size_t{0});
+        REQUIRE_EQ(device.p_tx_status[0], 1);
+        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+        REQUIRE(std::all_of(std::begin(device.blocks[0].data), std::end(device.blocks[0].data),
+                            [](auto sample) { return sample == 123; }));
+    }
+}
+
+TEST_CASE("queue-full TX waits time out and leave submission resources retryable")
+{
+    SoapySidekiq device;
+    device.reject_notifies = false;
+    device.send_results = {SKIQ_TX_ASYNC_SEND_QUEUE_FULL, SKIQ_TX_ASYNC_SEND_QUEUE_FULL, 0};
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    for (long timeout : {0L, 1000L})
+    {
+        REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                      device.current_tx_block_size, flags, 0, timeout),
+                   SOAPY_SDR_TIMEOUT);
+        REQUIRE_EQ(device.p_tx_status[0], 0);
+        REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
+        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    }
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+}
+
+TEST_CASE("TX back-pressure after a submitted prefix returns that sample count")
+{
+    SoapySidekiq device;
+    device.txUseShort = true;
+    device.reject_notifies = false;
+    device.send_results = {0, SKIQ_TX_ASYNC_SEND_QUEUE_FULL};
+    std::vector<std::int16_t> input(4 * device.current_tx_block_size, -123);
+    std::fill(input.begin() + 2 * device.current_tx_block_size, input.end(), 456);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  2 * device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{1});
+    REQUIRE_EQ(device.p_tx_status[1], 0);
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    // The caller can resume from the returned prefix without repeating it.
+    const void *remainder[]{input.data() + 2 * device.current_tx_block_size};
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), remainder,
+                                  device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{2});
+    REQUIRE(std::all_of(device.transmitted[0].begin(), device.transmitted[0].end(),
+                        [](auto sample) { return sample == -123; }));
+    REQUIRE(std::all_of(device.transmitted[1].begin(), device.transmitted[1].end(),
+                        [](auto sample) { return sample == 456; }));
+}
+
+TEST_CASE("spurious TX wakeups cannot free a busy hardware block")
+{
+    SoapySidekiq device;
+    device.p_tx_status[0] = 1;
+    bool notified = false;
+    wait_hook = [&] { notified = true; };
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 1000),
+               SOAPY_SDR_TIMEOUT);
+    REQUIRE(notified);
+    REQUIRE_EQ(device.p_tx_status[0], 1);
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+}
+
+TEST_CASE("PPS startup and TX buffer waits share one deadline")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    device.p_tx_status[0] = 1;
+    wait_hook = [&]
+    {
+        std::lock_guard<std::mutex> lock(device.tx_mutex);
+        device.tx_start_finished = true;
+    };
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 1000000),
+               SOAPY_SDR_TIMEOUT);
+    REQUIRE_EQ(device.tx_cv.deadlines.size(), std::size_t{1});
+    REQUIRE_EQ(device.tx_buf_cv.deadlines.size(), std::size_t{1});
+    REQUIRE(device.tx_cv.deadlines[0] == device.tx_buf_cv.deadlines[0]);
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+}
+
+TEST_CASE("TX buffer completion wakes the maximum timeout without overflow")
+{
+    SoapySidekiq device;
+    device.p_tx_status[0] = 1;
+    wait_hook = [&] { device.tx_complete(0, device.p_tx_block[0], 0); };
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0,
+                                  std::numeric_limits<long>::max()),
+               static_cast<int>(device.current_tx_block_size));
     REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
 }
