@@ -169,6 +169,16 @@ The SDK can run selected calibrations during subsequent RX tuning operations.
 Automatic gain control is exposed for RX. TX uses manual attenuation and
 reports `hasGainMode()` as false; requesting TX automatic mode raises an error.
 
+Device setting keys are case insensitive. `iq_swap` and `counter` accept
+`true`/`false` (case insensitive) or `1`/`0`; other values raise an error.
+`sys_clock_freq`, `full_scale`, `overload`, and `cal_offset` are read only.
+Unknown keys raise an error. Metadata reports the current cached settings.
+Counter mode applies to all RX handles and, per SDK requirements, takes effect
+when RX streaming next starts. Failed multi-handle changes attempt to restore
+all affected handles; rollback failures are reported and require recovery.
+Timestamp selection accepts `rf_timestamp` or `sys_timestamp`; configure it
+before starting RX streaming.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

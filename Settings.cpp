@@ -1345,23 +1345,23 @@ SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo(void) const
     SoapySDR::ArgInfo settingArg;
 
     settingArg.key         = "iq_swap";
-    settingArg.value       = "true";
+    settingArg.value = iq_swap ? "true" : "false";
     settingArg.name        = "I/Q Swap";
     settingArg.description = "Set I then Q format";
     settingArg.type        = SoapySDR::ArgInfo::BOOL;
     setArgs.push_back(settingArg);
 
     settingArg.key         = "counter";
-    settingArg.value       = "false";
+    settingArg.value = counter ? "true" : "false";
     settingArg.name        = "counter";
     settingArg.description = "FPGA creates RAMP samples";
     settingArg.type        = SoapySDR::ArgInfo::BOOL;
     setArgs.push_back(settingArg);
 
     settingArg.key         = "sys_clock_freq";
-    settingArg.value       = "sys_freq";
+    settingArg.value = std::to_string(sys_freq);
     settingArg.name        = "sys_clock_freq";
-    settingArg.description = "The frequency of the system timestamp clock";
+    settingArg.description = "Read-only frequency of the system timestamp clock";
     settingArg.type        = SoapySDR::ArgInfo::STRING;
     setArgs.push_back(settingArg);
 
@@ -1369,12 +1369,12 @@ SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo(void) const
     settingArg.key         = "full_scale";
     settingArg.value       = std::to_string(static_cast<uint32_t>(this->maxValue));
     settingArg.name        = "full_scale";
-    settingArg.description = "The device-specific full-scale integer sample value";
+    settingArg.description = "Read-only device-specific full-scale integer sample value";
     settingArg.type        = SoapySDR::ArgInfo::STRING;
     setArgs.push_back(settingArg);
 
     settingArg.key         = "timetype";
-    settingArg.value       = "rf_timestamp";
+    settingArg.value = timetype;
     settingArg.name        = "timetype";
     settingArg.description = "The type of timestamp to return in readStream";
     settingArg.type        = SoapySDR::ArgInfo::STRING;
@@ -1385,96 +1385,94 @@ SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo(void) const
     return setArgs;
 }
 
-void SoapySidekiq::writeSetting(const std::string &key,
-                                const std::string &value)
+namespace
 {
-    int status = 0;
-    skiq_iq_order_t iq_order;
+/** Parse documented boolean forms before any device or cached-state changes. */
+bool parseSettingBool(const std::string &key, const std::string &value)
+{
+    if (equalsIgnoreCase(value, "true") || value == "1")
+        return true;
+    if (equalsIgnoreCase(value, "false") || value == "0")
+        return false;
+    throw std::invalid_argument("Setting " + key + " requires true, false, 1, or 0");
+}
+} // namespace
 
+void SoapySidekiq::writeSetting(const std::string &key, const std::string &value)
+{
     SoapySDR_logf(SOAPY_SDR_TRACE, "writeSetting");
-
-    // make sure the case of the key doesn't matter
     if (equalsIgnoreCase(key, "iq_swap"))
     {
-        this->iq_swap = (value == "true");
-
-        /* set iq order to iq instead of qi */
-        if (iq_swap)
-        {
-            SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, setting iq mode to I then Q", this->card);
-            iq_order = skiq_iq_order_iq;
-        }
-        else
-        {
-            SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, setting iq mode to Q then I", this->card);
-            iq_order = skiq_iq_order_qi;
-        }
-
-        status = skiq_write_iq_order_mode(this->card, iq_order);
+        const bool requested = parseSettingBool(key, value);
+        const int status =
+            skiq_write_iq_order_mode(card, requested ? skiq_iq_order_iq : skiq_iq_order_qi);
         if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                    "skiq_write_iq_order_mode failed, (card %u), status %d",
-                    this->card, status);
-                    throw std::runtime_error("");
-        }
+            throw std::runtime_error("skiq_write_iq_order_mode failed: " + std::to_string(status));
+        iq_swap = requested;
     }
-    // make sure the case of the key doesn't matter
     else if (equalsIgnoreCase(key, "counter"))
     {
-        const skiq_data_src_t data_src =
-            (value == "true") ? skiq_data_src_counter : skiq_data_src_iq;
-
-        for (size_t chan = 0; chan < num_rx_channels; chan++)
+        const bool requested = parseSettingBool(key, value);
+        if (num_rx_channels == 0)
+            throw std::runtime_error("Counter setting requires an RX channel");
+        const auto source = requested ? skiq_data_src_counter : skiq_data_src_iq;
+        // Snapshot every mapped handle before writes; allocate rollback storage first.
+        std::vector<skiq_rx_hdl_t> handles;
+        std::vector<skiq_data_src_t> previous;
+        handles.reserve(num_rx_channels);
+        previous.reserve(num_rx_channels);
+        for (size_t channel = 0; channel < num_rx_channels; ++channel)
         {
-            status = skiq_write_rx_data_src(this->card, getRxHandle(chan), data_src);
+            const auto handle = getRxHandle(channel);
+            skiq_data_src_t old_source = skiq_data_src_iq;
+            const int status = skiq_read_rx_data_src(card, handle, &old_source);
+            if (status != 0)
+                throw std::runtime_error("skiq_read_rx_data_src failed on channel " +
+                                         std::to_string(channel) + ": " + std::to_string(status));
+            if (old_source != skiq_data_src_iq && old_source != skiq_data_src_counter)
+                throw std::runtime_error("Invalid RX data source on channel " +
+                                         std::to_string(channel));
+            handles.push_back(handle);
+            previous.push_back(old_source);
+        }
+        for (size_t channel = 0; channel < handles.size(); ++channel)
+        {
+            const int status = skiq_write_rx_data_src(card, handles[channel], source);
             if (status != 0)
             {
-                SoapySDR_logf(SOAPY_SDR_ERROR,
-                              "skiq_write_rx_data_src failed, card: %u channel: %zu status: %d",
-                              this->card, chan, status);
-                throw std::runtime_error("");
+                // Include the failed write: an SDK error can follow a partial update.
+                // Finish all compensation attempts before constructing the diagnostic.
+                int rollback_status = 0;
+                for (size_t attempted = channel + 1; attempted > 0; --attempted)
+                {
+                    const int restored = skiq_write_rx_data_src(card, handles[attempted - 1],
+                                                                previous[attempted - 1]);
+                    if (restored != 0 && rollback_status == 0)
+                        rollback_status = restored;
+                }
+                std::string message = "skiq_write_rx_data_src failed on channel " +
+                                      std::to_string(channel) + ": " + std::to_string(status);
+                if (rollback_status != 0)
+                    message +=
+                        "; RX data-source rollback failed: " + std::to_string(rollback_status);
+                throw std::runtime_error(message);
             }
         }
-
-        if (value == "true")
-        {
-            SoapySDR_log(SOAPY_SDR_INFO, "set all RX channels to counter mode");
-            counter = true;
-        }
-        else
-        {
-            SoapySDR_log(SOAPY_SDR_INFO, "set all RX channels to IQ mode");
-            counter = false;
-        }
+        counter = requested;
     }
-    // make sure the case of the key doesn't matter
     else if (equalsIgnoreCase(key, "timetype"))
     {
-        if (value == "rf_timestamp")
-        {
-            timetype = "rf_timestamp";
-            rfTimeSource = true;
-            SoapySDR_log(SOAPY_SDR_INFO, "set timetype to 'rf_timestamp'");
-        }
-        else if (value == "sys_timestamp")
-        {
-            timetype = "sys_timestamp";
-            rfTimeSource = false;
-            SoapySDR_log(SOAPY_SDR_INFO, "set timetype to 'sys_timestamp'");
-        }
-        else
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "invalid timetype %s ", value.c_str());
-            throw std::runtime_error("");
-        }
+        if (value != "rf_timestamp" && value != "sys_timestamp")
+            throw std::invalid_argument("Invalid timetype: " + value);
+        timetype = value;
+        rfTimeSource = value == "rf_timestamp";
     }
+    else if (equalsIgnoreCase(key, "sys_clock_freq") || equalsIgnoreCase(key, "full_scale") ||
+             equalsIgnoreCase(key, "overload") || equalsIgnoreCase(key, "cal_offset"))
+        throw std::invalid_argument("Read-only setting: " + key);
     else
-    {
-        SoapySDR_logf(SOAPY_SDR_WARNING, "writeSetting invalid key %s ", key.c_str());
-    }
+        throw std::invalid_argument("Unknown setting: " + key);
 }
-
 
 std::string SoapySidekiq::readSetting(const std::string &key) const
 {
@@ -1532,7 +1530,7 @@ std::string SoapySidekiq::readSetting(const std::string &key) const
     }
     else
     {
-        SoapySDR_logf(SOAPY_SDR_WARNING, "readSetting invalide key '%s'", key.c_str());
+        throw std::invalid_argument("Unknown setting: " + key);
     }
     return "";
 }
