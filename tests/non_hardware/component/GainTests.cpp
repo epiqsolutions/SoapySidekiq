@@ -193,6 +193,11 @@ class SoapySidekiq
     }
     std::size_t getNumChannels(int) const;
     void validateChannel(int, std::size_t) const;
+    void validateGainName(int, std::size_t, const std::string &) const;
+    std::vector<std::string> listGains(int, std::size_t) const;
+    bool hasGainMode(int, std::size_t) const;
+    void setGainMode(int, std::size_t, bool);
+    bool getGainMode(int, std::size_t) const;
     skiq_rx_hdl_t getRxHandle(std::size_t) const;
     skiq_tx_hdl_t getTxHandle(std::size_t) const;
     GainProfile gainProfile() const;
@@ -206,6 +211,7 @@ class SoapySidekiq
 };
 #include "ChannelValidationMethods.inc"
 #include "ChannelMappingMethods.inc"
+#include "GainModeMethods.inc"
 #include "GainMethods.inc"
 
 TEST_CASE("all existing RX profiles retain their index offsets, rounding and advertised ranges")
@@ -430,4 +436,49 @@ TEST_CASE("RX gain readback rejects indices outside the SDK range and metadata f
         REQUIRE_THROWS_AS(device.getGain(SOAPY_SDR_RX, 0), std::runtime_error);
         REQUIRE_EQ(sdk.events.back(), 'R');
     }
+}
+
+TEST_CASE("unknown named gain elements fail before SDK access or mode changes")
+{
+    SoapySidekiq device;
+    sdk.state[3].mode = skiq_rx_gain_auto;
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (const std::string name : {"", "lna", "unknown"})
+        {
+            REQUIRE_THROWS_AS(device.setGain(direction, 0, name, 5), std::invalid_argument);
+            REQUIRE_THROWS_AS(device.getGain(direction, 0, name), std::invalid_argument);
+            REQUIRE_THROWS_AS(device.getGainRange(direction, 0, name), std::invalid_argument);
+        }
+    REQUIRE(sdk.events.empty());
+    REQUIRE(sdk.state[3].mode == skiq_rx_gain_auto);
+}
+TEST_CASE("every advertised gain element works with named read write and range APIs")
+{
+    SoapySidekiq device;
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (std::size_t channel = 0; channel < 2; ++channel)
+            for (const auto &name : device.listGains(direction, channel))
+            {
+                device.setGain(direction, channel, name, 1.25);
+                REQUIRE_EQ(device.getGain(direction, channel, name),
+                           direction == SOAPY_SDR_RX ? 1.0 : 1.25);
+                REQUIRE_EQ(device.getGainRange(direction, channel, name).maximum(),
+                           direction == SOAPY_SDR_RX ? 76.0 : 89.75);
+            }
+}
+TEST_CASE("named gain validation rejects unavailable channels before consulting hardware")
+{
+    SoapySidekiq device;
+    REQUIRE_THROWS_AS(device.setGain(9, 0, "LNA", 5), std::invalid_argument);
+    REQUIRE_THROWS_AS(device.getGain(9, 0, "LNA"), std::invalid_argument);
+    REQUIRE_THROWS_AS(device.getGainRange(9, 0, "LNA"), std::invalid_argument);
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (const std::size_t channel : {std::size_t{2}, std::numeric_limits<std::size_t>::max()})
+        {
+            REQUIRE_THROWS_AS(device.setGain(direction, channel, "unknown", 5), std::out_of_range);
+            REQUIRE_THROWS_AS(device.getGain(direction, channel, "unknown"), std::out_of_range);
+            REQUIRE_THROWS_AS(device.getGainRange(direction, channel, "unknown"),
+                              std::out_of_range);
+        }
+    REQUIRE(sdk.events.empty());
 }

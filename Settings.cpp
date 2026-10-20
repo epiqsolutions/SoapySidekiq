@@ -859,6 +859,16 @@ double SoapySidekiq::txGainMaximum(const size_t channel) const
     return static_cast<double>(maximum - minimum) / 4.0;
 }
 
+void SoapySidekiq::validateGainName(const int direction, const size_t channel,
+                                    const std::string &name) const
+{
+    const auto choices = listGains(direction, channel);
+    if (std::find(choices.begin(), choices.end(), name) == choices.end())
+        throw std::invalid_argument(
+            "unknown gain element '" + name + "' (card " + std::to_string(card) + ", direction " +
+            std::to_string(direction) + ", channel " + std::to_string(channel) + ")");
+}
+
 std::vector<std::string> SoapySidekiq::listGains(const int direction, const size_t channel) const
 {
     validateChannel(direction, channel);
@@ -915,6 +925,7 @@ void SoapySidekiq::setGain(const int direction,
                            const std::string &name,
                            const double value)
 {
+    validateGainName(direction, channel, name);
     setGain(direction, channel, value);
 }
 
@@ -981,6 +992,7 @@ void SoapySidekiq::setGain(const int direction, const size_t channel, const doub
 
 double SoapySidekiq::getGain(const int direction, const size_t channel, const std::string &name) const
 {
+    validateGainName(direction, channel, name);
     return getGain(direction, channel);
 }
 
@@ -1025,6 +1037,7 @@ SoapySDR::Range SoapySidekiq::getGainRange(const int    direction,
                                            const size_t channel,
                                            const std::string & name) const
 {
+    validateGainName(direction, channel, name);
     SoapySDR_log(SOAPY_SDR_TRACE, "getGainRange with name");
     return getGainRange(direction, channel);
 }
