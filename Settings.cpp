@@ -859,98 +859,55 @@ double SoapySidekiq::txGainMaximum(const size_t channel) const
     return static_cast<double>(maximum - minimum) / 4.0;
 }
 
-std::vector<std::string> SoapySidekiq::listGains(const int direction, const size_t channel) const {
-    //  list available gain elements,
-    std::vector<std::string> results;
-    SoapySDR_logf(SOAPY_SDR_TRACE, "listGains");
-    results.push_back("LNA");
-    return results;
+std::vector<std::string> SoapySidekiq::listGains(const int direction, const size_t channel) const
+{
+    validateChannel(direction, channel);
+    // Retain the existing element name for client compatibility.
+    return {"LNA"};
 }
 
-// the Gain API is called for tx attenuation too.
 bool SoapySidekiq::hasGainMode(const int direction, const size_t channel) const
 {
-    SoapySDR_logf(SOAPY_SDR_TRACE, "hasGainMode");
-
-    // all Sidekiq cards have rx gain mode and tx attenuation mode
-    return true;
+    validateChannel(direction, channel);
+    return direction == SOAPY_SDR_RX;
 }
 
-void SoapySidekiq::setGainMode(const int direction, const size_t channel,
-                               const bool automatic)
+void SoapySidekiq::setGainMode(const int direction, const size_t channel, const bool automatic)
 {
-    int status = 0;
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "setGainMode");
-
-    if (direction == SOAPY_SDR_RX)
+    validateChannel(direction, channel);
+    if (direction == SOAPY_SDR_TX)
     {
-        skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
-
-        skiq_rx_gain_t mode =
-            automatic ? skiq_rx_gain_auto : skiq_rx_gain_manual;
-
-        status = skiq_write_rx_gain_mode(card, rx_hdl, mode);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_write_rx_gain_mode failed "
-                          "(card %u, channel %d, mode %d), status %d",
-                          card, channel, mode, status);
-            throw std::runtime_error("");
-        }
-
-        SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, handle: %u, setting RX gain mode: %s",
-                      card, rx_hdl, automatic ? "skiq_rx_gain_auto" :
-                      "skiq_rx_gain_manual");
+        if (automatic)
+            throw std::invalid_argument("TX automatic gain mode is not supported");
+        // Manual-only TX already satisfies a request to disable AGC.
+        return;
     }
-    else if (direction == SOAPY_SDR_TX)
-    {
-        // Tx has no mode
-        SoapySDR_logf(SOAPY_SDR_WARNING, "TX does not have an attenuation mode");
-    }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
-    }
+    const auto handle = getRxHandle(channel);
+    const auto mode = automatic ? skiq_rx_gain_auto : skiq_rx_gain_manual;
+    const int status = skiq_write_rx_gain_mode(card, handle, mode);
+    if (status != 0)
+        throw std::runtime_error("skiq_write_rx_gain_mode failed (card " + std::to_string(card) +
+                                 ", channel " + std::to_string(channel) + ", handle " +
+                                 std::to_string(handle) + ", status " + std::to_string(status) +
+                                 ")");
 }
 
 bool SoapySidekiq::getGainMode(const int direction, const size_t channel) const
 {
-    int status = 0;
-    SoapySDR_logf(SOAPY_SDR_TRACE, "getGainMode");
-
-    if (direction == SOAPY_SDR_RX)
-    {
-        skiq_rx_hdl_t rx_hdl = getRxHandle(channel);
-        skiq_rx_gain_t p_gain_mode;
-
-        status = skiq_read_rx_gain_mode(card, rx_hdl, &p_gain_mode);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_read_rx_gain_mode failed, (card %u), status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-        SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, handle: %u, RX gain mode: is %s",
-                      card, rx_hdl, p_gain_mode ? "skiq_rx_gain_auto" :
-                      "skiq_rx_gain_manual");
-
-        return p_gain_mode;
-    }
-    else if (direction == SOAPY_SDR_TX)
-    {
-        // Tx has no mode
-        SoapySDR_logf(SOAPY_SDR_WARNING, "TX does not have an attenuation mode");
-    }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
-    }
-
-    return false;
+    validateChannel(direction, channel);
+    if (direction == SOAPY_SDR_TX)
+        return false;
+    const auto handle = getRxHandle(channel);
+    skiq_rx_gain_t mode = skiq_rx_gain_manual;
+    const int status = skiq_read_rx_gain_mode(card, handle, &mode);
+    if (status != 0)
+        throw std::runtime_error("skiq_read_rx_gain_mode failed (card " + std::to_string(card) +
+                                 ", channel " + std::to_string(channel) + ", handle " +
+                                 std::to_string(handle) + ", status " + std::to_string(status) +
+                                 ")");
+    if (mode != skiq_rx_gain_manual && mode != skiq_rx_gain_auto)
+        throw std::runtime_error("skiq_read_rx_gain_mode returned an unsupported gain mode");
+    return mode == skiq_rx_gain_auto;
 }
 
 void SoapySidekiq::setGain(const int direction,
