@@ -421,7 +421,13 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
         // Preserve retryable hardware ownership if the backend stop fails.
         if (rx_session != nullptr)
         {
-            deactivateStream(stream, 0, 0);
+            const int status = deactivateStream(stream, 0, 0);
+            if (status != 0)
+            {
+                throw std::runtime_error("Cannot close RX stream after failed deactivation (card " +
+                                         std::to_string(card) + ", status " +
+                                         std::to_string(status) + ")");
+            }
         }
 
         if (active_rx_stream == stream_handle)
@@ -713,7 +719,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
     {
         if (active_rx_stream != stream_handle)
         {
-            throw std::runtime_error("RX stream is not the active device RX stream");
+            return SOAPY_SDR_STREAM_ERROR;
         }
 
         const skiq_rx_hdl_t rx_handle = stream_handle->rx_handle;
@@ -732,14 +738,14 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                 "stopping RX streaming failed (card %u, handle %d), status %d",
                 card, rx_handle, status);
-            throw std::runtime_error("failed to stop RX streaming");
+            return SOAPY_SDR_STREAM_ERROR;
         }
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
     {
         if (active_tx_stream != stream_handle)
         {
-            throw std::runtime_error("TX stream is not the active device TX stream");
+            return SOAPY_SDR_STREAM_ERROR;
         }
 
         const skiq_tx_hdl_t tx_handle = stream_handle->tx_handle;
@@ -769,7 +775,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
                     SoapySDR_logf(SOAPY_SDR_ERROR,
                         "skiq_stop_tx_streaming_on_1pps failed (card %u), status %d",
                         card, status);
-                    throw std::runtime_error("");
+                    return SOAPY_SDR_STREAM_ERROR;
                 }
             }
 
@@ -791,7 +797,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
                     SoapySDR_logf(SOAPY_SDR_ERROR,
                         "skiq_stop_tx_streaming failed (card %u), status %d",
                         card, status);
-                    throw std::runtime_error("");
+                    return SOAPY_SDR_STREAM_ERROR;
                 }
             }
         }

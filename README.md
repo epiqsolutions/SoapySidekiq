@@ -238,6 +238,12 @@ into logged `SOAPY_SDR_STREAM_ERROR` results. Unsupported options still return
 stream is already active or still owns a PPS startup thread, including a failed
 PPS start. This keeps repeated activation from replacing a joinable thread.
 
+SDK stop failures from `deactivateStream()` return `SOAPY_SDR_STREAM_ERROR` and
+retain stream ownership so the caller can retry. TX stops keep new writes
+blocked after failure. `closeStream()` raises an exception if RX hardware
+cannot be stopped and retains the stream for recovery; active TX must be
+deactivated successfully before it can be closed.
+
 ## Sensors
 
 `listSensors()` exposes `temperature` and `accelerometer`. `getSensorInfo()`
