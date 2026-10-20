@@ -161,6 +161,9 @@ public:
     std::uint8_t card{};
     double maxValue{32767};
     double txMaxValue{32767};
+    std::uint8_t num_rx_channels{1}, num_tx_channels{1};
+    std::size_t getNumChannels(int) const;
+    void validateChannel(int, std::size_t) const;
     skiq_tx_block_t blocks[DEFAULT_NUM_BUFFERS];
     skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{&blocks[0], &blocks[1], &blocks[2]};
     std::unique_ptr<std::int32_t[]> p_tx_status{
@@ -267,6 +270,7 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
     throw std::invalid_argument("invalid stream direction");
 }
 #include "NativeStreamFormat.inc"
+#include "ChannelValidationMethods.inc"
 
 // Generated directly from Streaming.cpp by CMake, including the input advance.
 #include "TxWriteMethod.inc"

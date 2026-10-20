@@ -219,25 +219,26 @@ bool writeKernel1PpsSource(const skiq_1pps_source_t source)
     return output.good();
 }
 
+void SoapySidekiq::validateChannel(const int direction, const size_t channel) const
+{
+    const auto count = getNumChannels(direction);
+    if (channel >= count)
+    {
+        throw std::out_of_range(std::string(direction == SOAPY_SDR_RX ? "RX" : "TX") + " channel " +
+                                std::to_string(channel) + " is unavailable; device has " +
+                                std::to_string(count) + " channel(s)");
+    }
+}
+
 skiq_rx_hdl_t SoapySidekiq::getRxHandle(const size_t channel) const
 {
-    if (channel >= num_rx_channels)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid RX channel %zu", channel);
-        throw std::runtime_error("");
-    }
-
+    validateChannel(SOAPY_SDR_RX, channel);
     return this->param.rx_param[channel].handle;
 }
 
 skiq_tx_hdl_t SoapySidekiq::getTxHandle(const size_t channel) const
 {
-    if (channel >= num_tx_channels)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid TX channel %zu", channel);
-        throw std::runtime_error("");
-    }
-
+    validateChannel(SOAPY_SDR_TX, channel);
     return this->param.tx_param[channel].handle;
 }
 
@@ -622,11 +623,9 @@ size_t SoapySidekiq::getNumChannels(const int dir) const
     }
     else
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", dir);
-        throw std::runtime_error("");
+        throw std::invalid_argument("invalid stream direction " + std::to_string(dir));
     }
 
-    return -1;
 }
 
 /*******************************************************************

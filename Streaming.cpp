@@ -106,6 +106,7 @@ long long SoapySidekiq::convert_timestamp_to_nanos(
 std::vector<std::string> SoapySidekiq::getStreamFormats(
     const int direction, const size_t channel) const
 {
+    validateChannel(direction, channel);
     SoapySDR_logf(SOAPY_SDR_TRACE, "getStreamFormats");
 
     std::vector<std::string> formats;
@@ -120,6 +121,7 @@ std::string SoapySidekiq::getNativeStreamFormat(const int    direction,
                                                 const size_t channel,
                                                 double &     fullScale) const
 {
+    validateChannel(direction, channel);
     SoapySDR_logf(SOAPY_SDR_TRACE, "getNativeStreamFormat");
 
     const auto stream_direction = streamDirection(direction);
@@ -132,6 +134,7 @@ std::string SoapySidekiq::getNativeStreamFormat(const int    direction,
 SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(
             const int direction, const size_t channel) const
 {
+    validateChannel(direction, channel);
     SoapySDR::ArgInfoList streamArgs;
 
     SoapySDR::ArgInfo bufflenArg;
