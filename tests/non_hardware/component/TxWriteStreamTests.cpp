@@ -751,6 +751,100 @@ TEST_CASE("TX buffer completion wakes the maximum timeout without overflow")
     REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
 }
 
+TEST_CASE("TX rejects partial and unrepresentable sample counts before PPS waits")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    int flags = 0;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    for (const auto count : {std::size_t{1}, std::size_t{device.current_tx_block_size - 1},
+                             static_cast<std::size_t>(std::numeric_limits<int>::max()) + 1})
+        REQUIRE_EQ(device.writeStream(stream, nullptr, count, flags, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE(device.tx_cv.deadlines.empty());
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+TEST_CASE("TX zero-length and null-buffer requests never submit or wait")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    int flags = 0;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    REQUIRE_EQ(device.writeStream(stream, nullptr, 0, flags, 0, 0), 0);
+    REQUIRE_EQ(device.writeStream(stream, nullptr, device.current_tx_block_size, flags, 0, 0),
+               SOAPY_SDR_STREAM_ERROR);
+    const void *buffers[]{nullptr};
+    REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 0),
+               SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE(device.tx_cv.deadlines.empty());
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+TEST_CASE("production CF32 writes clip exceptional values at each supported TX scale")
+{
+    const float infinity = std::numeric_limits<float>::infinity();
+    const std::vector<float> values{-infinity,
+                                    -2.0f,
+                                    -1.0f,
+                                    -0.5f,
+                                    -0.0f,
+                                    0.0f,
+                                    0.5f,
+                                    1.0f,
+                                    2.0f,
+                                    infinity,
+                                    std::numeric_limits<float>::quiet_NaN()};
+    for (const int scale : {2047, 8191, 32767})
+    {
+        SoapySidekiq device;
+        device.txMaxValue = scale;
+        std::vector<float> input(2 * device.current_tx_block_size);
+        for (std::size_t i = 0; i < input.size(); ++i)
+            input[i] = values[i % values.size()];
+        const std::vector<std::int16_t> expected{static_cast<std::int16_t>(-scale),
+                                                 static_cast<std::int16_t>(-scale),
+                                                 static_cast<std::int16_t>(-scale),
+                                                 static_cast<std::int16_t>(-(scale + 1) / 2),
+                                                 0,
+                                                 0,
+                                                 static_cast<std::int16_t>((scale + 1) / 2),
+                                                 static_cast<std::int16_t>(scale),
+                                                 static_cast<std::int16_t>(scale),
+                                                 static_cast<std::int16_t>(scale),
+                                                 0};
+        const void *buffers[]{input.data()};
+        int flags = 0;
+        REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                      device.current_tx_block_size, flags, 0, 0),
+                   static_cast<int>(device.current_tx_block_size));
+        for (std::size_t i = 0; i < input.size(); ++i)
+            REQUIRE_EQ(device.transmitted[0][i], expected[i % expected.size()]);
+    }
+}
+TEST_CASE("CF32 suffix retry after back-pressure preserves input stride and packet order")
+{
+    SoapySidekiq device;
+    device.reject_notifies = false;
+    device.send_results = {0, SKIQ_TX_ASYNC_SEND_QUEUE_FULL, 0};
+    std::vector<float> input(4 * device.current_tx_block_size, -1.0f);
+    std::fill(input.begin() + 2 * device.current_tx_block_size, input.end(), 1.0f);
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    const int accepted =
+        device.writeStream(stream, buffers, 2 * device.current_tx_block_size, flags, 0, 0);
+    REQUIRE_EQ(accepted, static_cast<int>(device.current_tx_block_size));
+    const void *suffix[]{input.data() + 2 * accepted};
+    REQUIRE_EQ(device.writeStream(stream, suffix, device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{2});
+    REQUIRE(std::all_of(device.transmitted[0].begin(), device.transmitted[0].end(),
+                        [](auto value) { return value == -32767; }));
+    REQUIRE(std::all_of(device.transmitted[1].begin(), device.transmitted[1].end(),
+                        [](auto value) { return value == 32767; }));
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
 TEST_CASE("TX callback releases context after throwing diagnostics and publishes completion first")
 {
     SoapySidekiq device;
