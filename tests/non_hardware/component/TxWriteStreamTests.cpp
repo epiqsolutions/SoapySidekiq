@@ -6,6 +6,8 @@
 #include "TestHarness.hpp"
 
 #include <cstddef>
+#include <chrono>
+#include <limits>
 #include <cmath>
 #include <cstdint>
 #include <condition_variable>
@@ -27,6 +29,7 @@
 #define SOAPY_SDR_RX 1
 #define SOAPY_SDR_NOT_SUPPORTED -1
 #define SOAPY_SDR_STREAM_ERROR -2
+#define SOAPY_SDR_TIMEOUT -3
 #define SKIQ_TX_ASYNC_SEND_QUEUE_FULL 1
 #define DEFAULT_NUM_BUFFERS 3
 #define SoapySDR_logf(...) ((void)0)
@@ -278,4 +281,72 @@ TEST_CASE("native CS16 reporting uses the host layout rather than physical DAC w
     REQUIRE_EQ(device.getNativeStreamFormat(SOAPY_SDR_RX, 0, scale), std::string{"CS16"});
     REQUIRE_EQ(scale, 32767.0);
     REQUIRE_THROWS_AS(device.getNativeStreamFormat(99, 0, scale), std::invalid_argument);
+}
+
+TEST_CASE("pending PPS startup respects zero and finite write timeouts")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    for (long timeout : {0L, 1000L})
+    {
+        REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                      device.current_tx_block_size, flags, 0, timeout),
+                   SOAPY_SDR_TIMEOUT);
+        REQUIRE(device.first_transmit);
+        REQUIRE(device.transmitted.empty());
+        REQUIRE_EQ(device.p_tx_status[0], 0);
+    }
+    // A timeout must not close the gate permanently once the start completes.
+    {
+        std::lock_guard<std::mutex> lock(device.tx_mutex);
+        device.tx_start_finished = true;
+    }
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE(!device.first_transmit);
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+}
+
+TEST_CASE("negative TX timeout fails without consuming the PPS write gate")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    const void *buffers[]{nullptr};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, -1),
+               SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(device.first_transmit);
+    REQUIRE(device.transmitted.empty());
+}
+
+TEST_CASE("PPS completion wakes a write with the maximum timeout safely")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    std::thread completion(
+        [&]
+        {
+            {
+                std::lock_guard<std::mutex> lock(device.tx_mutex);
+                device.tx_start_finished = true;
+                device.tx_start_status = 0;
+            }
+            device.tx_cv.notify_all();
+        });
+    int flags = 0;
+    // Always join before assertions; the fixture is borrowed by this thread.
+    const int result = device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
+                                          buffers, device.current_tx_block_size, flags, 0,
+                                          std::numeric_limits<long>::max());
+    completion.join();
+    REQUIRE_EQ(result, static_cast<int>(device.current_tx_block_size));
+    REQUIRE(!device.first_transmit);
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
 }
