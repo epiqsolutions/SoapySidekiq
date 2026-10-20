@@ -292,6 +292,17 @@ extract_stream_method(stream_metadata "std::vector<std::string> SoapySidekiq::ge
     "void SoapySidekiq::stopTxWrites(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelMetadataMethods.inc"
     "${channel_mapping}\n${stream_metadata}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelMappingMethods.inc" "${channel_mapping}")
+extract_settings_method(frequency_methods "void SoapySidekiq::setFrequency("
+    "void SoapySidekiq::setSampleRate(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/FrequencyMethods.inc" "${frequency_methods}")
+add_executable(frequency_tests support/TestMain.cpp component/FrequencyTests.cpp)
+target_include_directories(frequency_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(frequency_tests PRIVATE non_hardware_test_options)
+add_test(NAME frequency.all COMMAND frequency_tests)
+set_tests_properties(frequency.all PROPERTIES LABELS "component;non-hardware")
 add_executable(channel_metadata_tests support/TestMain.cpp component/ChannelMetadataTests.cpp)
 target_include_directories(channel_metadata_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
@@ -342,7 +353,8 @@ endif()
 
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests channel_metadata_tests sample_rate_capability_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
+            channel_metadata_tests sample_rate_capability_tests frequency_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
