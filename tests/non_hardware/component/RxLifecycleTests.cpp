@@ -95,6 +95,11 @@ public:
     std::uint8_t card{};
     bool tx_start_finished{}, tx_stream_active{}, rfTimeSource{true};
     std::mutex tx_mutex;
+    std::mutex tx_buf_mutex;
+    std::condition_variable tx_cv, tx_buf_cv;
+    bool tx_writes_stopping{true};
+    std::size_t active_tx_writers{};
+    void stopTxWrites();
     std::uint32_t rx_payload_size_in_words{2};
     std::uint64_t sys_freq{1000000};
     std::vector<std::uint32_t> rx_sample_rates{20000000};
@@ -137,6 +142,7 @@ static SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
 
 // Production close/deactivate and RX activation, using the real session worker.
 #include "RxLifecycleMethods.inc"
+#include "TxStopWritesMethod.inc"
 
 TEST_CASE("closing a failed RX worker stops hardware and permits reactivation")
 {

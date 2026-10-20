@@ -159,6 +159,17 @@ SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(
     return streamArgs;
 }
 
+void SoapySidekiq::stopTxWrites()
+{
+    {
+        std::scoped_lock lock(tx_mutex, tx_buf_mutex);
+        tx_writes_stopping = true;
+    }
+    tx_cv.notify_all();
+    tx_buf_cv.notify_all();
+    std::unique_lock<std::mutex> lock(tx_buf_mutex);
+    tx_buf_cv.wait(lock, [this] { return active_tx_writers == 0; });
+}
 
 void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
 {
@@ -624,6 +635,10 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         }
 
         tx_stream_active = true;
+        {
+            std::scoped_lock lock(tx_mutex, tx_buf_mutex);
+            tx_writes_stopping = false;
+        }
     }
 
 
@@ -671,6 +686,9 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
         }
 
         const skiq_tx_hdl_t tx_handle = stream_handle->tx_handle;
+        // Wake blocked writers and wait for their reservations/contexts to
+        // unwind before stopping hardware or allowing stream storage to close.
+        stopTxWrites();
         // A timed start may still be finishing when the caller stops the
         // stream. Join it before stopping and before destroying the device.
         if (_tx_streaming_thread.joinable())
@@ -820,6 +838,22 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         return SOAPY_SDR_STREAM_ERROR;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(tx_buf_mutex);
+        if (tx_writes_stopping)
+            return SOAPY_SDR_STREAM_ERROR;
+        ++active_tx_writers;
+    }
+    soapy_sidekiq::ScopeExit writer(
+        [this]() noexcept
+        {
+            {
+                std::lock_guard<std::mutex> lock(tx_buf_mutex);
+                --active_tx_writers;
+            }
+            tx_buf_cv.notify_all();
+        });
+
     // Clamp the deadline so even LONG_MAX microseconds cannot overflow
     // the clock's (typically nanosecond) representation.
     using Clock = std::chrono::steady_clock;
@@ -833,13 +867,14 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
     {
         SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start");
         std::unique_lock<std::mutex> lock(tx_mutex);
-        if (!tx_cv.wait_until(lock, deadline, [this] { return tx_start_finished; }))
+        if (!tx_cv.wait_until(lock, deadline,
+                              [this] { return tx_start_finished || tx_writes_stopping; }))
         {
             // The asynchronous PPS start is still pending. A later write may
             // wait again; no packet or callback context has been submitted.
             return SOAPY_SDR_TIMEOUT;
         }
-        if (tx_start_status != 0)
+        if (tx_writes_stopping || tx_start_status != 0)
         {
             // Keep the gate set so retries cannot transmit after a failed start.
             return SOAPY_SDR_STREAM_ERROR;
@@ -875,12 +910,16 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             // The predicate and completion updates share a mutex, so completion
             // cannot disappear between testing the slot and sleeping.
             std::unique_lock<std::mutex> lock(tx_buf_mutex);
-            if (!tx_buf_cv.wait_until(lock, deadline,
-                                      [this] { return p_tx_status[currTXBuffIndex] == 0; }))
+            if (!tx_buf_cv.wait_until(
+                    lock, deadline,
+                    [this] { return tx_writes_stopping || p_tx_status[currTXBuffIndex] == 0; }))
             {
                 return curr_block == 0 ? SOAPY_SDR_TIMEOUT
                                        : static_cast<int>(curr_block * current_tx_block_size);
             }
+            if (tx_writes_stopping)
+                return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
+                                       : static_cast<int>(curr_block * current_tx_block_size);
             p_tx_status[currTXBuffIndex] = 1;
             observed_completions = complete_count;
         }
@@ -932,10 +971,18 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             // A completion during skiq_transmit must satisfy this predicate
             // immediately; wait only when no completion has made progress.
             std::unique_lock<std::mutex> lock(tx_buf_mutex);
-            if (Clock::now() >= deadline ||
-                !tx_buf_cv.wait_until(lock, deadline,
-                                      [this, observed_completions]
-                                      { return complete_count != observed_completions; }))
+            const bool progressed =
+                tx_writes_stopping ||
+                (Clock::now() < deadline &&
+                 tx_buf_cv.wait_until(lock, deadline,
+                                      [this, observed_completions] {
+                                          return tx_writes_stopping ||
+                                                 complete_count != observed_completions;
+                                      }));
+            if (tx_writes_stopping)
+                return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
+                                       : static_cast<int>(curr_block * current_tx_block_size);
+            if (!progressed)
             {
                 return curr_block == 0 ? SOAPY_SDR_TIMEOUT
                                        : static_cast<int>(curr_block * current_tx_block_size);
