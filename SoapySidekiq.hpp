@@ -245,6 +245,8 @@ class SoapySidekiq : public SoapySDR::Device
     /** Acquire TX callback resources; unwind acquired state on any failure. */
     void initializeTxCallbacks();
 
+    /** Reject invalid directions/channels before metadata or SDK operations. */
+    void validateChannel(int direction, size_t channel) const;
     skiq_rx_hdl_t getRxHandle(const size_t channel) const;
     skiq_tx_hdl_t getTxHandle(const size_t channel) const;
     skiq_rx_hdl_t getFirstRxHandle(void) const;

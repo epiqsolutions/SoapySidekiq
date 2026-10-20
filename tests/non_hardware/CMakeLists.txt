@@ -269,6 +269,32 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxStopWritesMethod.inc" "${tx_stop_write
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxDeactivateMethod.inc" "${rx_deactivate}")
 extract_stream_method(activate_method "int SoapySidekiq::activateStream("
     "int SoapySidekiq::deactivateStream(")
+
+# Reuse the extraction boundary checks for side-effect-free device metadata.
+function(extract_settings_method output start_marker end_marker)
+    set(streaming_source "${settings_source}")
+    extract_stream_method(method "${start_marker}" "${end_marker}")
+    set(${output} "${method}" PARENT_SCOPE)
+endfunction()
+extract_settings_method(channel_validation "void SoapySidekiq::validateChannel("
+    "skiq_rx_hdl_t SoapySidekiq::getRxHandle(")
+extract_settings_method(channel_mapping "skiq_rx_hdl_t SoapySidekiq::getRxHandle("
+    "skiq_rx_hdl_t SoapySidekiq::getFirstRxHandle(")
+extract_settings_method(channel_count "size_t SoapySidekiq::getNumChannels("
+    "std::vector<std::string> SoapySidekiq::listAntennas(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelValidationMethods.inc"
+    "${channel_count}\n${channel_validation}")
+extract_stream_method(stream_metadata "std::vector<std::string> SoapySidekiq::getStreamFormats("
+    "void SoapySidekiq::stopTxWrites(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelMetadataMethods.inc"
+    "${channel_mapping}\n${stream_metadata}")
+add_executable(channel_metadata_tests support/TestMain.cpp component/ChannelMetadataTests.cpp)
+target_include_directories(channel_metadata_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(channel_metadata_tests PRIVATE non_hardware_test_options)
+add_test(NAME channel-metadata.all COMMAND channel_metadata_tests)
+set_tests_properties(channel-metadata.all PROPERTIES LABELS "component;non-hardware")
 string(FIND "${activate_method}" "    else if (stream_handle->direction == SOAPY_SDR_TX)" tx_branch)
 if(tx_branch LESS 0)
     message(FATAL_ERROR "Could not locate RX activation branch")
@@ -299,7 +325,7 @@ endif()
 
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests channel_metadata_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
