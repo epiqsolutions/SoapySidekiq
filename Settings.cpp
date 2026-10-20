@@ -526,7 +526,16 @@ SoapySDR::Kwargs SoapySidekiq::getHardwareInfo(void) const
     args["origin"] = "https://github.com/epiqsolutions/SoapySidekiq";
     args["card_type"] = part_str;
     args["card"]   = std::to_string(card);
-    args["serial"]   = serial;
+    char *serial_string = nullptr;
+    const int status = skiq_read_serial_string(card, &serial_string);
+    if (status != 0)
+        throw std::runtime_error("skiq_read_serial_string failed (card " + std::to_string(card) +
+                                 ", status " + std::to_string(status) + ")");
+    if (serial_string == nullptr || serial_string[0] == '\0')
+        throw std::runtime_error("skiq_read_serial_string returned a missing serial (card " +
+                                 std::to_string(card) + ")");
+    // The SDK owns this buffer. Copy its value; never release the pointer.
+    args["serial"] = serial_string;
     args["rx_channels"]   = std::to_string(num_rx_channels);
     args["tx_channels"]   = std::to_string(num_tx_channels);
 
