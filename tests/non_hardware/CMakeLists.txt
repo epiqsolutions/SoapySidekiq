@@ -259,6 +259,21 @@ function(extract_stream_method output start_marker end_marker)
     string(SUBSTRING "${streaming_source}" ${method_start} ${method_length} method)
     set(${output} "${method}" PARENT_SCOPE)
 endfunction()
+extract_stream_method(stream_lookup "SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle("
+    "void SoapySidekiq::registerInstance(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamHandleLookup.inc" "${stream_lookup}")
+extract_stream_method(stream_mtu "size_t SoapySidekiq::getStreamMTU("
+    "int SoapySidekiq::activateStream(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamMtuMethod.inc" "${stream_mtu}")
+extract_stream_method(stream_read "int SoapySidekiq::readStream("
+    "int SoapySidekiq::writeStream(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamReadMethod.inc" "${stream_read}")
+string(FIND "${streaming_source}" "int SoapySidekiq::readStreamStatus(" status_start)
+if(status_start LESS 0)
+    message(FATAL_ERROR "Could not locate stream status method")
+endif()
+string(SUBSTRING "${streaming_source}" ${status_start} -1 stream_status)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamStatusMethod.inc" "${stream_status}")
 extract_stream_method(rx_close "void SoapySidekiq::closeStream("
     "size_t SoapySidekiq::getStreamMTU(")
 extract_stream_method(rx_deactivate "int SoapySidekiq::deactivateStream("

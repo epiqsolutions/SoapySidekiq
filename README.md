@@ -200,6 +200,12 @@ all affected handles; rollback failures are reported and require recovery.
 Timestamp selection accepts `rf_timestamp` or `sys_timestamp`; configure it
 before starting RX streaming.
 
+Stream tokens belong to the device that created them and become invalid on
+close. Unknown tokens return `SOAPY_SDR_STREAM_ERROR` from activation,
+deactivation, I/O, and status calls. `closeStream` and `getStreamMTU` raise
+an argument error for an unknown token; MTU failures never return an unsigned
+version of a negative error code.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

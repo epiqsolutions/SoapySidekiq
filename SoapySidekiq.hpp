@@ -244,6 +244,9 @@ class SoapySidekiq : public SoapySDR::Device
     };
 
   private:
+    /** Resolve only this device's currently owned opaque stream tokens. */
+    StreamHandle *findStreamHandle(SoapySDR::Stream *stream) const noexcept;
+
     /** Acquire TX callback resources; unwind acquired state on any failure. */
     void initializeTxCallbacks();
 

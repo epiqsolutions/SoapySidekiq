@@ -37,6 +37,7 @@
 #define SOAPY_SDR_NOT_SUPPORTED -1
 #define SOAPY_SDR_STREAM_ERROR -2
 #define SOAPY_SDR_TIMEOUT -3
+#define SOAPY_SDR_UNDERFLOW -4
 #define SKIQ_TX_ASYNC_SEND_QUEUE_FULL 1
 #define DEFAULT_NUM_BUFFERS 3
 std::function<void()> log_hook;
@@ -191,6 +192,9 @@ public:
     }
 
     std::string getNativeStreamFormat(int, std::size_t, double &) const;
+    StreamHandle *findStreamHandle(SoapySDR::Stream *) const noexcept;
+    std::uint32_t tx_underruns{};
+    int readStreamStatus(SoapySDR::Stream *, std::size_t &, int &, long long &, long);
     int writeStream(SoapySDR::Stream *, const void *const *, std::size_t,
                     int &, long long, long);
     void tx_complete(int32_t, skiq_tx_block_t *, uint32_t);
@@ -258,10 +262,15 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
     return 0;
 }
 
-static SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
+#include "StreamHandleLookup.inc"
+unsigned underrun_reads{};
+int skiq_read_tx_num_underruns(std::uint8_t, unsigned, std::uint32_t *errors)
 {
-    return reinterpret_cast<SoapySidekiq::StreamHandle *>(stream);
+    ++underrun_reads;
+    *errors = 0;
+    return 0;
 }
+#include "StreamStatusMethod.inc"
 
 static soapy_sidekiq::StreamDirection streamDirection(int direction)
 {
@@ -1024,4 +1033,42 @@ TEST_CASE("deactivation drains a submission before calling SDK stop")
     REQUIRE(!drained_early);
     REQUIRE_EQ(stop_calls, 1);
     REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+}
+
+TEST_CASE("TX APIs reject unowned tokens before writes status reads or shutdown")
+{
+    SoapySidekiq device;
+    SoapySidekiq foreign;
+    underrun_reads = 0;
+    int flags = 123;
+    long long timestamp = 456;
+    std::size_t channels = 789;
+    for (auto *invalid : {static_cast<SoapySDR::Stream *>(nullptr),
+                          reinterpret_cast<SoapySDR::Stream *>(std::uintptr_t{1}),
+                          reinterpret_cast<SoapySDR::Stream *>(&foreign.handle)})
+    {
+        REQUIRE_EQ(device.writeStream(invalid, nullptr, 252, flags, 0, 0), SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_EQ(device.readStreamStatus(invalid, channels, flags, timestamp, 0),
+                   SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_EQ(device.deactivateStream(invalid, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    }
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE_EQ(underrun_reads, 0u);
+    REQUIRE(device.tx_stream_active);
+    REQUIRE_EQ(flags, 123);
+    REQUIRE_EQ(timestamp, 456LL);
+    REQUIRE_EQ(channels, std::size_t{789});
+}
+TEST_CASE("detached TX token is rejected and current token retains status access")
+{
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    int flags = 0;
+    long long timestamp = 0;
+    std::size_t channels = 0;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, timestamp, 0), 0);
+    device.active_tx_stream = nullptr;
+    REQUIRE_EQ(device.writeStream(stream, nullptr, 252, flags, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, timestamp, 0),
+               SOAPY_SDR_STREAM_ERROR);
 }
