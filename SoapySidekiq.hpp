@@ -256,6 +256,15 @@ class SoapySidekiq : public SoapySDR::Device
     };
     GainProfile gainProfile() const;
     double txGainMaximum(size_t channel) const;
+    /** Validated SDK configuration; caches change only after complete readback. */
+    struct RateAndBandwidth
+    {
+        uint32_t configured_rate;
+        double actual_rate;
+        uint32_t actual_bandwidth;
+    };
+    RateAndBandwidth readRateAndBandwidth(int direction, size_t channel) const;
+    void applyRateAndBandwidth(int direction, size_t channel, uint32_t rate, uint32_t bandwidth);
     skiq_rx_hdl_t getRxHandle(const size_t channel) const;
     skiq_tx_hdl_t getTxHandle(const size_t channel) const;
     skiq_rx_hdl_t getFirstRxHandle(void) const;

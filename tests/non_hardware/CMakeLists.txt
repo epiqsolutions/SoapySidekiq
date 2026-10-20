@@ -272,7 +272,11 @@ extract_stream_method(activate_method "int SoapySidekiq::activateStream("
 
 # Reuse the extraction boundary checks for side-effect-free device metadata.
 function(extract_settings_method output start_marker end_marker)
-    set(streaming_source "${settings_source}")
+    string(FIND "${settings_source}" "${start_marker}" settings_start)
+    if(settings_start LESS 0)
+        message(FATAL_ERROR "Could not locate settings method: ${start_marker}")
+    endif()
+    string(SUBSTRING "${settings_source}" ${settings_start} -1 streaming_source)
     extract_stream_method(method "${start_marker}" "${end_marker}")
     set(${output} "${method}" PARENT_SCOPE)
 endfunction()
@@ -310,6 +314,25 @@ target_include_directories(gain_tests PRIVATE
 target_link_libraries(gain_tests PRIVATE non_hardware_test_options)
 add_test(NAME gain.all COMMAND gain_tests)
 set_tests_properties(gain.all PROPERTIES LABELS "component;non-hardware")
+extract_settings_method(rate_set "void SoapySidekiq::setSampleRate("
+    "double SoapySidekiq::getSampleRate(")
+extract_settings_method(rate_get "double SoapySidekiq::getSampleRate("
+    "SoapySDR::RangeList SoapySidekiq::getSampleRateRange(")
+extract_settings_method(rate_helpers "SoapySidekiq::RateAndBandwidth SoapySidekiq::readRateAndBandwidth("
+    "void SoapySidekiq::setBandwidth(")
+extract_settings_method(bandwidth_set "void SoapySidekiq::setBandwidth("
+    "std::vector<double> SoapySidekiq::listSampleRates(")
+extract_settings_method(bandwidth_get "double SoapySidekiq::getBandwidth("
+    "SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RateBandwidthMethods.inc"
+    "${rate_set}\n${rate_get}\n${rate_helpers}\n${bandwidth_set}\n${bandwidth_get}")
+add_executable(rate_bandwidth_tests support/TestMain.cpp component/RateBandwidthTests.cpp)
+target_include_directories(rate_bandwidth_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(rate_bandwidth_tests PRIVATE non_hardware_test_options)
+add_test(NAME rate-bandwidth.all COMMAND rate_bandwidth_tests)
+set_tests_properties(rate-bandwidth.all PROPERTIES LABELS "component;non-hardware")
 add_executable(channel_metadata_tests support/TestMain.cpp component/ChannelMetadataTests.cpp)
 target_include_directories(channel_metadata_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
@@ -317,6 +340,19 @@ target_include_directories(channel_metadata_tests PRIVATE
 target_link_libraries(channel_metadata_tests PRIVATE non_hardware_test_options)
 add_test(NAME channel-metadata.all COMMAND channel_metadata_tests)
 set_tests_properties(channel-metadata.all PROPERTIES LABELS "component;non-hardware")
+
+# Each body ends at the first unindented closing brace after its signature.
+# This avoids depending on the adjacent RF helper method's name/order.
+extract_settings_method(rate_range "SoapySDR::RangeList SoapySidekiq::getSampleRateRange(" "\n}\n")
+extract_settings_method(rate_list "std::vector<double> SoapySidekiq::listSampleRates(" "\n}\n")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/SampleRateCapabilityMethods.inc"
+    "${rate_range}\n}\n${rate_list}\n}\n")
+add_executable(sample_rate_capability_tests support/TestMain.cpp component/SampleRateCapabilityTests.cpp)
+target_include_directories(sample_rate_capability_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(sample_rate_capability_tests PRIVATE non_hardware_test_options)
+add_test(NAME sample-rate-capability.all COMMAND sample_rate_capability_tests)
+set_tests_properties(sample-rate-capability.all PROPERTIES LABELS "component;non-hardware" TIMEOUT 10)
 string(FIND "${activate_method}" "    else if (stream_handle->direction == SOAPY_SDR_TX)" tx_branch)
 if(tx_branch LESS 0)
     message(FATAL_ERROR "Could not locate RX activation branch")
@@ -347,7 +383,9 @@ endif()
 
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests channel_metadata_tests frequency_tests gain_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
+            channel_metadata_tests sample_rate_capability_tests frequency_tests
+            rate_bandwidth_tests gain_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
