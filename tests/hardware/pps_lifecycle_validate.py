@@ -7,12 +7,30 @@ import time
 
 import numpy as np
 import SoapySDR
-from SoapySDR import SOAPY_SDR_CS16, SOAPY_SDR_HAS_TIME, SOAPY_SDR_RX, SOAPY_SDR_TX
+from SoapySDR import (SOAPY_SDR_CS16, SOAPY_SDR_HAS_TIME, SOAPY_SDR_RX,
+                      SOAPY_SDR_TIMEOUT, SOAPY_SDR_TX)
 
 
 def require_ok(label, result):
     if result < 0:
         raise RuntimeError(f"{label} failed: {result}")
+
+
+def write_after_pps_start(sdr, stream, buffer, mtu):
+    """Retry the unsent block while the asynchronous PPS start is pending."""
+    deadline = time.monotonic() + 5.0
+    while True:
+        remaining_us = int((deadline - time.monotonic()) * 1e6)
+        if remaining_us <= 0:
+            raise TimeoutError("timed TX start did not complete within 5 seconds")
+        sent = sdr.writeStream(stream, [buffer], mtu,
+                               timeoutUs=min(200000, remaining_us))
+        if sent.ret == SOAPY_SDR_TIMEOUT:
+            continue
+        require_ok("timed TX first write", sent.ret)
+        if sent.ret != mtu:
+            raise AssertionError(f"timed TX wrote {sent.ret} of {mtu}")
+        return sent
 
 
 def validate(serial, rate, rx_channel, tx_channel):
@@ -86,10 +104,7 @@ def validate(serial, rate, rx_channel, tx_channel):
         require_ok("timed TX start", sdr.activateStream(tx, SOAPY_SDR_HAS_TIME))
         tx_active = True
         t0 = time.monotonic()
-        sent = sdr.writeStream(tx, [tx_buffer], tx_mtu, timeoutUs=200000)
-        require_ok("timed TX first write", sent.ret)
-        if sent.ret != tx_mtu:
-            raise AssertionError(f"timed TX wrote {sent.ret} of {tx_mtu}")
+        sent = write_after_pps_start(sdr, tx, tx_buffer, tx_mtu)
         write_wait = time.monotonic() - t0
         t0 = time.monotonic()
         require_ok("timed TX stop", sdr.deactivateStream(tx, SOAPY_SDR_HAS_TIME))
