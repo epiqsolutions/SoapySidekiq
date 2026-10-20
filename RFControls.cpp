@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
