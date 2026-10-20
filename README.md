@@ -179,6 +179,11 @@ all affected handles; rollback failures are reported and require recovery.
 Timestamp selection accepts `rf_timestamp` or `sys_timestamp`; configure it
 before starting RX streaming.
 
+`getHardwareTime` uses system time for the empty selector or `sys_timestamp`.
+Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle
+with the SDK's current actual rate, preserving fractional Hz. Missing rates,
+unsupported directions, unknown selectors, and nanosecond overflow raise errors.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

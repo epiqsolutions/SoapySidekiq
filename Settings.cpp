@@ -9,6 +9,7 @@
 #include <SoapySidekiq/SidekiqRxBackend.hpp>
 #include <SoapySidekiq/SampleScale.hpp>
 #include <SoapySidekiq/NumericConversion.hpp>
+#include <SoapySidekiq/TimestampConversion.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <algorithm>
 #include <cerrno>
@@ -1714,111 +1715,59 @@ void SoapySidekiq::setTimeSource(const std::string &source)
 
 bool SoapySidekiq::hasHardwareTime(const std::string &what="") const
 {
-    SoapySDR_logf(SOAPY_SDR_TRACE, "hasHardwareTime");
-
+    if (what.empty() || equalsIgnoreCase(what, "sys_timestamp"))
+        return true;
     if (equalsIgnoreCase(what, "rx_rf_timestamp"))
-    {
-        return true;
-    }
-    else if (equalsIgnoreCase(what, "tx_rf_timestamp"))
-    {
-        return true;
-    }
-    else if (equalsIgnoreCase(what, "sys_timestamp"))
-    {
-        return true;
-    }
-    else if (what == "")
-    {
-        return true;
-    }
-
-
+        return num_rx_channels != 0;
+    if (equalsIgnoreCase(what, "tx_rf_timestamp"))
+        return num_tx_channels != 0;
     return false;
 }
 
-/* Return the specific timestamp in nanoseconds */
 long long SoapySidekiq::getHardwareTime(const std::string &what="") const
 {
-    int status = 0;
     uint64_t timestamp = 0;
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "getHardwareTime");
-
-    if (equalsIgnoreCase(what, "rx_rf_timestamp"))
+    if (what.empty() || equalsIgnoreCase(what, "sys_timestamp"))
     {
-        status = skiq_read_curr_rx_timestamp(card, getFirstRxHandle(), &timestamp);
+        uint64_t frequency = 0;
+        int status = skiq_read_sys_timestamp_freq(card, &frequency);
         if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_read_curr_rx_timestamp failed, (card %u), status %d",
-                           card, status);
-            throw std::runtime_error("");
-        }
-
-        // if the user has not set the sample rate then we
-        // must warn them and return
-        if (rx_sample_rates.empty() || rx_sample_rates.front() == 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_WARNING, "Cannot convert an rf timestamp to time without"
-                          "configuring the sample rate first.  Passing unconverted timestamp");
-
-            return timestamp;
-        }
-
-        return convert_timestamp_to_nanos(timestamp, rx_sample_rates.front());
-    }
-    else if (equalsIgnoreCase(what, "tx_rf_timestamp"))
-    {
-        status = skiq_read_curr_tx_timestamp(card, getFirstTxHandle(), &timestamp);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_read_curr_rx_timestamp failed, (card %u), status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-
-        // if the user has not set the sample rate then we
-        // must warn them and return
-        if (tx_sample_rates.empty() || tx_sample_rates.front() == 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_WARNING, "Cannot convert an rf timestamp to time without"
-                          "configuring the sample rate first.  Passing unconverted timestamp");
-
-            return timestamp;
-        }
-        return convert_timestamp_to_nanos(timestamp, tx_sample_rates.front());
-    }
-    else if (equalsIgnoreCase(what, "sys_timestamp"))
-    {
-        uint64_t current_sys_freq = 0;
-        status = skiq_read_sys_timestamp_freq(card, &current_sys_freq);
-        if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_read_sys_timestamp_freq failed (card %u), status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-
+            throw std::runtime_error("skiq_read_sys_timestamp_freq failed: " +
+                                     std::to_string(status));
+        if (frequency == 0)
+            throw std::runtime_error("System timestamp frequency is missing or zero");
         status = skiq_read_curr_sys_timestamp(card, &timestamp);
         if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_read_curr_sys_timestamp failed, (card %u), status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-        return convert_timestamp_to_nanos(timestamp, current_sys_freq);
-
+            throw std::runtime_error("skiq_read_curr_sys_timestamp failed: " +
+                                     std::to_string(status));
+        return soapy_sidekiq::ticksToNanoseconds(timestamp, frequency);
     }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_WARNING, "invalid 'what' parameter %s", what.c_str());
-    }
-
-    return 0;
+    const bool rx = equalsIgnoreCase(what, "rx_rf_timestamp");
+    const bool tx = equalsIgnoreCase(what, "tx_rf_timestamp");
+    if (!rx && !tx)
+        throw std::invalid_argument("Unknown hardware timestamp: " + what);
+    validateChannel(rx ? SOAPY_SDR_RX : SOAPY_SDR_TX, 0);
+    uint32_t configured_rate{}, configured_bw{}, actual_bw{};
+    double actual_rate = std::numeric_limits<double>::quiet_NaN();
+    // Read the current rate rather than an integer cache that can be stale or
+    // omit fractional Hz. Bandwidth does not affect timestamp conversion.
+    int status =
+        rx ? skiq_read_rx_sample_rate_and_bandwidth(card, getFirstRxHandle(), &configured_rate,
+                                                    &actual_rate, &configured_bw, &actual_bw)
+           : skiq_read_tx_sample_rate_and_bandwidth(card, getFirstTxHandle(), &configured_rate,
+                                                    &actual_rate, &configured_bw, &actual_bw);
+    if (status != 0)
+        throw std::runtime_error(std::string(rx ? "RX" : "TX") +
+                                 " timestamp rate read failed: " + std::to_string(status));
+    if (!std::isfinite(actual_rate) || actual_rate < 1 || actual_rate >= std::ldexp(1.0, 32))
+        throw std::runtime_error("Invalid actual RF timestamp rate");
+    status = rx ? skiq_read_curr_rx_timestamp(card, getFirstRxHandle(), &timestamp)
+                : skiq_read_curr_tx_timestamp(card, getFirstTxHandle(), &timestamp);
+    if (status != 0)
+        throw std::runtime_error(
+            std::string(rx ? "skiq_read_curr_rx_timestamp" : "skiq_read_curr_tx_timestamp") +
+            " failed: " + std::to_string(status));
+    return soapy_sidekiq::ticksToNanosecondsAtRate(timestamp, actual_rate);
 }
 
 void SoapySidekiq::setHardwareTime(const long long timeNs, const std::string &what="")
