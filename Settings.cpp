@@ -88,8 +88,6 @@ void logging_handler(int32_t priority, const char *message) noexcept
  */
 void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex)
 {
-    this->complete_count++;
-
     // update the in use status of the packet just completed
     {
         std::lock_guard<std::mutex> lock(tx_buf_mutex);
@@ -98,7 +96,9 @@ void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t
             SoapySDR_logf(SOAPY_SDR_ERROR, "status isn't 1");
         }
         p_tx_status[txIndex] = 0;
+        ++complete_count;
     }
+    tx_buf_cv.notify_all();
 
     // signal to the other thread that there may be space available now that a
     // packet send has completed

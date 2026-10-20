@@ -279,6 +279,7 @@ class SoapySidekiq : public SoapySDR::Device
     std::mutex tx_mutex;
     std::condition_variable tx_cv;
     std::mutex tx_buf_mutex;
+    std::condition_variable tx_buf_cv;
     pthread_mutex_t space_avail_mutex;
     pthread_cond_t space_avail_cond;
     bool space_avail{};
@@ -294,7 +295,7 @@ class SoapySidekiq : public SoapySDR::Device
     std::vector<uint32_t> tx_sample_rates;
     std::vector<uint32_t> tx_bandwidths;
     uint32_t tx_underruns{};
-    uint32_t complete_count{};
+    uint64_t complete_count{}; // Guarded by tx_buf_mutex.
     uint32_t current_tx_block_size{};
 
     //  setting

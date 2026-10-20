@@ -820,18 +820,19 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         return SOAPY_SDR_STREAM_ERROR;
     }
 
+    // Clamp the deadline so even LONG_MAX microseconds cannot overflow
+    // the clock's (typically nanosecond) representation.
+    using Clock = std::chrono::steady_clock;
+    const auto now = Clock::now();
+    const auto budget = std::chrono::microseconds(timeoutUs);
+    const auto remaining =
+        std::chrono::duration_cast<std::chrono::microseconds>(Clock::time_point::max() - now);
+    const auto deadline = budget >= remaining ? Clock::time_point::max() : now + budget;
+
     if (first_transmit)
     {
         SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start");
         std::unique_lock<std::mutex> lock(tx_mutex);
-        // Clamp the deadline so even LONG_MAX microseconds cannot overflow
-        // the clock's (typically nanosecond) representation.
-        using Clock = std::chrono::steady_clock;
-        const auto now = Clock::now();
-        const auto budget = std::chrono::microseconds(timeoutUs);
-        const auto remaining =
-            std::chrono::duration_cast<std::chrono::microseconds>(Clock::time_point::max() - now);
-        const auto deadline = budget >= remaining ? Clock::time_point::max() : now + budget;
         if (!tx_cv.wait_until(lock, deadline, [this] { return tx_start_finished; }))
         {
             // The asynchronous PPS start is still pending. A later write may
@@ -869,27 +870,19 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     while (curr_block < num_blocks)
     {
-        // need to make sure that we don't update the timestamp of a packet
-        // that is already in use
+        uint64_t observed_completions = 0;
         {
+            // The predicate and completion updates share a mutex, so completion
+            // cannot disappear between testing the slot and sleeping.
             std::unique_lock<std::mutex> lock(tx_buf_mutex);
-            if (p_tx_status[currTXBuffIndex] == 0)
+            if (!tx_buf_cv.wait_until(lock, deadline,
+                                      [this] { return p_tx_status[currTXBuffIndex] == 0; }))
             {
-                p_tx_status[currTXBuffIndex] = 1;
+                return curr_block == 0 ? SOAPY_SDR_TIMEOUT
+                                       : static_cast<int>(curr_block * current_tx_block_size);
             }
-            else
-            {
-                // Completion needs this mutex to release a busy block.
-                lock.unlock();
-                pthread_mutex_lock(&space_avail_mutex);
-                // wait for a packet to complete
-                space_avail = false;
-                pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
-                pthread_mutex_unlock(&space_avail_mutex);
-
-                // space available so try again
-                continue;
-            }
+            p_tx_status[currTXBuffIndex] = 1;
+            observed_completions = complete_count;
         }
 
         {
@@ -936,16 +929,17 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         }
         if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
         {
-            // if there's no space left to send, wait until there should be space available
-            pthread_mutex_lock(&space_avail_mutex);
-
-            // wait for a packet to complete
-            while (!space_avail)
+            // A completion during skiq_transmit must satisfy this predicate
+            // immediately; wait only when no completion has made progress.
+            std::unique_lock<std::mutex> lock(tx_buf_mutex);
+            if (Clock::now() >= deadline ||
+                !tx_buf_cv.wait_until(lock, deadline,
+                                      [this, observed_completions]
+                                      { return complete_count != observed_completions; }))
             {
-                pthread_cond_wait(&space_avail_cond, &space_avail_mutex);
+                return curr_block == 0 ? SOAPY_SDR_TIMEOUT
+                                       : static_cast<int>(curr_block * current_tx_block_size);
             }
-            space_avail = false;
-            pthread_mutex_unlock(&space_avail_mutex);
         }
         else if (status != 0)
         {

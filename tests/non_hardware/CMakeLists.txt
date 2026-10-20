@@ -181,6 +181,16 @@ target_link_libraries(sdk_logging_tests PRIVATE non_hardware_test_options)
 add_test(NAME sdk-logging.all COMMAND sdk_logging_tests)
 set_tests_properties(sdk-logging.all PROPERTIES LABELS "component;non-hardware")
 
+# TX wait regressions use real completion publication, not a duplicated notifier.
+string(FIND "${settings_source}" "void SoapySidekiq::tx_complete(" completion_start)
+string(FIND "${settings_source}" "bool equalsIgnoreCase(" completion_end)
+if(completion_start LESS 0 OR completion_end LESS completion_start)
+    message(FATAL_ERROR "Could not locate the production TX completion method")
+endif()
+math(EXPR completion_length "${completion_end} - ${completion_start}")
+string(SUBSTRING "${settings_source}" ${completion_start} ${completion_length} completion_method)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxCompletionMethod.inc" "${completion_method}")
+
 # Exercise the actual constructor registration transaction with failing APIs.
 string(FIND "${settings_source}" "void SoapySidekiq::initializeTxCallbacks(" callback_start)
 string(FIND "${settings_source}" "SoapySidekiq::SoapySidekiq(" callback_end)
