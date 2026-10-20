@@ -176,6 +176,13 @@ The SDK immediate update sets both RF and system counters to the same raw tick
 value; the PPS update sets RF to zero and system to the requested tick value.
 The counters can therefore represent different times when their rates differ.
 
+PPS source selection rejects unknown names. If the SDK source API fails, the
+existing kernel PPS endpoint is used when available. Selecting external or
+internal PPS requires a timestamp transition across one one-second observation
+interval; missing edges, SDK errors, and interrupted waits raise an error.
+Source configuration can already have changed when pulse verification fails.
+The kernel fallback can select external/internal GPS, but cannot disable PPS.
+
 Clock selection accepts `internal_clock` or `external_clock` (case insensitive)
 and rejects other names before accessing the SDK. Actual source support is
 card dependent; SDK failures are returned to the caller. The SDK host reference
