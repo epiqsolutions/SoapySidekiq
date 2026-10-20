@@ -11,6 +11,7 @@
 #include <SoapySidekiq/NumericConversion.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <cinttypes>
@@ -635,54 +636,51 @@ size_t SoapySidekiq::getNumChannels(const int dir) const
  * Antenna API
  ******************************************************************/
 
-std::vector<std::string> SoapySidekiq::listAntennas(const int direction, const size_t channel) const {
-    std::vector<std::string> antennas;
-    skiq_rf_port_t rf_port = skiq_rf_port_unknown;
-    int status = 0;
+std::vector<std::string> SoapySidekiq::listAntennas(const int direction, const size_t channel) const
+{
+    const auto name = currentAntenna(direction, channel);
+    return name.empty() ? std::vector<std::string>{} : std::vector<std::string>{name};
+}
 
-    SoapySDR_logf(SOAPY_SDR_TRACE, "listAntennas");
+std::string SoapySidekiq::currentAntenna(const int direction, const size_t channel) const
+{
+    validateChannel(direction, channel);
+    skiq_rf_port_t port = skiq_rf_port_unknown;
+    const int status = direction == SOAPY_SDR_RX
+                           ? skiq_read_rx_rf_port_for_hdl(card, getRxHandle(channel), &port)
+                           : skiq_read_tx_rf_port_for_hdl(card, getTxHandle(channel), &port);
+    // RF-port reporting is optional; do not advertise a fabricated choice.
+    if (status == -ENOTSUP || status == -ENOSYS)
+        return {};
+    if (status != 0)
+        throw std::runtime_error(std::string(direction == SOAPY_SDR_RX ? "RX" : "TX") +
+                                 " RF-port read failed (card " + std::to_string(card) +
+                                 ", channel " + std::to_string(channel) + ", status " +
+                                 std::to_string(status) + ")");
+    if (port == skiq_rf_port_unknown)
+        return {};
+    const char *name = skiq_rf_port_string(port);
+    if (name == nullptr || name[0] == '\0')
+        throw std::runtime_error("SDK returned an invalid RF-port name (card " +
+                                 std::to_string(card) + ", channel " + std::to_string(channel) +
+                                 ")");
+    return name;
+}
 
-    if (direction == SOAPY_SDR_RX)
-    {
-        if (channel >= num_rx_channels)
-        {
-            antennas.push_back("NONE");
-        }
-        else
-        {
-            status = skiq_read_rx_rf_port_for_hdl(card, getRxHandle(channel), &rf_port);
-            if ((status == 0) && (rf_port != skiq_rf_port_unknown))
-            {
-                antennas.push_back(skiq_rf_port_string(rf_port));
-            }
-            else
-            {
-                antennas.push_back("UNKNOWN");
-            }
-        }
-    }
-    else if (direction == SOAPY_SDR_TX)
-    {
-        if (channel >= num_tx_channels)
-        {
-            antennas.push_back("NONE");
-        }
-        else
-        {
-            status = skiq_read_tx_rf_port_for_hdl(card, getTxHandle(channel), &rf_port);
-            if ((status == 0) && (rf_port != skiq_rf_port_unknown))
-            {
-                antennas.push_back(skiq_rf_port_string(rf_port));
-            }
-            else
-            {
-                antennas.push_back("UNKNOWN");
-            }
-        }
-    }
+std::string SoapySidekiq::getAntenna(const int direction, const size_t channel) const
+{
+    return currentAntenna(direction, channel);
+}
 
-
-    return antennas;
+void SoapySidekiq::setAntenna(const int direction, const size_t channel, const std::string &name)
+{
+    const auto current = currentAntenna(direction, channel);
+    // The driver currently exposes only the configured route, so selecting it
+    // is idempotent. Other selections must not silently succeed via the base API.
+    if (current.empty() || name != current)
+        throw std::invalid_argument("antenna selection '" + name + "' is unavailable (card " +
+                                    std::to_string(card) + ", channel " + std::to_string(channel) +
+                                    "); only the configured RF port can be selected");
 }
 
 /*******************************************************************
