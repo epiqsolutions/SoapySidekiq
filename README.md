@@ -162,6 +162,9 @@ are preserved and can also run automatically in that mode. Disabling DC-offset
 correction clears only its selection bit and preserves the shared mode.
 The SDK can run selected calibrations during subsequent RX tuning operations.
 
+Automatic gain control is exposed for RX. TX uses manual attenuation and
+reports `hasGainMode()` as false; requesting TX automatic mode raises an error.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
