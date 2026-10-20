@@ -18,6 +18,7 @@
 #include "SoapySidekiq.hpp"
 #include <SoapySDR/Formats.hpp>
 #include <SoapySidekiq/SampleConversion.hpp>
+#include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySidekiq/StreamConfiguration.hpp>
 #include <SoapySidekiq/TimestampConversion.hpp>
 #include <sidekiq_types.h>
@@ -868,26 +869,6 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
 
     while (curr_block < num_blocks)
     {
-        // Pointer to the location in the output buffer to copy to.
-        char *outbuff_ptr = reinterpret_cast<char *>(p_tx_block[currTXBuffIndex]->data);
-
-        // determine if we received short or float
-        if (txUseShort)
-        {
-            // CS16
-            memcpy(outbuff_ptr, inbuff_ptr, tx_block_bytes);
-        }
-        else
-        {
-            // Clip and normalize exceptional CF32 values before integer storage.
-            soapy_sidekiq::convertCf32ToCs16(
-                reinterpret_cast<const float *>(inbuff_ptr),
-                reinterpret_cast<std::int16_t *>(outbuff_ptr),
-                current_tx_block_size,
-                static_cast<float>(this->txMaxValue));
-        }
-
-
         // need to make sure that we don't update the timestamp of a packet
         // that is already in use
         {
@@ -911,24 +892,50 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             }
         }
 
-        // Create the structure that is passed in p_user
-        passedStructInstance = new passedStruct;
-        passedStructInstance->classAddr = this;
-        passedStructInstance->txIndex = currTXBuffIndex;
-
-        // transmit the buffer
-        status = skiq_transmit(this->card,
-                               stream_handle->tx_handle,
-                               this->p_tx_block[currTXBuffIndex],
-                               passedStructInstance);
-        if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
         {
-            // update the in use status since we didn't actually send it yet
+            // Until the SDK accepts this block, unwind its reservation on any
+            // allocation, conversion, or submission failure.
+            const auto block_index = currTXBuffIndex;
+            soapy_sidekiq::ScopeExit reservation(
+                [this, block_index]() noexcept
+                {
+                    std::lock_guard<std::mutex> lock(tx_buf_mutex);
+                    p_tx_status[block_index] = 0;
+                });
+            auto context = std::make_unique<passedStruct>();
+            context->classAddr = this;
+            context->txIndex = block_index;
+
+            // Pointer to the location in the output buffer to copy to.
+            char *outbuff_ptr = reinterpret_cast<char *>(p_tx_block[currTXBuffIndex]->data);
+
+            // determine if we received short or float
+            if (txUseShort)
             {
-                std::lock_guard<std::mutex> lock(tx_buf_mutex);
-                p_tx_status[currTXBuffIndex] = 0;
+                // CS16
+                memcpy(outbuff_ptr, inbuff_ptr, tx_block_bytes);
+            }
+            else
+            {
+                // Clip and normalize exceptional CF32 values before integer storage.
+                soapy_sidekiq::convertCf32ToCs16(reinterpret_cast<const float *>(inbuff_ptr),
+                                                 reinterpret_cast<std::int16_t *>(outbuff_ptr),
+                                                 current_tx_block_size,
+                                                 static_cast<float>(this->txMaxValue));
             }
 
+            status = skiq_transmit(this->card, stream_handle->tx_handle,
+                                   this->p_tx_block[block_index], context.get());
+            if (status == 0)
+            {
+                // The SDK completion callback now owns context. It may already
+                // have run synchronously; do not inspect context after submit.
+                context.release();
+                reservation.release();
+            }
+        }
+        if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
+        {
             // if there's no space left to send, wait until there should be space available
             pthread_mutex_lock(&space_avail_mutex);
 

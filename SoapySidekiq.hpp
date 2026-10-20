@@ -320,13 +320,12 @@ class SoapySidekiq : public SoapySDR::Device
     static SoapySidekiq *getInstanceForCard(uint8_t card);
 
   public:
+    /** Per-send context: owned by writeStream until accepted, then by completion. */
     struct passedStruct
     {
         SoapySidekiq *classAddr;
         uint32_t txIndex;
     };
-
-    passedStruct *passedStructInstance;
 
     // tx thread
     std::thread _tx_streaming_thread;
