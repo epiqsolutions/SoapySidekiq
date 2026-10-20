@@ -313,6 +313,20 @@ target_link_libraries(antenna_tests PRIVATE non_hardware_test_options)
 add_test(NAME antenna.all COMMAND antenna_tests)
 set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
 
+extract_settings_method(pps_methods "std::vector<std::string> SoapySidekiq::listTimeSources("
+    "bool SoapySidekiq::hasHardwareTime(")
+extract_settings_method(pps_kernel "bool readKernel1PpsSource("
+    "void SoapySidekiq::validateChannel(")
+extract_settings_method(pps_case_fold "bool equalsIgnoreCase(" "namespace\n{")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/PpsMethods.inc"
+    "${pps_case_fold}\n${pps_kernel}\n${pps_methods}")
+add_executable(pps_source_tests support/TestMain.cpp component/PpsSourceTests.cpp)
+target_include_directories(pps_source_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(pps_source_tests PRIVATE non_hardware_test_options)
+add_test(NAME pps-source.all COMMAND pps_source_tests)
+set_tests_properties(pps-source.all PROPERTIES LABELS "component;non-hardware")
+
 extract_settings_method(dc_offset_methods "bool SoapySidekiq::hasDCOffsetMode("
     "/*******************************************************************\n * Gain API")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/DcOffsetMethods.inc" "${dc_offset_methods}")
@@ -413,7 +427,7 @@ add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
             channel_metadata_tests sample_rate_capability_tests frequency_tests
-            rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests
+            rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests pps_source_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests

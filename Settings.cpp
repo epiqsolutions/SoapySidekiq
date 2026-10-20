@@ -186,12 +186,13 @@ bool readKernel1PpsSource(skiq_1pps_source_t &source)
         return true;
     }
 
-    if (active_source != "unavailable")
+    if (active_source == "unavailable")
     {
-        SoapySDR_logf(SOAPY_SDR_WARNING,
-                      "unrecognized active kernel 1pps source '%s' from '%s'",
-                      active_source.c_str(), value.c_str());
+        source = skiq_1pps_source_unavailable;
+        return true;
     }
+    SoapySDR_logf(SOAPY_SDR_WARNING, "unrecognized active kernel 1pps source '%s' from '%s'",
+                  active_source.c_str(), value.c_str());
     return false;
 }
 
@@ -220,6 +221,8 @@ bool writeKernel1PpsSource(const skiq_1pps_source_t source)
     }
 
     output << value;
+    // Kernel endpoints can reject buffered writes only when the stream flushes.
+    output.close();
     return output.good();
 }
 
@@ -1574,7 +1577,9 @@ std::string SoapySidekiq::getTimeSource(void) const
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_read_1pps_source failed, (card %u), status %d",
                           card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error(
+                "skiq_read_1pps_source failed and kernel fallback unavailable: " +
+                std::to_string(status));
         }
     }
 
@@ -1593,75 +1598,29 @@ std::string SoapySidekiq::getTimeSource(void) const
             break;
 
         default:
-            SoapySDR_logf(SOAPY_SDR_WARNING, "invalid pps_source %d", pps_source);
-            break;
+            throw std::runtime_error("Invalid PPS source readback: " +
+                                     std::to_string(static_cast<int>(pps_source)));
     }
-
-    return "NONE";
 }
 
+/** Verify a PPS edge between two observations, including a zero baseline. */
 void check_1pps(uint8_t card, skiq_1pps_source_t pps_source)
 {
-    int32_t status = 0;
-    uint32_t pulseCount = 0;
-    uint32_t tryCount = 0;
-    uint64_t lastTimestamp = 0;
-    uint64_t rfTs = 0;
-    uint64_t sysTs = 0;
-    bool has_pps_source = false;
-    useconds_t one_second_usecs = 1000000;
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "check_1pps");
-
-    if ((pps_source == skiq_1pps_source_external) || (pps_source == skiq_1pps_source_host))
-    {
-        do
-        {
-            status = skiq_read_last_1pps_timestamp(card, &rfTs, &sysTs);
-            if (0 != status)
-            {
-                SoapySDR_logf(SOAPY_SDR_WARNING, "failed to get timestamp for card %" PRIu8
-                        " (status = %" PRIi32 "); will try again\n", card, status);
-            }
-            else
-            {
-                if (sysTs != lastTimestamp)
-                {
-                    SoapySDR_logf(SOAPY_SDR_TRACE, "sysTs %lu, "
-                                           "lastTimesamp %lu, trycount %lu, status %d",
-                                           sysTs, lastTimestamp, tryCount, status);
-                    pulseCount++;
-                    lastTimestamp = sysTs;
-                    SoapySDR_logf(SOAPY_SDR_DEBUG, "found 1pps pulse");
-                }
-            }
-            tryCount++;
-
-            if (tryCount > 1)
-            {
-                if (pulseCount == tryCount)
-                {
-                    has_pps_source = true;
-                }
-            }
-
-            SoapySDR_logf(SOAPY_SDR_DEBUG, "");
-
-            /* sleep for a second */
-            usleep(one_second_usecs);
-
-        } while ((!has_pps_source) && (tryCount <= 1));
-
-        if (has_pps_source)
-        {
-            SoapySDR_logf(SOAPY_SDR_INFO, "Expected 1pps, found 1pps pulse");
-        }
-        else
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "Expected 1pps, but no 1pps pulse found");
-            throw std::runtime_error("");
-        }
-    }
+    if (pps_source != skiq_1pps_source_external && pps_source != skiq_1pps_source_host)
+        return;
+    uint64_t rf_timestamp = 0;
+    uint64_t previous = 0;
+    int status = skiq_read_last_1pps_timestamp(card, &rf_timestamp, &previous);
+    if (status != 0)
+        throw std::runtime_error("skiq_read_last_1pps_timestamp failed: " + std::to_string(status));
+    if (usleep(1000000) != 0)
+        throw std::runtime_error("PPS observation wait interrupted");
+    uint64_t current = 0;
+    status = skiq_read_last_1pps_timestamp(card, &rf_timestamp, &current);
+    if (status != 0)
+        throw std::runtime_error("skiq_read_last_1pps_timestamp failed: " + std::to_string(status));
+    if (current == previous)
+        throw std::runtime_error("No PPS edge observed for card " + std::to_string(card));
 }
 
 void SoapySidekiq::setTimeSource(const std::string &source)
@@ -1685,7 +1644,7 @@ void SoapySidekiq::setTimeSource(const std::string &source)
     }
     else
     {
-        SoapySDR_logf(SOAPY_SDR_WARNING, "invalid pps_source %s", source.c_str());
+        throw std::invalid_argument("Unknown time source: " + source);
     }
 
     status = skiq_write_1pps_source(card, pps_source);
@@ -1702,7 +1661,9 @@ void SoapySidekiq::setTimeSource(const std::string &source)
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_write_1pps_source %d failed, (card %u), status %d",
                           pps_source, card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error(
+                "skiq_write_1pps_source failed and kernel fallback unavailable: " +
+                std::to_string(status));
         }
     }
 
