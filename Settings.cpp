@@ -1863,102 +1863,46 @@ std::vector<std::string> SoapySidekiq::listClockSources(void) const
 
 std::string SoapySidekiq::getClockSource(void) const
 {
-    int status = 0;
-    skiq_ref_clock_select_t ref_clock = skiq_ref_clock_internal;
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "getClockSource");
-
-    status = skiq_read_ref_clock_select(card, &ref_clock);
+    skiq_ref_clock_select_t source = skiq_ref_clock_invalid;
+    const int status = skiq_read_ref_clock_select(card, &source);
     if (status != 0)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR,
-                      "skiq_read_ref_clock_select failed, (card %u), status %d",
-                      card, status);
-        throw std::runtime_error("");
-    }
-
-    if ((ref_clock == skiq_ref_clock_internal) || (ref_clock == skiq_ref_clock_host))
-    {
+        throw std::runtime_error("skiq_read_ref_clock_select failed: " + std::to_string(status));
+    if (source == skiq_ref_clock_internal || source == skiq_ref_clock_host)
         return "internal_clock";
-    }
-    else if (ref_clock == skiq_ref_clock_external)
-    {
+    if (source == skiq_ref_clock_external)
         return "external_clock";
-    }
-    else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid ref clock %d", ref_clock);
-        throw std::runtime_error("");
-    }
-
-    return "NONE";
+    throw std::runtime_error("Unsupported reference clock readback: " +
+                             std::to_string(static_cast<int>(source)));
 }
 
 void SoapySidekiq::setClockSource(const std::string &source)
 {
-    int status = 0;
-    skiq_ref_clock_select_t ref_clock = skiq_ref_clock_internal;
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "setClockSource");
-
+    skiq_ref_clock_select_t selected;
     if (equalsIgnoreCase(source, "internal_clock"))
-    {
-        ref_clock = skiq_ref_clock_internal;
-    }
+        selected = skiq_ref_clock_internal;
     else if (equalsIgnoreCase(source, "external_clock"))
-    {
-        ref_clock = skiq_ref_clock_external;
-    }
+        selected = skiq_ref_clock_external;
     else
-    {
-        SoapySDR_logf(SOAPY_SDR_WARNING, "invalid ref_clock %s", source.c_str());
-    }
-
-    status = skiq_write_ref_clock_select(card, ref_clock);
+        throw std::invalid_argument("Unknown clock source: " + source);
+    const int status = skiq_write_ref_clock_select(card, selected);
     if (status != 0)
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR,
-                      "skiq_write_ref_clock_select failed, (card %u), status %d",
-                      card, status);
-        throw std::runtime_error("");
-    }
-
-    SoapySDR_logf(SOAPY_SDR_INFO, "ref_clock set to %s", source.c_str());
-    return;
+        throw std::runtime_error("skiq_write_ref_clock_select failed: " + std::to_string(status));
 }
 
 double SoapySidekiq::getReferenceClockRate(void) const
 {
-    int status = 0;
-    std::string source;
-    uint32_t ref_clock = 0;
-
-    SoapySDR_logf(SOAPY_SDR_TRACE, "getReferenceClockRate");
-
-    // get the current ref clock
-    source = getClockSource();
-
-    if (equalsIgnoreCase(source, "external_clock"))
+    const std::string source = getClockSource();
+    uint32_t frequency = 0;
+    if (source == "external_clock")
     {
-        status = skiq_read_ext_ref_clock_freq(card, &ref_clock);
+        const int status = skiq_read_ext_ref_clock_freq(card, &frequency);
         if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_write_ref_clock_select failed, (card %u), status %d",
-                          card, status);
-            throw std::runtime_error("");
-        }
-        return ref_clock;
-    }
-    else if (equalsIgnoreCase(source, "internal_clock"))
-    {
-        return this->param.rf_param.ref_clock_freq;
+            throw std::runtime_error("skiq_read_ext_ref_clock_freq failed: " +
+                                     std::to_string(status));
     }
     else
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "invalid ref clock %d", ref_clock);
-        throw std::runtime_error("");
-    }
-
-    return 0;
+        frequency = param.rf_param.ref_clock_freq;
+    if (frequency == 0)
+        throw std::runtime_error("Reference clock frequency must be nonzero");
+    return frequency;
 }

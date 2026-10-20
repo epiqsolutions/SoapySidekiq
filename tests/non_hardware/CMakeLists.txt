@@ -324,6 +324,20 @@ target_link_libraries(time_setting_tests PRIVATE non_hardware_test_options)
 add_test(NAME time-setting.all COMMAND time_setting_tests)
 set_tests_properties(time-setting.all PROPERTIES LABELS "component;non-hardware")
 
+extract_settings_method(clock_list "std::vector<std::string> SoapySidekiq::listClockSources(" "\n}\n")
+extract_settings_method(clock_get "std::string SoapySidekiq::getClockSource(" "\n}\n")
+extract_settings_method(clock_set "void SoapySidekiq::setClockSource(" "\n}\n")
+extract_settings_method(clock_rate "double SoapySidekiq::getReferenceClockRate(" "\n}\n")
+extract_settings_method(clock_case_fold "bool equalsIgnoreCase(" "namespace\n{")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ClockMethods.inc"
+    "${clock_case_fold}\n${clock_list}\n}\n${clock_get}\n}\n${clock_set}\n}\n${clock_rate}\n}\n")
+add_executable(clock_tests support/TestMain.cpp component/ClockTests.cpp)
+target_include_directories(clock_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(clock_tests PRIVATE non_hardware_test_options)
+add_test(NAME clock.all COMMAND clock_tests)
+set_tests_properties(clock.all PROPERTIES LABELS "component;non-hardware")
+
 extract_settings_method(settings_methods "SoapySDR::ArgInfoList SoapySidekiq::getSettingInfo("
     "std::vector<std::string> SoapySidekiq::listTimeSources(")
 extract_settings_method(case_fold "bool equalsIgnoreCase(" "namespace\n{")
@@ -436,7 +450,7 @@ add_custom_target(non_hardware_tests
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
             channel_metadata_tests sample_rate_capability_tests frequency_tests
             rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests
-            time_setting_tests settings_tests
+            time_setting_tests clock_tests settings_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
