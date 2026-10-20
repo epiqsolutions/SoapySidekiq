@@ -160,6 +160,12 @@ Antenna APIs expose the currently configured RF port. Selecting that same
 port is supported; switching to another port is not yet implemented. Cards
 without RF-port reporting return no antenna names.
 
+RX automatic DC-offset correction selects the DC calibration type and enables
+the SDK's shared automatic calibration mode. Other selected calibration types
+are preserved and can also run automatically in that mode. Disabling DC-offset
+correction clears only its selection bit and preserves the shared mode.
+The SDK can run selected calibrations during subsequent RX tuning operations.
+
 Automatic gain control is exposed for RX. TX uses manual attenuation and
 reports `hasGainMode()` as false; requesting TX automatic mode raises an error.
 
