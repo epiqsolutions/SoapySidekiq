@@ -315,6 +315,17 @@ target_link_libraries(antenna_tests PRIVATE non_hardware_test_options)
 add_test(NAME antenna.all COMMAND antenna_tests)
 set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
 
+extract_settings_method(time_set "void SoapySidekiq::setHardwareTime(" "\n}\n")
+extract_settings_method(time_case_fold "bool equalsIgnoreCase(" "namespace\n{")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TimeSettingMethods.inc" "${time_case_fold}\n${time_set}\n}\n")
+add_executable(time_setting_tests support/TestMain.cpp component/TimeSettingTests.cpp)
+target_include_directories(time_setting_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(time_setting_tests PRIVATE non_hardware_test_options)
+add_test(NAME time-setting.all COMMAND time_setting_tests)
+set_tests_properties(time-setting.all PROPERTIES LABELS "component;non-hardware")
+
 extract_settings_method(pps_methods "std::vector<std::string> SoapySidekiq::listTimeSources("
     "bool SoapySidekiq::hasHardwareTime(")
 extract_settings_method(pps_kernel "bool readKernel1PpsSource("
@@ -353,6 +364,18 @@ target_include_directories(settings_tests PRIVATE
 target_link_libraries(settings_tests PRIVATE non_hardware_test_options)
 add_test(NAME settings.all COMMAND settings_tests)
 set_tests_properties(settings.all PROPERTIES LABELS "component;non-hardware")
+
+extract_settings_method(time_read "bool SoapySidekiq::hasHardwareTime("
+    "void SoapySidekiq::setHardwareTime(")
+extract_settings_method(time_read_case_fold "bool equalsIgnoreCase(" "namespace\n{")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TimeReadbackMethods.inc" "${time_read_case_fold}\n${time_read}")
+add_executable(time_readback_tests support/TestMain.cpp component/TimeReadbackTests.cpp)
+target_include_directories(time_readback_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(time_readback_tests PRIVATE non_hardware_test_options)
+add_test(NAME time-readback.all COMMAND time_readback_tests)
+set_tests_properties(time-readback.all PROPERTIES LABELS "component;non-hardware")
 
 extract_settings_method(dc_offset_methods "bool SoapySidekiq::hasDCOffsetMode("
     "/*******************************************************************\n * Gain API")
@@ -455,7 +478,7 @@ add_custom_target(non_hardware_tests
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
             channel_metadata_tests sample_rate_capability_tests frequency_tests
             rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests
-            pps_source_tests clock_tests settings_tests
+            time_readback_tests time_setting_tests pps_source_tests clock_tests settings_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests

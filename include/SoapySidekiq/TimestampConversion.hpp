@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -97,6 +98,61 @@ inline std::int64_t ticksToNanoseconds(
     }
     return static_cast<std::int64_t>(whole_nanoseconds + fractional);
 #endif
+}
+
+/**
+ * Convert RF ticks using the SDK's actual, possibly fractional, sample rate.
+ * Integer rates use the exact integer conversion; fractional rates use widened
+ * floating-point division and reject results outside the signed timestamp range.
+ * @param ticks Device counter value.
+ * @param frequency Actual counter ticks per second, finite and positive.
+ * @return Whole nanoseconds, truncated toward zero.
+ * @throws std::invalid_argument for invalid frequency.
+ * @throws std::overflow_error for an unrepresentable timestamp.
+ */
+inline std::int64_t ticksToNanosecondsAtRate(const std::uint64_t ticks, const double frequency)
+{
+    if (!std::isfinite(frequency) || frequency <= 0)
+        throw std::invalid_argument("timestamp rate must be finite and positive");
+    if (std::floor(frequency) == frequency && frequency < std::ldexp(1.0, 64))
+        return ticksToNanoseconds(ticks, static_cast<std::uint64_t>(frequency));
+    const long double nanoseconds =
+        static_cast<long double>(ticks) * 1000000000.0L / static_cast<long double>(frequency);
+    // The exclusive power-of-two limit remains safe when long double == double.
+    if (!std::isfinite(nanoseconds) || nanoseconds >= std::ldexp(1.0L, 63))
+        throw std::overflow_error("timestamp does not fit in nanoseconds");
+    return static_cast<std::int64_t>(nanoseconds);
+}
+
+/**
+ * Convert nonnegative nanoseconds to device ticks, truncating fractional ticks.
+ * Split seconds and frequency before multiplication so all intermediates fit
+ * uint64_t without relying on compiler-specific wide integer support.
+ * @param nanoseconds Requested SoapySDR time.
+ * @param frequency Device counter ticks per second.
+ * @return Whole device ticks.
+ * @throws std::invalid_argument for negative time or zero frequency.
+ * @throws std::overflow_error when the tick count exceeds uint64_t.
+ */
+inline std::uint64_t nanosecondsToTicks(const std::int64_t nanoseconds,
+                                        const std::uint64_t frequency)
+{
+    if (nanoseconds < 0 || frequency == 0)
+        throw std::invalid_argument("timestamp requires nonnegative time and nonzero frequency");
+    constexpr std::uint64_t billion = 1000000000ULL;
+    const auto time = static_cast<std::uint64_t>(nanoseconds);
+    const auto seconds = time / billion;
+    const auto remainder = time % billion;
+    const auto maximum = std::numeric_limits<std::uint64_t>::max();
+    if (seconds > maximum / frequency)
+        throw std::overflow_error("timestamp does not fit in device ticks");
+    const auto whole = seconds * frequency;
+    // Each product is bounded: remainder < 1e9 and frequency % 1e9 < 1e9.
+    const auto fractional =
+        (frequency / billion) * remainder + ((frequency % billion) * remainder) / billion;
+    if (fractional > maximum - whole)
+        throw std::overflow_error("timestamp does not fit in device ticks");
+    return whole + fractional;
 }
 
 } // namespace soapy_sidekiq

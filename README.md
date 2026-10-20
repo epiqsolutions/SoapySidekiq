@@ -169,6 +169,13 @@ The SDK can run selected calibrations during subsequent RX tuning operations.
 Automatic gain control is exposed for RX. TX uses manual attenuation and
 reports `hasGainMode()` as false; requesting TX automatic mode raises an error.
 
+`setHardwareTime` accepts nonnegative nanoseconds with an empty/`now` selector
+for an immediate update or `1pps` for the next PPS. Conversion uses the system
+clock frequency and truncates fractional ticks with checked integer arithmetic.
+The SDK immediate update sets both RF and system counters to the same raw tick
+value; the PPS update sets RF to zero and system to the requested tick value.
+The counters can therefore represent different times when their rates differ.
+
 PPS source selection rejects unknown names. If the SDK source API fails, the
 existing kernel PPS endpoint is used when available. Selecting external or
 internal PPS requires a timestamp transition across one one-second observation
@@ -198,6 +205,11 @@ current system timestamp frequency. Fractional sample rates retain their exact
 binary value through the worker and partial-read timestamp calculation.
 Configure rates, clocks, and timestamp selection before activating RX; stop
 and reactivate RX after changing them so it captures a fresh timing snapshot.
+
+`getHardwareTime` uses system time for the empty selector or `sys_timestamp`.
+Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle
+with the SDK's current actual rate, preserving fractional Hz. Missing rates,
+unsupported directions, unknown selectors, and nanosecond overflow raise errors.
 
 ## License
 
