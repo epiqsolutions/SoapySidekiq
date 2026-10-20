@@ -38,10 +38,37 @@ struct FakeSdk
     bool streaming{};
     int stop_status{};
     unsigned starts{}, stops{};
-    bool stop_on_pps{};
+    bool stop_on_pps{}, provide_packet{}, delivered{};
+    double actual_rate{20000000};
+    std::uint64_t system_frequency{1000000}, rf_timestamp{1}, system_timestamp{1};
+    unsigned rate_reads{}, frequency_reads{};
+    unsigned rate_handle{};
+    std::uint32_t configured_rate{}, configured_bandwidth{}, actual_bandwidth{};
+    bool omit_rate{};
+    int rate_status{}, frequency_status{};
 } sdk;
 }
 
+int skiq_read_rx_sample_rate_and_bandwidth(std::uint8_t, skiq_rx_hdl_t handle,
+                                           std::uint32_t *configured_rate, double *actual_rate,
+                                           std::uint32_t *configured_bandwidth,
+                                           std::uint32_t *actual_bandwidth)
+{
+    ++sdk.rate_reads;
+    sdk.rate_handle = handle;
+    *configured_rate = sdk.configured_rate;
+    if (!sdk.omit_rate)
+        *actual_rate = sdk.actual_rate;
+    *configured_bandwidth = sdk.configured_bandwidth;
+    *actual_bandwidth = sdk.actual_bandwidth;
+    return sdk.rate_status;
+}
+int skiq_read_sys_timestamp_freq(std::uint8_t, std::uint64_t *frequency)
+{
+    ++sdk.frequency_reads;
+    *frequency = sdk.system_frequency;
+    return sdk.frequency_status;
+}
 int skiq_start_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 {
     if (sdk.streaming) return -EBUSY;
@@ -78,7 +105,19 @@ public:
     int stop(std::uint32_t handle, bool pps) override
     { return pps ? skiq_stop_rx_streaming_on_1pps(0, handle, 0) : skiq_stop_rx_streaming(0, handle); }
     soapy_sidekiq::RxReceiveResult receive() override
-    { throw std::runtime_error("injected receive failure"); }
+    {
+        if (!sdk.provide_packet)
+            throw std::runtime_error("injected receive failure");
+        if (sdk.delivered)
+            return {};
+        sdk.delivered = true;
+        return {soapy_sidekiq::RxReceiveStatus::success,
+                sdk.rate_handle,
+                {1, 2, 3, 4},
+                sdk.rf_timestamp,
+                sdk.system_timestamp,
+                0};
+    }
 };
 
 /** Supply the device fields used by the extracted production lifecycle methods. */
@@ -238,4 +277,78 @@ TEST_CASE("session destruction after PPS activation requests immediate hardware 
     }
     REQUIRE_EQ(sdk.stops, 1u);
     REQUIRE(!sdk.stop_on_pps);
+}
+
+TEST_CASE("RX activation refreshes actual fractional rate instead of the stale cache")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    sdk.provide_packet = true;
+    sdk.actual_rate = 1.5;
+    device.active_rx_stream->channel = 1;
+    device.active_rx_stream->rx_handle = 7;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    std::int16_t output[2]{};
+    const auto first = device.rx_session->read(output, 1, std::chrono::seconds(1));
+    REQUIRE_EQ(first.time_ns, std::int64_t{666666666});
+    const auto second = device.rx_session->read(output, 1, std::chrono::seconds(1));
+    REQUIRE_EQ(second.time_ns, std::int64_t{1333333333});
+    REQUIRE_EQ(sdk.rate_handle, 7u);
+    REQUIRE_EQ(sdk.rate_reads, 1u);
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+}
+TEST_CASE("RX activation refreshes the selected system clock before starting hardware")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    sdk.provide_packet = true;
+    sdk.system_frequency = 3;
+    device.rfTimeSource = false;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    std::int16_t output[2]{};
+    REQUIRE_EQ(device.rx_session->read(output, 1, std::chrono::seconds(1)).time_ns,
+               std::int64_t{333333333});
+    REQUIRE_EQ(sdk.frequency_reads, 1u);
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+}
+TEST_CASE("RX activation validates refreshed rates before any hardware start")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    sdk.rate_status = -5;
+    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::runtime_error);
+    sdk.rate_status = 0;
+    sdk.actual_rate = 0;
+    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::invalid_argument);
+    sdk.actual_rate = 20000000;
+    device.rfTimeSource = false;
+    sdk.frequency_status = -6;
+    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::runtime_error);
+    sdk.frequency_status = 0;
+    sdk.system_frequency = 0;
+    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::invalid_argument);
+    REQUIRE_EQ(sdk.starts, 0u);
+}
+
+TEST_CASE("RX timestamp setup accepts actual rate without configured rate or bandwidth")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    sdk.provide_packet = true;
+    sdk.actual_rate = 1.5;
+    sdk.configured_rate = sdk.configured_bandwidth = sdk.actual_bandwidth = 0;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    std::int16_t output[2]{};
+    REQUIRE_EQ(device.rx_session->read(output, 1, std::chrono::seconds(1)).time_ns,
+               std::int64_t{666666666});
+    REQUIRE_EQ(sdk.starts, 1u);
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+}
+TEST_CASE("RX timestamp setup rejects omitted actual rate before hardware start")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    sdk.omit_rate = true;
+    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::invalid_argument);
+    REQUIRE_EQ(sdk.starts, 0u);
 }

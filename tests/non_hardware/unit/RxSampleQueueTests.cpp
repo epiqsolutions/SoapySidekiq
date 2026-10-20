@@ -248,3 +248,35 @@ TEST_CASE("fractional RX timestamps match a rational wide integer oracle")
     }
 }
 #endif
+
+TEST_CASE("fractional RF rate preserves exact phase across partial reads")
+{
+    soapy_sidekiq::RxSampleQueue queue(2);
+    queue.start();
+    const auto rate = soapy_sidekiq::TimestampRate::fromActualRate(1.5);
+    queue.pushTicks(std::vector<std::int16_t>{1, 2, 3, 4, 5, 6}, 1, rate, rate);
+    std::int16_t output[2]{};
+    for (const auto expected : {666666666LL, 1333333333LL, 2000000000LL})
+        REQUIRE_EQ(queue.read(output, 1, std::chrono::microseconds(0)).time_ns, expected);
+}
+TEST_CASE("fractional sample rate carries phase with an independent system clock")
+{
+    soapy_sidekiq::RxSampleQueue queue(2);
+    queue.start();
+    const auto rate = soapy_sidekiq::TimestampRate::fromActualRate(1.5);
+    queue.pushTicks(std::vector<std::int16_t>{1, 2, 3, 4, 5, 6}, 1, 3, rate);
+    std::int16_t output[2]{};
+    for (const auto expected : {333333333LL, 1000000000LL, 1666666666LL})
+        REQUIRE_EQ(queue.read(output, 1, std::chrono::microseconds(0)).time_ns, expected);
+}
+TEST_CASE("fractional samples advance a nanosecond-based queue timestamp")
+{
+    soapy_sidekiq::RxSampleQueue queue(2);
+    queue.start();
+    queue.push(std::vector<std::int16_t>{1, 2, 3, 4}, 7,
+               soapy_sidekiq::TimestampRate::fromActualRate(1.5));
+    std::int16_t output[2]{};
+    REQUIRE_EQ(queue.read(output, 1, std::chrono::microseconds(0)).time_ns, std::int64_t{7});
+    REQUIRE_EQ(queue.read(output, 1, std::chrono::microseconds(0)).time_ns,
+               std::int64_t{666666673});
+}

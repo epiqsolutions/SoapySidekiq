@@ -81,7 +81,7 @@ struct RxSessionConfiguration
     /** Expected number of complex samples per hardware block. */
     std::size_t block_samples{};
     /** RX sample rate used for RF timestamp conversion. */
-    std::uint64_t sample_rate{};
+    TimestampRate sample_rate{};
     /** System-counter frequency used when RF time is not selected. */
     std::uint64_t system_timestamp_frequency{};
     /** Select RF timestamps instead of system-counter timestamps. */

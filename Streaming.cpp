@@ -505,14 +505,30 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             }
         }
 
+        // Coupled clocks may have changed since the last RX setter. Timestamp
+        // setup needs only the actual rate, not configured rate or bandwidth.
+        uint32_t configured_rate{}, configured_bandwidth{}, actual_bandwidth{};
+        double actual_rate = std::numeric_limits<double>::quiet_NaN();
+        const int rate_status =
+            skiq_read_rx_sample_rate_and_bandwidth(card, rx_handle, &configured_rate, &actual_rate,
+                                                   &configured_bandwidth, &actual_bandwidth);
+        if (rate_status != 0)
+            throw std::runtime_error(
+                "RX activation rate read failed (card " + std::to_string(card) + ", handle " +
+                std::to_string(rx_handle) + "): " + std::to_string(rate_status));
+        const auto sample_rate = soapy_sidekiq::TimestampRate::fromActualRate(actual_rate);
+        uint64_t system_frequency = rfTimeSource ? sys_freq : 0;
+        if (!rfTimeSource)
+        {
+            const int read_status = skiq_read_sys_timestamp_freq(card, &system_frequency);
+            if (read_status != 0)
+                throw std::runtime_error("skiq_read_sys_timestamp_freq failed at RX activation: " +
+                                         std::to_string(read_status));
+        }
         // The session starts hardware before publishing or creating a worker.
-        status = rx_session->activate({
-            static_cast<uint32_t>(rx_handle),
-            rx_payload_size_in_words,
-            rx_sample_rates.at(stream_handle->channel),
-            sys_freq,
-            rfTimeSource,
-            (flags & SOAPY_SDR_HAS_TIME) != 0});
+        status = rx_session->activate({static_cast<uint32_t>(rx_handle), rx_payload_size_in_words,
+                                       sample_rate, system_frequency, rfTimeSource,
+                                       (flags & SOAPY_SDR_HAS_TIME) != 0});
         if (status != 0)
         {
             SoapySDR_logf(SOAPY_SDR_ERROR,
