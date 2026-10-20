@@ -206,6 +206,11 @@ deactivation, I/O, and status calls. `closeStream` and `getStreamMTU` raise
 an argument error for an unknown token; MTU failures never return an unsigned
 version of a negative error code.
 
+`getHardwareTime` uses system time for the empty selector or `sys_timestamp`.
+Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle
+with the SDK's current actual rate, preserving fractional Hz. Missing rates,
+unsupported directions, unknown selectors, and nanosecond overflow raise errors.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

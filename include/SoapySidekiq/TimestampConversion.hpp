@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -97,6 +98,30 @@ inline std::int64_t ticksToNanoseconds(
     }
     return static_cast<std::int64_t>(whole_nanoseconds + fractional);
 #endif
+}
+
+/**
+ * Convert RF ticks using the SDK's actual, possibly fractional, sample rate.
+ * Integer rates use the exact integer conversion; fractional rates use widened
+ * floating-point division and reject results outside the signed timestamp range.
+ * @param ticks Device counter value.
+ * @param frequency Actual counter ticks per second, finite and positive.
+ * @return Whole nanoseconds, truncated toward zero.
+ * @throws std::invalid_argument for invalid frequency.
+ * @throws std::overflow_error for an unrepresentable timestamp.
+ */
+inline std::int64_t ticksToNanosecondsAtRate(const std::uint64_t ticks, const double frequency)
+{
+    if (!std::isfinite(frequency) || frequency <= 0)
+        throw std::invalid_argument("timestamp rate must be finite and positive");
+    if (std::floor(frequency) == frequency && frequency < std::ldexp(1.0, 64))
+        return ticksToNanoseconds(ticks, static_cast<std::uint64_t>(frequency));
+    const long double nanoseconds =
+        static_cast<long double>(ticks) * 1000000000.0L / static_cast<long double>(frequency);
+    // The exclusive power-of-two limit remains safe when long double == double.
+    if (!std::isfinite(nanoseconds) || nanoseconds >= std::ldexp(1.0L, 63))
+        throw std::overflow_error("timestamp does not fit in nanoseconds");
+    return static_cast<std::int64_t>(nanoseconds);
 }
 
 /**
