@@ -22,6 +22,8 @@
 #define SOAPY_SDR_HAS_TIME 4
 #define SOAPY_SDR_STREAM_ERROR -2
 #define SOAPY_SDR_NOT_SUPPORTED -1
+#define SOAPY_SDR_TIMEOUT -3
+#define SOAPY_SDR_OVERFLOW -4
 #define DEFAULT_NUM_BUFFERS 1
 #define SoapySDR_logf(...) ((void)0)
 #define SoapySDR_log(...) ((void)0)
@@ -140,7 +142,9 @@ public:
     bool tx_writes_stopping{true};
     std::size_t active_tx_writers{};
     void stopTxWrites();
-    std::uint32_t rx_payload_size_in_words{2};
+    std::uint32_t rx_payload_size_in_words{2}, current_tx_block_size{252};
+    bool rxUseShort{true};
+    double maxValue{2048};
     std::uint64_t sys_freq{1000000};
     std::vector<std::uint32_t> rx_sample_rates{20000000};
     StreamHandle *active_rx_stream{}, *active_tx_stream{};
@@ -172,13 +176,17 @@ public:
                 soapy_sidekiq::RxReadStatus::error);
         REQUIRE(!rx_session->running());
     }
+    StreamHandle *findStreamHandle(SoapySDR::Stream *) const noexcept;
+    std::size_t getStreamMTU(SoapySDR::Stream *) const;
+    int readStream(SoapySDR::Stream *, void *const *, std::size_t, int &, long long &, long);
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
     int deactivateStream(SoapySDR::Stream *, int, long long);
     void closeStream(SoapySDR::Stream *);
 };
 
-static SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
-{ return reinterpret_cast<SoapySidekiq::StreamHandle *>(stream); }
+#include "StreamHandleLookup.inc"
+#include "StreamMtuMethod.inc"
+#include "StreamReadMethod.inc"
 
 // Production close/deactivate and RX activation, using the real session worker.
 #include "RxLifecycleMethods.inc"
@@ -278,6 +286,55 @@ TEST_CASE("session destruction after PPS activation requests immediate hardware 
     }
     REQUIRE_EQ(sdk.stops, 1u);
     REQUIRE(!sdk.stop_on_pps);
+}
+
+TEST_CASE("RX stream APIs reject null inaccessible and foreign tokens before dereference")
+{
+    SoapySidekiq device;
+    SoapySidekiq other;
+    auto *live = device.setupRx();
+    auto *foreign = other.setupRx();
+    int flags = 123;
+    long long timestamp = 456;
+    for (auto *invalid : {static_cast<SoapySDR::Stream *>(nullptr),
+                          reinterpret_cast<SoapySDR::Stream *>(std::uintptr_t{1}), foreign})
+    {
+        REQUIRE_EQ(device.activateStream(invalid, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_EQ(device.deactivateStream(invalid, 0, 0), SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_EQ(device.readStream(invalid, nullptr, 1, flags, timestamp, 0),
+                   SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_THROWS_AS(device.getStreamMTU(invalid), std::invalid_argument);
+        REQUIRE_THROWS_AS(device.closeStream(invalid), std::invalid_argument);
+    }
+    REQUIRE_EQ(sdk.starts + sdk.stops, 0u);
+    REQUIRE_EQ(flags, 123);
+    REQUIRE_EQ(timestamp, 456LL);
+    REQUIRE_EQ(device.getStreamMTU(live), std::size_t{2});
+}
+TEST_CASE("closed RX tokens are rejected without accessing freed storage")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    device.closeStream(stream);
+    int flags = 0;
+    long long timestamp = 0;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.readStream(stream, nullptr, 1, flags, timestamp, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_THROWS_AS(device.getStreamMTU(stream), std::invalid_argument);
+    REQUIRE_THROWS_AS(device.closeStream(stream), std::invalid_argument);
+}
+
+TEST_CASE("stream MTU reports positive sizes and rejects an invalid direction")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.getStreamMTU(stream), std::size_t{2});
+    device.active_rx_stream->direction = SOAPY_SDR_TX;
+    REQUIRE_EQ(device.getStreamMTU(stream), std::size_t{252});
+    device.active_rx_stream->direction = 99;
+    REQUIRE_THROWS_AS(device.getStreamMTU(stream), std::invalid_argument);
+    device.active_rx_stream->direction = SOAPY_SDR_RX;
 }
 
 TEST_CASE("RX activation refreshes actual fractional rate instead of the stale cache")

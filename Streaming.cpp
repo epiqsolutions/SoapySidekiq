@@ -28,12 +28,6 @@ namespace
 std::mutex g_instance_registry_mutex;
 std::unordered_map<uint8_t, SoapySidekiq *> g_instance_registry;
 
-/** Convert the opaque SoapySDR stream token back to its driver-owned handle. */
-SoapySidekiq::StreamHandle *getStreamHandle(SoapySDR::Stream *stream)
-{
-    return reinterpret_cast<SoapySidekiq::StreamHandle *>(stream);
-}
-
 /** Translate a SoapySDR direction constant or reject an unknown value. */
 soapy_sidekiq::StreamDirection streamDirection(const int direction)
 {
@@ -48,6 +42,19 @@ soapy_sidekiq::StreamDirection streamDirection(const int direction)
     }
     throw std::invalid_argument("invalid stream direction " + std::to_string(direction));
 }
+}
+
+SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle(SoapySDR::Stream *stream) const noexcept
+{
+    // Compare opaque tokens before dereferencing: null, foreign, and closed
+    // handles need not point to accessible memory.
+    if (stream == nullptr)
+        return nullptr;
+    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_rx_stream))
+        return active_rx_stream;
+    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_tx_stream))
+        return active_tx_stream;
+    return nullptr;
 }
 
 void SoapySidekiq::registerInstance(uint8_t card, SoapySidekiq *instance)
@@ -396,7 +403,9 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "closeStream");
 
-    StreamHandle *stream_handle = getStreamHandle(stream);
+    StreamHandle *stream_handle = findStreamHandle(stream);
+    if (stream_handle == nullptr)
+        throw std::invalid_argument("Cannot close an unknown stream handle");
 
     if (stream_handle->direction == SOAPY_SDR_RX)
     {
@@ -442,7 +451,9 @@ size_t SoapySidekiq::getStreamMTU(SoapySDR::Stream *stream) const
 {
     SoapySDR_logf(SOAPY_SDR_TRACE, "getStremMTU");
 
-    const StreamHandle *stream_handle = getStreamHandle(stream);
+    const StreamHandle *stream_handle = findStreamHandle(stream);
+    if (stream_handle == nullptr)
+        throw std::invalid_argument("Cannot query MTU for an unknown stream handle");
 
     if (stream_handle->direction == SOAPY_SDR_RX)
     {
@@ -454,10 +465,9 @@ size_t SoapySidekiq::getStreamMTU(SoapySDR::Stream *stream) const
     }
     else
     {
-        return SOAPY_SDR_NOT_SUPPORTED;
+        throw std::invalid_argument("Invalid stream direction for MTU");
     }
 
-    return 0;
 }
 
 int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
@@ -467,7 +477,9 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
 {
     int status = 0;
     bool rx_streaming_on_1pps_started = false;
-    StreamHandle *stream_handle = getStreamHandle(stream);
+    StreamHandle *stream_handle = findStreamHandle(stream);
+    if (stream_handle == nullptr)
+        return SOAPY_SDR_STREAM_ERROR;
 
     // Only continuous operation and the legacy next-PPS convention exist.
     // Reject options before any SDK call or asynchronous startup state change.
@@ -678,7 +690,9 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
                                    const long long timeNs)
 {
     int status = 0;
-    StreamHandle *stream_handle = getStreamHandle(stream);
+    StreamHandle *stream_handle = findStreamHandle(stream);
+    if (stream_handle == nullptr)
+        return SOAPY_SDR_STREAM_ERROR;
     if ((flags & ~SOAPY_SDR_HAS_TIME) != 0 || ((flags & SOAPY_SDR_HAS_TIME) != 0 && timeNs != 0))
         return SOAPY_SDR_NOT_SUPPORTED;
     SoapySDR_logf(SOAPY_SDR_TRACE, "deactivateStream");
@@ -783,7 +797,9 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
                              long long &timeNs,
                              const long timeoutUs)
 {
-    const StreamHandle *stream_handle = getStreamHandle(stream);
+    const StreamHandle *stream_handle = findStreamHandle(stream);
+    if (stream_handle == nullptr)
+        return SOAPY_SDR_STREAM_ERROR;
     if (stream_handle->direction != SOAPY_SDR_RX) return SOAPY_SDR_NOT_SUPPORTED;
     if (active_rx_stream != stream_handle) return SOAPY_SDR_STREAM_ERROR;
     if (rx_session == nullptr) return SOAPY_SDR_STREAM_ERROR;
@@ -853,7 +869,9 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                               const long timeoutUs)
 {
     int      status = 0;
-    const StreamHandle *stream_handle = getStreamHandle(stream);
+    const StreamHandle *stream_handle = findStreamHandle(stream);
+    if (stream_handle == nullptr)
+        return SOAPY_SDR_STREAM_ERROR;
 
     if (stream_handle->direction != SOAPY_SDR_TX)
     {
@@ -1061,7 +1079,9 @@ int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream,
 {
     int status = 0;
     uint32_t errors = 0;
-    const StreamHandle *stream_handle = getStreamHandle(stream);
+    const StreamHandle *stream_handle = findStreamHandle(stream);
+    if (stream_handle == nullptr)
+        return SOAPY_SDR_STREAM_ERROR;
 
     if (stream_handle->direction != SOAPY_SDR_TX)
     {
