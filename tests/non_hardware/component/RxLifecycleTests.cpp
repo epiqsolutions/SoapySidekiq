@@ -140,7 +140,7 @@ public:
     std::mutex tx_buf_mutex;
     std::condition_variable tx_cv, tx_buf_cv;
     bool tx_writes_stopping{true};
-    std::size_t active_tx_writers{};
+    std::size_t active_tx_writers{}, active_tx_status_readers{};
     void stopTxWrites();
     std::uint32_t rx_payload_size_in_words{2}, current_tx_block_size{252};
     bool rxUseShort{true};

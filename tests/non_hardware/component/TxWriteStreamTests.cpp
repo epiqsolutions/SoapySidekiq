@@ -90,6 +90,26 @@ int skiq_stop_tx_streaming_on_1pps(std::uint8_t card, skiq_tx_hdl_t handle, int)
 {
     return skiq_stop_tx_streaming(card, handle);
 }
+int pps_start_status{};
+int skiq_start_tx_streaming_on_1pps(std::uint8_t, skiq_tx_hdl_t, int)
+{
+    return pps_start_status;
+}
+std::vector<std::uint32_t> underrun_counts;
+std::size_t underrun_reads{};
+int underrun_status{};
+std::function<void()> underrun_hook;
+unsigned underrun_handle{};
+int skiq_read_tx_num_underruns(std::uint8_t, skiq_tx_hdl_t handle, std::uint32_t *errors)
+{
+    underrun_handle = handle;
+    if (underrun_hook)
+        underrun_hook();
+    const auto index = underrun_reads++;
+    *errors =
+        underrun_counts.empty() ? 0 : underrun_counts[std::min(index, underrun_counts.size() - 1)];
+    return underrun_status;
+}
 struct UnusedRxSession
 {
     int deactivate(bool)
@@ -155,7 +175,7 @@ public:
     UnusedRxSession *rx_session{};
     bool tx_stream_active{true};
     bool tx_writes_stopping{};
-    std::size_t active_tx_writers{};
+    std::size_t active_tx_writers{}, active_tx_status_readers{};
     std::thread _tx_streaming_thread;
     bool first_transmit{false}, txUseShort{false};
     std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
@@ -193,8 +213,10 @@ public:
 
     std::string getNativeStreamFormat(int, std::size_t, double &) const;
     StreamHandle *findStreamHandle(SoapySDR::Stream *) const noexcept;
+    std::timed_mutex tx_status_mutex;
     std::uint32_t tx_underruns{};
     int readStreamStatus(SoapySDR::Stream *, std::size_t &, int &, long long &, long);
+    void tx_streaming_start(skiq_tx_hdl_t);
     int writeStream(SoapySDR::Stream *, const void *const *, std::size_t,
                     int &, long long, long);
     void tx_complete(int32_t, skiq_tx_block_t *, uint32_t);
@@ -263,13 +285,6 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
 }
 
 #include "StreamHandleLookup.inc"
-unsigned underrun_reads{};
-int skiq_read_tx_num_underruns(std::uint8_t, unsigned, std::uint32_t *errors)
-{
-    ++underrun_reads;
-    *errors = 0;
-    return 0;
-}
 #include "StreamStatusMethod.inc"
 
 static soapy_sidekiq::StreamDirection streamDirection(int direction)
@@ -285,6 +300,7 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
 #include "TxWriteMethod.inc"
 #include "TxStopWritesMethod.inc"
 #include "TxDeactivateMethod.inc"
+#include "TxStartMethod.inc"
 
 TEST_CASE("TX completion can release status from another thread during submission")
 {
@@ -1099,9 +1115,249 @@ TEST_CASE("detached TX token is rejected and current token retains status access
     int flags = 0;
     long long timestamp = 0;
     std::size_t channels = 0;
-    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, timestamp, 0), 0);
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, timestamp, 0), SOAPY_SDR_TIMEOUT);
     device.active_tx_stream = nullptr;
     REQUIRE_EQ(device.writeStream(stream, nullptr, 252, flags, 0, 0), SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, timestamp, 0),
                SOAPY_SDR_STREAM_ERROR);
+}
+
+namespace
+{
+/** Reset scripted status replies between independent production-method cases. */
+void resetUnderruns()
+{
+    underrun_counts.clear();
+    underrun_reads = 0;
+    underrun_status = 0;
+    underrun_hook = {};
+    wait_hook = {};
+}
+} // namespace
+TEST_CASE("TX status reports one underrun event with stream-relative metadata")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    device.handle.tx_handle = 7;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    underrun_counts = {2, 2};
+    std::size_t channels = 99;
+    int flags = 99;
+    long long time = 99;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_UNDERFLOW);
+    REQUIRE_EQ(channels, std::size_t{1});
+    REQUIRE_EQ(flags, 0);
+    REQUIRE_EQ(time, 0LL);
+    REQUIRE_EQ(underrun_handle, 7u);
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_TIMEOUT);
+    REQUIRE_EQ(channels, std::size_t{0});
+}
+TEST_CASE("TX status honors a finite timeout without a busy polling loop")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    std::size_t channels = 0;
+    int flags = 0;
+    long long time = 0;
+    const auto start = std::chrono::steady_clock::now();
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 2000), SOAPY_SDR_TIMEOUT);
+    REQUIRE(std::chrono::steady_clock::now() - start >= std::chrono::microseconds(2000));
+    REQUIRE(!device.tx_buf_cv.deadlines.empty());
+    REQUIRE(underrun_reads < 20);
+}
+TEST_CASE("TX status observes a later event within a shared deadline")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    underrun_counts = {0, 1};
+    std::size_t channels = 0;
+    int flags = 0;
+    long long time = 0;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 1000000),
+               SOAPY_SDR_UNDERFLOW);
+    REQUIRE_EQ(underrun_reads, std::size_t{2});
+}
+TEST_CASE("TX status rejects invalid timeout and reports SDK read failures as status codes")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    std::size_t channels = 0;
+    int flags = 0;
+    long long time = 0;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, -1), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(underrun_reads, std::size_t{0});
+    underrun_status = -5;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_STREAM_ERROR);
+}
+TEST_CASE("TX status waits for PPS startup and rejects failed or stopped sessions")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    device.first_transmit = true;
+    device.tx_start_finished = false;
+    std::size_t channels = 0;
+    int flags = 0;
+    long long time = 0;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_TIMEOUT);
+    device.tx_start_finished = true;
+    device.tx_start_status = -5;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_STREAM_ERROR);
+    device.first_transmit = false;
+    device.tx_writes_stopping = true;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(underrun_reads, std::size_t{0});
+}
+TEST_CASE("TX status is interrupted when shutdown closes admission")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    std::size_t channels = 0;
+    int flags = 0;
+    long long time = 0;
+    wait_hook = [&]
+    {
+        std::scoped_lock lock(device.tx_mutex, device.tx_buf_mutex);
+        device.tx_writes_stopping = true;
+    };
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 1000000),
+               SOAPY_SDR_STREAM_ERROR);
+}
+TEST_CASE("TX counter decreases rebase the cache for subsequent underruns")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    device.tx_underruns = 10;
+    underrun_counts = {0, 1};
+    std::size_t channels = 0;
+    int flags = 0;
+    long long time = 0;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_TIMEOUT);
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_UNDERFLOW);
+}
+TEST_CASE("successful PPS startup resets the host underrun baseline")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    device.tx_underruns = 10;
+    pps_start_status = 0;
+    device.tx_streaming_start(7);
+    REQUIRE_EQ(device.tx_underruns, std::uint32_t{0});
+    REQUIRE(device.tx_start_finished);
+    REQUIRE_EQ(device.tx_start_status, 0);
+    device.tx_underruns = 10;
+    pps_start_status = -5;
+    device.tx_streaming_start(7);
+    REQUIRE_EQ(device.tx_underruns, std::uint32_t{10});
+    REQUIRE_EQ(device.tx_start_status, -5);
+}
+TEST_CASE("TX status saturates very large timeout budgets without overflow")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    underrun_counts = {1};
+    std::size_t channels = 0;
+    int flags = 0;
+    long long time = 0;
+    REQUIRE_EQ(
+        device.readStreamStatus(stream, channels, flags, time, std::numeric_limits<long>::max()),
+        SOAPY_SDR_UNDERFLOW);
+}
+
+TEST_CASE("concurrent TX pollers consume a counter increase only once")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    underrun_counts = {1};
+    const auto poll = [&]
+    {
+        std::size_t channels = 0;
+        int flags = 0;
+        long long time = 0;
+        return device.readStreamStatus(stream, channels, flags, time, 0);
+    };
+    auto first = std::async(std::launch::async, poll);
+    auto second = std::async(std::launch::async, poll);
+    const int a = first.get(), b = second.get();
+    REQUIRE((a == SOAPY_SDR_UNDERFLOW && b == SOAPY_SDR_TIMEOUT) ||
+            (b == SOAPY_SDR_UNDERFLOW && a == SOAPY_SDR_TIMEOUT));
+}
+
+TEST_CASE("TX shutdown drains an admitted status SDK read before returning")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    std::promise<void> entered, release, stop_entered;
+    auto released = release.get_future().share();
+    auto entered_future = entered.get_future();
+    bool first_read = true;
+    underrun_hook = [&]
+    {
+        if (first_read)
+        {
+            first_read = false;
+            entered.set_value();
+            released.wait();
+        }
+    };
+    auto poll =
+        std::async(std::launch::async,
+                   [&]
+                   {
+                       std::size_t channels = 0;
+                       int flags = 0;
+                       long long time = 0;
+                       return device.readStreamStatus(stream, channels, flags, time, 1000000);
+                   });
+    const bool reached =
+        entered_future.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
+    if (!reached)
+        release.set_value();
+    REQUIRE(reached);
+    auto stop = std::async(std::launch::async,
+                           [&]
+                           {
+                               stop_entered.set_value();
+                               device.stopTxWrites();
+                           });
+    stop_entered.get_future().wait();
+    const bool draining =
+        stop.wait_for(std::chrono::milliseconds(2)) == std::future_status::timeout;
+    release.set_value();
+    const auto result = poll.get();
+    stop.get();
+    underrun_hook = {};
+    REQUIRE(draining);
+    REQUIRE_EQ(result, SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.active_tx_status_readers, std::size_t{0});
+}
+
+TEST_CASE("TX status timeout includes waiting for another counter poller")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    std::unique_lock<std::timed_mutex> held(device.tx_status_mutex);
+    auto poll = std::async(std::launch::async,
+                           [&]
+                           {
+                               std::size_t channels = 0;
+                               int flags = 0;
+                               long long time = 0;
+                               return device.readStreamStatus(stream, channels, flags, time, 2000);
+                           });
+    const bool ready = poll.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
+    held.unlock();
+    const auto result = poll.get();
+    REQUIRE(ready);
+    REQUIRE_EQ(result, SOAPY_SDR_TIMEOUT);
+    REQUIRE_EQ(underrun_reads, std::size_t{0});
 }

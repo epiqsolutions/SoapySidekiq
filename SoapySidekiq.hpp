@@ -316,9 +316,11 @@ class SoapySidekiq : public SoapySDR::Device
     std::condition_variable tx_cv;
     std::mutex tx_buf_mutex;
     std::condition_variable tx_buf_cv;
-    // Written with both TX mutexes held; read with either mutex held.
+    // Written with tx_mutex and tx_buf_mutex held; read with either held.
     bool tx_writes_stopping{true};
     std::size_t active_tx_writers{}; // Guarded by tx_buf_mutex.
+    std::size_t active_tx_status_readers{}; // Guarded by tx_buf_mutex.
+    /** Close write/status admission and drain admitted calls before stopping hardware. */
     void stopTxWrites();
     bool tx_start_finished{};
     int tx_start_status{};
@@ -331,7 +333,8 @@ class SoapySidekiq : public SoapySDR::Device
     uint8_t num_tx_channels{};
     std::vector<uint32_t> tx_sample_rates;
     std::vector<uint32_t> tx_bandwidths;
-    uint32_t tx_underruns{};
+    std::timed_mutex tx_status_mutex;
+    uint32_t tx_underruns{};   // Guarded by tx_status_mutex; reset after successful SDK start.
     uint64_t complete_count{}; // Guarded by tx_buf_mutex.
     uint32_t current_tx_block_size{};
 
