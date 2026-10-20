@@ -984,25 +984,19 @@ TEST_CASE("deactivation returns the accepted prefix from a queue-full write")
 }
 TEST_CASE("failed SDK stop keeps stream ownership and closes write admission until retry")
 {
-    SoapySidekiq device;
-    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
-    stop_status = -EIO;
-    bool threw = false;
-    try
+    for (const int flags : {0, SOAPY_SDR_HAS_TIME})
     {
-        device.deactivateStream(stream, 0, 0);
+        SoapySidekiq device;
+        auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+        stop_status = -EIO;
+        REQUIRE_EQ(device.deactivateStream(stream, flags, 0), SOAPY_SDR_STREAM_ERROR);
+        REQUIRE(device.tx_stream_active);
+        REQUIRE(device.active_tx_stream == &device.handle);
+        REQUIRE(device.tx_writes_stopping);
+        stop_status = 0;
+        REQUIRE_EQ(device.deactivateStream(stream, flags, 0), 0);
+        REQUIRE(!device.tx_stream_active);
     }
-    catch (const std::runtime_error &)
-    {
-        threw = true;
-    }
-    REQUIRE(threw);
-    REQUIRE(device.tx_stream_active);
-    REQUIRE(device.active_tx_stream == &device.handle);
-    REQUIRE(device.tx_writes_stopping);
-    stop_status = 0;
-    REQUIRE_EQ(device.deactivateStream(stream, SOAPY_SDR_HAS_TIME, 0), 0);
-    REQUIRE(!device.tx_stream_active);
 }
 
 TEST_CASE("deactivation drains a submission before calling SDK stop")
@@ -1360,4 +1354,19 @@ TEST_CASE("TX status timeout includes waiting for another counter poller")
     REQUIRE(ready);
     REQUIRE_EQ(result, SOAPY_SDR_TIMEOUT);
     REQUIRE_EQ(underrun_reads, std::size_t{0});
+}
+
+TEST_CASE("already stopped TX hardware deactivates successfully for immediate and PPS stops")
+{
+    for (const int flags : {0, SOAPY_SDR_HAS_TIME})
+    {
+        SoapySidekiq device;
+        auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+        stop_status = -ENODEV;
+        REQUIRE_EQ(device.deactivateStream(stream, flags, 0), 0);
+        REQUIRE(!device.tx_stream_active);
+        REQUIRE(device.active_tx_stream == &device.handle);
+        REQUIRE(device.tx_writes_stopping);
+    }
+    stop_status = 0;
 }
