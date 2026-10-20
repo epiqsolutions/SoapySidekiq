@@ -22,7 +22,7 @@ namespace
 /** Adapts Sidekiq discovery calls to the hardware-independent interface. */
 class SidekiqDiscoveryBackend final : public soapy_sidekiq::DiscoveryBackend
 {
-public:
+  public:
     /** @copydoc soapy_sidekiq::DiscoveryBackend::cardIds */
     std::vector<std::uint8_t> cardIds() override
     {
@@ -31,8 +31,7 @@ public:
         const int status = skiq_get_cards(skiq_xport_type_auto, &count, cards);
         if (status != 0)
         {
-            throw std::runtime_error("skiq_get_cards failed with status " +
-                                     std::to_string(status));
+            throw std::runtime_error("skiq_get_cards failed with status " + std::to_string(status));
         }
         return std::vector<std::uint8_t>(cards, cards + count);
     }
@@ -63,8 +62,7 @@ public:
         {
             return owner == getpid();
         }
-        throw std::runtime_error("skiq_is_card_avail failed with status " +
-                                 std::to_string(status));
+        throw std::runtime_error("skiq_is_card_avail failed with status " + std::to_string(status));
     }
 };
 
@@ -98,15 +96,13 @@ std::vector<SoapySDR::Kwargs> findSidekiq(const SoapySDR::Kwargs &args)
         // Discovery is best-effort: log diagnostics while returning valid cards.
         if (error.card.has_value())
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                "Sidekiq discovery failed for card %u during %s: %s",
-                *error.card, error.operation.c_str(), error.message.c_str());
+            SoapySDR_logf(SOAPY_SDR_ERROR, "Sidekiq discovery failed for card %u during %s: %s",
+                          *error.card, error.operation.c_str(), error.message.c_str());
         }
         else
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                "Sidekiq discovery failed during %s: %s",
-                error.operation.c_str(), error.message.c_str());
+            SoapySDR_logf(SOAPY_SDR_ERROR, "Sidekiq discovery failed during %s: %s",
+                          error.operation.c_str(), error.message.c_str());
         }
     }
 
@@ -133,7 +129,6 @@ SoapySDR::Device *makeSidekiq(const SoapySDR::Kwargs &args)
     return new SoapySidekiq(args);
 }
 
-SoapySDR::Registry registerSidekiq(
-    "sidekiq", &findSidekiq, &makeSidekiq, SOAPY_SDR_ABI_VERSION);
+SoapySDR::Registry registerSidekiq("sidekiq", &findSidekiq, &makeSidekiq, SOAPY_SDR_ABI_VERSION);
 
 } // namespace
