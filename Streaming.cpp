@@ -505,14 +505,21 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             }
         }
 
+        // Coupled RX/TX clocks may have changed since the last RX setter.
+        const auto sample_rate = soapy_sidekiq::TimestampRate::fromActualRate(
+            getSampleRate(SOAPY_SDR_RX, stream_handle->channel));
+        uint64_t system_frequency = rfTimeSource ? sys_freq : 0;
+        if (!rfTimeSource)
+        {
+            const int read_status = skiq_read_sys_timestamp_freq(card, &system_frequency);
+            if (read_status != 0)
+                throw std::runtime_error("skiq_read_sys_timestamp_freq failed at RX activation: " +
+                                         std::to_string(read_status));
+        }
         // The session starts hardware before publishing or creating a worker.
-        status = rx_session->activate({
-            static_cast<uint32_t>(rx_handle),
-            rx_payload_size_in_words,
-            rx_sample_rates.at(stream_handle->channel),
-            sys_freq,
-            rfTimeSource,
-            (flags & SOAPY_SDR_HAS_TIME) != 0});
+        status = rx_session->activate({static_cast<uint32_t>(rx_handle), rx_payload_size_in_words,
+                                       sample_rate, system_frequency, rfTimeSource,
+                                       (flags & SOAPY_SDR_HAS_TIME) != 0});
         if (status != 0)
         {
             SoapySDR_logf(SOAPY_SDR_ERROR,

@@ -193,6 +193,12 @@ all affected handles; rollback failures are reported and require recovery.
 Timestamp selection accepts `rf_timestamp` or `sys_timestamp`; configure it
 before starting RX streaming.
 
+RX activation reads the current actual sample rate and, when selected, the
+current system timestamp frequency. Fractional sample rates retain their exact
+binary value through the worker and partial-read timestamp calculation.
+Configure rates, clocks, and timestamp selection before activating RX; stop
+and reactivate RX after changing them so it captures a fresh timing snapshot.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

@@ -35,7 +35,7 @@ int RxStreamSession::activate(const RxSessionConfiguration &configuration)
     {
         throw std::invalid_argument("RX block sample count must be positive");
     }
-    if (configuration.sample_rate == 0)
+    if (!configuration.sample_rate.valid())
     {
         throw std::invalid_argument("RX sample rate must be positive");
     }
@@ -231,9 +231,10 @@ void RxStreamSession::receiveLoop(RxSessionConfiguration configuration) noexcept
             const std::uint64_t timestamp = configuration.use_rf_timestamp
                 ? result.rf_timestamp
                 : result.system_timestamp;
-            const std::uint64_t frequency = configuration.use_rf_timestamp
-                ? configuration.sample_rate
-                : configuration.system_timestamp_frequency;
+            const TimestampRate frequency =
+                configuration.use_rf_timestamp
+                    ? configuration.sample_rate
+                    : TimestampRate(configuration.system_timestamp_frequency);
             queue_.pushTicks(std::move(result.samples), timestamp, frequency,
                              configuration.sample_rate);
         }
