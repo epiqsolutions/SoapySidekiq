@@ -479,7 +479,6 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
                                  const size_t numElems)
 {
     int status = 0;
-    bool rx_streaming_on_1pps_started = false;
     StreamHandle *stream_handle = findStreamHandle(stream);
     if (stream_handle == nullptr)
         return SOAPY_SDR_STREAM_ERROR;
@@ -639,18 +638,6 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
         /* start tx streaming */
         if (flags == SOAPY_SDR_HAS_TIME)
         {
-            if (rx_streaming_on_1pps_started)
-            {
-                /* if skiq_start_rx_streaming_on_1pps is called, then skiq_start_tx_streaming_on_1pps
-                 * is called the second one called will block until the first one finishes.
-                 * So the second one called will unblock 2 seconds later.
-                 * So warn the user */
-                SoapySDR_logf(SOAPY_SDR_WARNING, "The skiq_start_rx_streaming_on_1pps is"
-                                                 " still blocked waiting for 1pps to occur"
-                                                 " so calling activating a TX stream will be"
-                                                 " delayed 2 seconds");
-
-            }
             /* The SDK call blocks until the PPS edge. Keep activateStream
              * nonblocking and let the first write wait for the result. */
             {
