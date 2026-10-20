@@ -303,6 +303,15 @@ target_include_directories(frequency_tests PRIVATE
 target_link_libraries(frequency_tests PRIVATE non_hardware_test_options)
 add_test(NAME frequency.all COMMAND frequency_tests)
 set_tests_properties(frequency.all PROPERTIES LABELS "component;non-hardware")
+extract_settings_method(antenna_methods "std::vector<std::string> SoapySidekiq::listAntennas("
+    "bool SoapySidekiq::hasDCOffsetMode(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/AntennaMethods.inc" "${antenna_methods}")
+add_executable(antenna_tests support/TestMain.cpp component/AntennaTests.cpp)
+target_include_directories(antenna_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(antenna_tests PRIVATE non_hardware_test_options)
+add_test(NAME antenna.all COMMAND antenna_tests)
+set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
 extract_settings_method(gain_profiles "SoapySidekiq::GainProfile SoapySidekiq::gainProfile("
     "std::vector<std::string> SoapySidekiq::listGains(")
 extract_settings_method(gain_methods "void SoapySidekiq::setGain("
@@ -385,7 +394,7 @@ add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
             channel_metadata_tests sample_rate_capability_tests frequency_tests
-            rate_bandwidth_tests gain_tests
+            rate_bandwidth_tests gain_tests antenna_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
