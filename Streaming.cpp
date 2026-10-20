@@ -815,11 +815,29 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         return SOAPY_SDR_STREAM_ERROR;
     }
 
+    if (timeoutUs < 0)
+    {
+        return SOAPY_SDR_STREAM_ERROR;
+    }
+
     if (first_transmit)
     {
         SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start");
         std::unique_lock<std::mutex> lock(tx_mutex);
-        tx_cv.wait(lock, [this] { return tx_start_finished; });
+        // Clamp the deadline so even LONG_MAX microseconds cannot overflow
+        // the clock's (typically nanosecond) representation.
+        using Clock = std::chrono::steady_clock;
+        const auto now = Clock::now();
+        const auto budget = std::chrono::microseconds(timeoutUs);
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::microseconds>(Clock::time_point::max() - now);
+        const auto deadline = budget >= remaining ? Clock::time_point::max() : now + budget;
+        if (!tx_cv.wait_until(lock, deadline, [this] { return tx_start_finished; }))
+        {
+            // The asynchronous PPS start is still pending. A later write may
+            // wait again; no packet or callback context has been submitted.
+            return SOAPY_SDR_TIMEOUT;
+        }
         if (tx_start_status != 0)
         {
             // Keep the gate set so retries cannot transmit after a failed start.
