@@ -8,6 +8,7 @@
 #include <sidekiq_api.h>
 
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -95,6 +96,13 @@ class SoapySidekiq : public SoapySDR::Device
     int readStream(SoapySDR::Stream *stream, void *const *buffs, const size_t numElems, int &flags,
                    long long &timeNs, const long timeoutUs = 100000) override;
 
+    /**
+     * Submit CS16 or normalized CF32 samples in whole TX MTUs, without staging.
+     * numElems must fit int; invalid counts/buffers return SOAPY_SDR_STREAM_ERROR.
+     * A zero-length write returns zero without accessing buffs. Back-pressure
+     * returns an accepted sample prefix or SOAPY_SDR_TIMEOUT; callers retry
+     * only the unaccepted suffix, advancing by two format components per sample.
+     */
     int writeStream(SoapySDR::Stream *stream, const void *const *buffs, const size_t numElems,
                     int &flags, const long long timeNs = 0, const long timeoutUs = 100000) override;
 
@@ -237,6 +245,8 @@ class SoapySidekiq : public SoapySDR::Device
     /** Acquire TX callback resources; unwind acquired state on any failure. */
     void initializeTxCallbacks();
 
+    /** Reject invalid directions/channels before metadata or SDK operations. */
+    void validateChannel(int direction, size_t channel) const;
     skiq_rx_hdl_t getRxHandle(const size_t channel) const;
     skiq_tx_hdl_t getTxHandle(const size_t channel) const;
     skiq_rx_hdl_t getFirstRxHandle(void) const;
@@ -279,6 +289,10 @@ class SoapySidekiq : public SoapySDR::Device
     std::condition_variable tx_cv;
     std::mutex tx_buf_mutex;
     std::condition_variable tx_buf_cv;
+    // Written with both TX mutexes held; read with either mutex held.
+    bool tx_writes_stopping{true};
+    std::size_t active_tx_writers{}; // Guarded by tx_buf_mutex.
+    void stopTxWrites();
     bool tx_start_finished{};
     int tx_start_status{};
     bool tx_stream_active{};
@@ -310,7 +324,8 @@ class SoapySidekiq : public SoapySDR::Device
     // The registration requires a static function instead of a method so
     // this must be created to be able to register it.
     // This function calls the tx_complete method.
-    static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data, void *p_user);
+    static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
+                                     void *p_user) noexcept;
 
     static void registerInstance(uint8_t card, SoapySidekiq *instance);
     static void unregisterInstance(uint8_t card, SoapySidekiq *instance);

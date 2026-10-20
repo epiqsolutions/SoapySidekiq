@@ -213,6 +213,14 @@ set_tests_properties(tx-callback-initialization.all PROPERTIES LABELS "component
 # Fail configuration if its boundaries change rather than testing a stale copy.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Streaming.cpp)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Streaming.cpp" streaming_source)
+string(FIND "${streaming_source}" "void SoapySidekiq::tx_complete_callback(" tx_callback_start)
+string(FIND "${streaming_source}" "long long SoapySidekiq::convert_timestamp_to_nanos(" tx_callback_end)
+if(tx_callback_start LESS 0 OR tx_callback_end LESS tx_callback_start)
+    message(FATAL_ERROR "Could not locate the production TX completion callback")
+endif()
+math(EXPR tx_callback_length "${tx_callback_end} - ${tx_callback_start}")
+string(SUBSTRING "${streaming_source}" ${tx_callback_start} ${tx_callback_length} tx_callback)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxCompletionCallback.inc" "${tx_callback}")
 string(FIND "${streaming_source}" "int SoapySidekiq::writeStream(" tx_write_start)
 string(FIND "${streaming_source}" "int SoapySidekiq::readStreamStatus(" tx_write_end)
 if(tx_write_start LESS 0 OR tx_write_end LESS tx_write_start)
@@ -238,7 +246,7 @@ target_include_directories(tx_write_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_libraries(tx_write_tests PRIVATE non_hardware_test_options Threads::Threads)
 add_test(NAME tx-write.all COMMAND tx_write_tests)
-set_tests_properties(tx-write.all PROPERTIES LABELS "component;non-hardware")
+set_tests_properties(tx-write.all PROPERTIES LABELS "component;non-hardware" TIMEOUT 30)
 
 # Reuse production lifecycle methods with a fake SDK, as in the TX write fixture.
 function(extract_stream_method output start_marker end_marker)
@@ -255,8 +263,38 @@ extract_stream_method(rx_close "void SoapySidekiq::closeStream("
     "size_t SoapySidekiq::getStreamMTU(")
 extract_stream_method(rx_deactivate "int SoapySidekiq::deactivateStream("
     "int SoapySidekiq::readStream(")
+extract_stream_method(tx_stop_writes "void SoapySidekiq::stopTxWrites("
+    "void SoapySidekiq::tx_streaming_start(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxStopWritesMethod.inc" "${tx_stop_writes}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxDeactivateMethod.inc" "${rx_deactivate}")
 extract_stream_method(activate_method "int SoapySidekiq::activateStream("
     "int SoapySidekiq::deactivateStream(")
+
+# Reuse the extraction boundary checks for side-effect-free device metadata.
+function(extract_settings_method output start_marker end_marker)
+    set(streaming_source "${settings_source}")
+    extract_stream_method(method "${start_marker}" "${end_marker}")
+    set(${output} "${method}" PARENT_SCOPE)
+endfunction()
+extract_settings_method(channel_validation "void SoapySidekiq::validateChannel("
+    "skiq_rx_hdl_t SoapySidekiq::getRxHandle(")
+extract_settings_method(channel_mapping "skiq_rx_hdl_t SoapySidekiq::getRxHandle("
+    "skiq_rx_hdl_t SoapySidekiq::getFirstRxHandle(")
+extract_settings_method(channel_count "size_t SoapySidekiq::getNumChannels("
+    "std::vector<std::string> SoapySidekiq::listAntennas(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelValidationMethods.inc"
+    "${channel_count}\n${channel_validation}")
+extract_stream_method(stream_metadata "std::vector<std::string> SoapySidekiq::getStreamFormats("
+    "void SoapySidekiq::stopTxWrites(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelMetadataMethods.inc"
+    "${channel_mapping}\n${stream_metadata}")
+add_executable(channel_metadata_tests support/TestMain.cpp component/ChannelMetadataTests.cpp)
+target_include_directories(channel_metadata_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(channel_metadata_tests PRIVATE non_hardware_test_options)
+add_test(NAME channel-metadata.all COMMAND channel_metadata_tests)
+set_tests_properties(channel-metadata.all PROPERTIES LABELS "component;non-hardware")
 string(FIND "${activate_method}" "    else if (stream_handle->direction == SOAPY_SDR_TX)" tx_branch)
 if(tx_branch LESS 0)
     message(FATAL_ERROR "Could not locate RX activation branch")
@@ -287,7 +325,7 @@ endif()
 
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
+    DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests channel_metadata_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
