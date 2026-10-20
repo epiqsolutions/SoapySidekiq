@@ -134,6 +134,14 @@ build directory.
 tree, or copies a compile database into the repository root. Use the database
 generated in the selected build directory directly.
 
+## Constructor topology selection
+
+The optional `topology` device argument selects an SDK topology ID. An explicit
+request on a card without topology support raises an argument error instead of
+silently retaining a different configuration. Supported cards pass the ID to
+the SDK and report application failures with card/topology/status context.
+Omit the argument to retain the card's default topology behavior.
+
 ## Streaming limitations
 
 The current streaming implementation supports:
