@@ -8,6 +8,7 @@
 #include <sidekiq_api.h>
 
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -286,6 +287,10 @@ class SoapySidekiq : public SoapySDR::Device
     std::condition_variable tx_cv;
     std::mutex tx_buf_mutex;
     std::condition_variable tx_buf_cv;
+    // Written with both TX mutexes held; read with either mutex held.
+    bool tx_writes_stopping{true};
+    std::size_t active_tx_writers{}; // Guarded by tx_buf_mutex.
+    void stopTxWrites();
     bool tx_start_finished{};
     int tx_start_status{};
     bool tx_stream_active{};

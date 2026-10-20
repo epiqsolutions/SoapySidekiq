@@ -11,6 +11,8 @@
 #include <atomic>
 #include <algorithm>
 #include <functional>
+#include <future>
+#include <cerrno>
 #include <new>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <cmath>
@@ -31,6 +33,7 @@
 // Stand-ins match the members used by writeStream without opening a real device.
 #define SOAPY_SDR_TX 0
 #define SOAPY_SDR_RX 1
+#define SOAPY_SDR_HAS_TIME 4
 #define SOAPY_SDR_NOT_SUPPORTED -1
 #define SOAPY_SDR_STREAM_ERROR -2
 #define SOAPY_SDR_TIMEOUT -3
@@ -67,6 +70,25 @@ struct passedStruct
     }
 };
 int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *, passedStruct *);
+using skiq_tx_hdl_t = unsigned;
+using skiq_rx_hdl_t = unsigned;
+int stop_status{}, stop_calls{};
+int skiq_stop_tx_streaming(std::uint8_t, skiq_tx_hdl_t)
+{
+    ++stop_calls;
+    return stop_status;
+}
+int skiq_stop_tx_streaming_on_1pps(std::uint8_t card, skiq_tx_hdl_t handle, int)
+{
+    return skiq_stop_tx_streaming(card, handle);
+}
+struct UnusedRxSession
+{
+    int deactivate(bool)
+    {
+        return 0;
+    }
+};
 
 // Observe wait boundaries without sleeps; injected completion runs under the
 // same locking protocol as a real SDK callback, on another thread.
@@ -80,6 +102,10 @@ class FixtureCondition
     void notify_all()
     {
         condition.notify_all();
+    }
+    template <typename Predicate> void wait(std::unique_lock<std::mutex> &lock, Predicate ready)
+    {
+        condition.wait(lock, ready);
     }
     template <typename Predicate>
     bool wait_until(std::unique_lock<std::mutex> &lock,
@@ -110,9 +136,19 @@ class FixtureCondition
 class SoapySidekiq
 {
 public:
-    struct StreamHandle { int direction{SOAPY_SDR_TX}; unsigned tx_handle{}; };
+  struct StreamHandle
+  {
+      int direction{SOAPY_SDR_TX};
+      unsigned tx_handle{}, rx_handle{};
+  };
     StreamHandle handle;
     StreamHandle *active_tx_stream{&handle};
+    StreamHandle *active_rx_stream{};
+    UnusedRxSession *rx_session{};
+    bool tx_stream_active{true};
+    bool tx_writes_stopping{};
+    std::size_t active_tx_writers{};
+    std::thread _tx_streaming_thread;
     bool first_transmit{false}, txUseShort{false};
     std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
     std::uint8_t card{};
@@ -136,6 +172,7 @@ public:
     std::vector<int> send_results;
     std::size_t attempts{};
     bool reject_notifies{true};
+    std::function<void()> on_submit;
 
     ~SoapySidekiq()
     {
@@ -147,6 +184,8 @@ public:
     int writeStream(SoapySDR::Stream *, const void *const *, std::size_t,
                     int &, long long, long);
     void tx_complete(int32_t, skiq_tx_block_t *, uint32_t);
+    void stopTxWrites();
+    int deactivateStream(SoapySDR::Stream *, int, long long);
 };
 
 #include "TxCompletionMethod.inc"
@@ -155,6 +194,8 @@ public:
 int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *context)
 {
     auto &device = *context->classAddr;
+    if (device.on_submit)
+        device.on_submit();
     const auto attempt = device.attempts++;
     const int status = attempt < device.send_results.size() ? device.send_results[attempt] : 0;
     if (status != 0)
@@ -222,6 +263,8 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
 
 // Generated directly from Streaming.cpp by CMake, including the input advance.
 #include "TxWriteMethod.inc"
+#include "TxStopWritesMethod.inc"
+#include "TxDeactivateMethod.inc"
 
 TEST_CASE("TX completion can release status from another thread during submission")
 {
@@ -793,4 +836,133 @@ TEST_CASE("CF32 suffix retry after back-pressure preserves input stride and pack
     REQUIRE(std::all_of(device.transmitted[1].begin(), device.transmitted[1].end(),
                         [](auto value) { return value == 32767; }));
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+// A promise marks the actual condition-variable wait boundary. Deactivation
+// runs on the calling thread and must drain the writer before returning.
+static void checkCancelledWrite(bool pps, bool queue_full, bool partial)
+{
+    SoapySidekiq device;
+    device.first_transmit = pps;
+    device.txUseShort = true;
+    device.reject_notifies = false;
+    if (queue_full)
+        device.send_results = partial ? std::vector<int>{0, SKIQ_TX_ASYNC_SEND_QUEUE_FULL}
+                                      : std::vector<int>{SKIQ_TX_ASYNC_SEND_QUEUE_FULL};
+    else if (!pps)
+        device.p_tx_status[0] = 1;
+    std::promise<void> waiting;
+    auto entered = waiting.get_future();
+    wait_hook = [&] { waiting.set_value(); };
+    std::vector<std::int16_t> input(2 * device.current_tx_block_size * (partial ? 2 : 1), 17);
+    const void *buffers[]{input.data()};
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    auto writer = std::async(std::launch::async,
+                             [&]
+                             {
+                                 int flags = 0;
+                                 return device.writeStream(stream, buffers, input.size() / 2, flags,
+                                                           0, std::numeric_limits<long>::max());
+                             });
+    entered.wait();
+    stop_status = 0;
+    stop_calls = 0;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    REQUIRE_EQ(writer.get(),
+               partial ? static_cast<int>(device.current_tx_block_size) : SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+    REQUIRE(device.tx_writes_stopping);
+    REQUIRE(!device.tx_stream_active);
+    REQUIRE_EQ(stop_calls, 1);
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    const auto attempts = device.attempts;
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 0),
+               SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.attempts, attempts);
+}
+
+TEST_CASE("deactivation cancels a writer waiting for PPS startup")
+{
+    checkCancelledWrite(true, false, false);
+}
+TEST_CASE("deactivation cancels a writer waiting for a busy TX buffer")
+{
+    checkCancelledWrite(false, false, false);
+}
+TEST_CASE("deactivation cancels a queue-full writer and releases rejected context")
+{
+    checkCancelledWrite(false, true, false);
+}
+TEST_CASE("deactivation returns the accepted prefix from a queue-full write")
+{
+    checkCancelledWrite(false, true, true);
+}
+TEST_CASE("failed SDK stop keeps stream ownership and closes write admission until retry")
+{
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    stop_status = -EIO;
+    bool threw = false;
+    try
+    {
+        device.deactivateStream(stream, 0, 0);
+    }
+    catch (const std::runtime_error &)
+    {
+        threw = true;
+    }
+    REQUIRE(threw);
+    REQUIRE(device.tx_stream_active);
+    REQUIRE(device.active_tx_stream == &device.handle);
+    REQUIRE(device.tx_writes_stopping);
+    stop_status = 0;
+    REQUIRE_EQ(device.deactivateStream(stream, SOAPY_SDR_HAS_TIME, 0), 0);
+    REQUIRE(!device.tx_stream_active);
+}
+
+TEST_CASE("deactivation drains a submission before calling SDK stop")
+{
+    SoapySidekiq device;
+    std::promise<void> submitted, release;
+    auto submitting = submitted.get_future();
+    auto allowed = release.get_future();
+    device.on_submit = [&]
+    {
+        submitted.set_value();
+        allowed.wait();
+    };
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    auto writer = std::async(std::launch::async,
+                             [&]
+                             {
+                                 int flags = 0;
+                                 return device.writeStream(
+                                     stream, buffers, device.current_tx_block_size, flags, 0, 0);
+                             });
+    submitting.wait();
+    stop_status = 0;
+    stop_calls = 0;
+    auto stopping =
+        std::async(std::launch::async, [&] { return device.deactivateStream(stream, 0, 0); });
+    bool admission_closed;
+    {
+        std::unique_lock<std::mutex> lock(device.tx_buf_mutex);
+        admission_closed = device.tx_buf_cv.wait_until(
+            lock, std::chrono::steady_clock::now() + std::chrono::seconds(2),
+            [&] { return device.tx_writes_stopping; });
+    }
+    // Capture observations before releasing the submission, but assert only
+    // after joining so a failed assertion cannot strand a waiting test thread.
+    const bool drained_early =
+        stopping.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    release.set_value();
+    REQUIRE_EQ(writer.get(), static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(stopping.get(), 0);
+    REQUIRE(admission_closed);
+    REQUIRE(!drained_early);
+    REQUIRE_EQ(stop_calls, 1);
+    REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
 }
