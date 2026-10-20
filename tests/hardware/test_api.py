@@ -22,35 +22,44 @@ def do_identification(sdr, handle):
         print(f"\t{key}: {value}")
 
 
+def expect_rejected(operation, description):
+    """Check an invalid API request without aborting the hardware diagnostic."""
+    try:
+        operation()
+    except (RuntimeError, ValueError, IndexError) as error:
+        print(f"\tExpected rejection ({description}): {error}")
+    else:
+        raise AssertionError(f"API accepted {description}")
+
+
 def do_frontend(sdr, handle):
-    #  *** Frontend Corrections API
-    dc_offset_mode = sdr.hasDCOffsetMode(SOAPY_SDR_RX, handle)
-    print(f"{dc_offset_mode}")
-
-    dc_offset_mode = sdr.hasDCOffsetMode(SOAPY_SDR_TX, handle)
-    print(f"{dc_offset_mode}")
-
-    # test invalid handle, no error due to it is a get command
-    dc_offset_mode = sdr.hasDCOffsetMode(SOAPY_SDR_RX, 1)
-    print(f"{dc_offset_mode}")
-
-    sdr.setDCOffsetMode(SOAPY_SDR_RX, handle, True)
-
-    sdr.setDCOffsetMode(SOAPY_SDR_TX, handle, True)
-
-    dc_offset_mode = sdr.getDCOffsetMode(SOAPY_SDR_RX, handle)
-    print(f"\t{dc_offset_mode}")
-
-    sdr.setDCOffsetMode(SOAPY_SDR_RX, handle, False)
-    dc_offset_mode = sdr.getDCOffsetMode(SOAPY_SDR_RX, handle)
-    print(f"\t{dc_offset_mode}")
-
-    sdr.setDCOffsetMode(SOAPY_SDR_TX, handle, False)
-    dc_offset_mode = sdr.getDCOffsetMode(SOAPY_SDR_TX, handle)
-    print(f"\t{dc_offset_mode}")
-
-    # test invalid handle, test passed so comment out
-#    sdr.setDCOffsetMode(SOAPY_SDR_RX, 1, False)
+    """Exercise DC mode only where advertised and check invalid channels."""
+    for direction in (SOAPY_SDR_RX, SOAPY_SDR_TX):
+        count = sdr.getNumChannels(direction)
+        if handle < count:
+            supported = sdr.hasDCOffsetMode(direction, handle)
+            print(f"\tDC mode support ({direction}, {handle}): {supported}")
+            if supported:
+                original = sdr.getDCOffsetMode(direction, handle)
+                try:
+                    for automatic in (True, False):
+                        sdr.setDCOffsetMode(direction, handle, automatic)
+                        assert sdr.getDCOffsetMode(direction, handle) == automatic
+                finally:
+                    # Restore the visible DC selection. The SDK automatic
+                    # calibration mode is shared, as documented in README.
+                    sdr.setDCOffsetMode(direction, handle, original)
+            else:
+                expect_rejected(
+                    lambda: sdr.setDCOffsetMode(direction, handle, True),
+                    "automatic DC mode on an unsupported channel",
+                )
+                sdr.setDCOffsetMode(direction, handle, False)
+                assert not sdr.getDCOffsetMode(direction, handle)
+        # The channel count is the first invalid logical index for this direction.
+        expect_rejected(lambda: sdr.hasDCOffsetMode(direction, count), "invalid DC capability channel")
+        expect_rejected(lambda: sdr.getDCOffsetMode(direction, count), "invalid DC readback channel")
+        expect_rejected(lambda: sdr.setDCOffsetMode(direction, count, False), "invalid DC mode channel")
 
 
 def do_gain(sdr, handle):
@@ -74,7 +83,7 @@ def do_gain(sdr, handle):
     gain = sdr.getGain(SOAPY_SDR_RX, handle)
     print(f"\tgain value is: {gain}");
 
-    # set invalid gain, should get a warning
+    # RX gain requests outside the hardware index range clamp to its boundary.
     sdr.setGain(SOAPY_SDR_RX, handle, 100)
     # see if its the same as the old gain
 #    gain = sdr.getGain(SOAPY_SDR_RX, handle)
@@ -89,8 +98,10 @@ def do_gain(sdr, handle):
     gain = sdr.getGain(SOAPY_SDR_TX, handle)
     print(f"\tattenuation value is: {gain}");
 
-    # set invalid attenuation, should get a warning
-    sdr.setGain(SOAPY_SDR_TX, handle, 100)
+    # Invalid TX gain requests raise instead of silently leaving attenuation unchanged.
+    maximum = sdr.getGainRange(SOAPY_SDR_TX, handle).maximum()
+    expect_rejected(lambda: sdr.setGain(SOAPY_SDR_TX, handle, maximum + 0.25),
+                    "TX gain above the advertised range")
     gain = sdr.getGain(SOAPY_SDR_TX, handle)
     print(f"\tattenuation value is: {gain}");
     
