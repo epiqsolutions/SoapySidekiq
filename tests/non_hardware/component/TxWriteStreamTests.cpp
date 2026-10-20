@@ -6,6 +6,11 @@
 #include "TestHarness.hpp"
 
 #include <cstddef>
+#include <atomic>
+#include <algorithm>
+#include <functional>
+#include <new>
+#include <SoapySidekiq/ScopeExit.hpp>
 #include <cmath>
 #include <cstdint>
 #include <condition_variable>
@@ -34,7 +39,31 @@
 namespace SoapySDR { struct Stream {}; }
 struct skiq_tx_block_t { std::int16_t data[504]{}; };
 class SoapySidekiq;
-struct passedStruct { SoapySidekiq *classAddr; std::uint32_t txIndex; };
+struct passedStruct
+{
+    inline static std::atomic<std::size_t> live{};
+    inline static bool fail_allocation{};
+    SoapySidekiq *classAddr{};
+    std::uint32_t txIndex{};
+    passedStruct()
+    {
+        ++live;
+    }
+    ~passedStruct()
+    {
+        --live;
+    }
+    static void *operator new(std::size_t bytes)
+    {
+        if (fail_allocation)
+            throw std::bad_alloc();
+        return ::operator new(bytes);
+    }
+    static void operator delete(void *pointer) noexcept
+    {
+        ::operator delete(pointer);
+    }
+};
 int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *, passedStruct *);
 
 /** Minimal device fixture supplying the state accessed by the production method. */
@@ -53,7 +82,6 @@ public:
     skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{&blocks[0], &blocks[1], &blocks[2]};
     std::unique_ptr<std::int32_t[]> p_tx_status{
         std::make_unique<std::int32_t[]>(DEFAULT_NUM_BUFFERS)};
-    passedStruct *passedStructInstance{};
     std::mutex tx_buf_mutex;
     std::mutex tx_mutex;
     std::condition_variable tx_cv;
@@ -63,6 +91,28 @@ public:
     pthread_cond_t space_avail_cond{};
     std::vector<std::vector<std::int16_t>> transmitted;
     bool complete_on_worker{};
+    bool defer_completion{};
+    std::vector<passedStruct *> pending;
+    std::vector<int> send_results;
+    std::size_t attempts{};
+
+    SoapySidekiq()
+    {
+        if (pthread_mutex_init(&space_avail_mutex, nullptr) != 0)
+            throw std::runtime_error("fixture mutex initialization");
+        if (pthread_cond_init(&space_avail_cond, nullptr) != 0)
+        {
+            pthread_mutex_destroy(&space_avail_mutex);
+            throw std::runtime_error("fixture condition initialization");
+        }
+    }
+    ~SoapySidekiq()
+    {
+        for (auto *context : pending)
+            delete context;
+        pthread_cond_destroy(&space_avail_cond);
+        pthread_mutex_destroy(&space_avail_mutex);
+    }
 
     std::string getNativeStreamFormat(int, std::size_t, double &) const;
     int writeStream(SoapySDR::Stream *, const void *const *, std::size_t,
@@ -73,7 +123,22 @@ public:
 int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *context)
 {
     auto &device = *context->classAddr;
+    const auto attempt = device.attempts++;
+    const int status = attempt < device.send_results.size() ? device.send_results[attempt] : 0;
+    if (status != 0)
+    {
+        // Rejected sends never acquire the caller's context. Model an available
+        // queue slot so a queue-full test can retry without a real SDK worker.
+        if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
+            device.space_avail = true;
+        return status;
+    }
     device.transmitted.emplace_back(block->data, block->data + 2 * device.current_tx_block_size);
+    if (device.defer_completion)
+    {
+        device.pending.push_back(context);
+        return 0;
+    }
     if (device.complete_on_worker)
     {
         // A different SDK thread must be able to acquire the status lock while
@@ -114,6 +179,21 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
     throw std::invalid_argument("invalid stream direction");
 }
 #include "NativeStreamFormat.inc"
+
+// Inject a completion at the busy-buffer wait boundary without timing sleeps.
+std::function<void()> wait_hook;
+int fixture_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex)
+{
+    if (wait_hook)
+    {
+        auto hook = std::move(wait_hook);
+        wait_hook = {};
+        hook();
+        return 0;
+    }
+    return pthread_cond_wait(condition, mutex);
+}
+#define pthread_cond_wait fixture_cond_wait
 
 // Generated directly from Streaming.cpp by CMake, including the input advance.
 #include "TxWriteMethod.inc"
@@ -278,4 +358,127 @@ TEST_CASE("native CS16 reporting uses the host layout rather than physical DAC w
     REQUIRE_EQ(device.getNativeStreamFormat(SOAPY_SDR_RX, 0, scale), std::string{"CS16"});
     REQUIRE_EQ(scale, 32767.0);
     REQUIRE_THROWS_AS(device.getNativeStreamFormat(99, 0, scale), std::invalid_argument);
+}
+
+TEST_CASE("TX never overwrites a busy SDK block before completion")
+{
+    SoapySidekiq device;
+    device.txUseShort = true;
+    device.p_tx_status[0] = 1;
+    std::fill(std::begin(device.blocks[0].data), std::end(device.blocks[0].data), 123);
+    std::vector<std::int16_t> input(2 * device.current_tx_block_size, 456);
+    bool original_payload_preserved = false;
+    wait_hook = [&]
+    {
+        original_payload_preserved =
+            std::all_of(std::begin(device.blocks[0].data), std::end(device.blocks[0].data),
+                        [](auto sample) { return sample == 123; });
+        std::lock_guard<std::mutex> lock(device.tx_buf_mutex);
+        device.p_tx_status[0] = 0;
+    };
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE(original_payload_preserved);
+    REQUIRE(device.transmitted[0] == input);
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("queue-full TX retries release context and retain the input block")
+{
+    SoapySidekiq device;
+    device.txUseShort = true;
+    device.send_results = {SKIQ_TX_ASYNC_SEND_QUEUE_FULL, SKIQ_TX_ASYNC_SEND_QUEUE_FULL, 0};
+    std::vector<std::int16_t> input(2 * device.current_tx_block_size, -789);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.attempts, std::size_t{3});
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+    REQUIRE(device.transmitted[0] == input);
+    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{1});
+    REQUIRE_EQ(device.p_tx_status[0], 0);
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("hard TX errors release reservation and context before a retry")
+{
+    SoapySidekiq device;
+    device.send_results = {-5, 0};
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_THROWS_AS(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
+                                         buffers, device.current_tx_block_size, flags, 0, 0),
+                      std::runtime_error);
+    REQUIRE_EQ(device.p_tx_status[0], 0);
+    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("CF32 conversion failure releases its reserved TX block and context")
+{
+    SoapySidekiq device;
+    device.txMaxValue = 0;
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_THROWS_AS(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
+                                         buffers, device.current_tx_block_size, flags, 0, 0),
+                      std::invalid_argument);
+    REQUIRE_EQ(device.p_tx_status[0], 0);
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("callback context allocation failure releases its reserved TX block")
+{
+    SoapySidekiq device;
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    passedStruct::fail_allocation = true;
+    soapy_sidekiq::ScopeExit restore([]() noexcept { passedStruct::fail_allocation = false; });
+    REQUIRE_THROWS_AS(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
+                                         buffers, device.current_tx_block_size, flags, 0, 0),
+                      std::bad_alloc);
+    REQUIRE_EQ(device.p_tx_status[0], 0);
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("accepted TX contexts survive submission until out-of-order completion")
+{
+    SoapySidekiq device;
+    device.defer_completion = true;
+    std::vector<float> input(4 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  2 * device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(2 * device.current_tx_block_size));
+    REQUIRE_EQ(device.pending.size(), std::size_t{2});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{2});
+    REQUIRE_EQ(device.p_tx_status[0], 1);
+    REQUIRE_EQ(device.p_tx_status[1], 1);
+    for (auto it = device.pending.rbegin(); it != device.pending.rend(); ++it)
+    {
+        auto *context = *it;
+        std::lock_guard<std::mutex> lock(device.tx_buf_mutex);
+        device.p_tx_status[context->txIndex] = 0;
+        delete context;
+    }
+    device.pending.clear();
+    REQUIRE_EQ(device.p_tx_status[0], 0);
+    REQUIRE_EQ(device.p_tx_status[1], 0);
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
 }
