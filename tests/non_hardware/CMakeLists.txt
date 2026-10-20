@@ -303,6 +303,15 @@ target_include_directories(frequency_tests PRIVATE
 target_link_libraries(frequency_tests PRIVATE non_hardware_test_options)
 add_test(NAME frequency.all COMMAND frequency_tests)
 set_tests_properties(frequency.all PROPERTIES LABELS "component;non-hardware")
+extract_settings_method(dc_offset_methods "bool SoapySidekiq::hasDCOffsetMode("
+    "/*******************************************************************\n * Gain API")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/DcOffsetMethods.inc" "${dc_offset_methods}")
+add_executable(dc_offset_tests support/TestMain.cpp component/DcOffsetTests.cpp)
+target_include_directories(dc_offset_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(dc_offset_tests PRIVATE non_hardware_test_options)
+add_test(NAME dc-offset.all COMMAND dc_offset_tests)
+set_tests_properties(dc-offset.all PROPERTIES LABELS "component;non-hardware")
 extract_settings_method(rate_set "void SoapySidekiq::setSampleRate("
     "double SoapySidekiq::getSampleRate(")
 extract_settings_method(rate_get "double SoapySidekiq::getSampleRate("
@@ -374,7 +383,7 @@ add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
             channel_metadata_tests sample_rate_capability_tests frequency_tests
-            rate_bandwidth_tests
+            rate_bandwidth_tests dc_offset_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests
             rx_stream_session_tests tx_write_tests timestamp_portable_tests rx_lifecycle_tests
