@@ -156,6 +156,10 @@ and NaN converts to zero before scaling to the card's TX full scale.
 SDK's reported bounds. It does not enumerate the exact profiles of cards with
 discrete rate support; the SDK validates each requested rate.
 
+Antenna APIs expose the currently configured RF port. Selecting that same
+port is supported; switching to another port is not yet implemented. Cards
+without RF-port reporting return no antenna names.
+
 RX automatic DC-offset correction selects the DC calibration type and enables
 the SDK's shared automatic calibration mode. Other selected calibration types
 are preserved and can also run automatically in that mode. Disabling DC-offset

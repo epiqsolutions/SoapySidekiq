@@ -114,6 +114,8 @@ class SoapySidekiq : public SoapySDR::Device
      ******************************************************************/
 
     std::vector<std::string> listAntennas(const int direction, const size_t channel) const override;
+    std::string getAntenna(const int direction, const size_t channel) const override;
+    void setAntenna(const int direction, const size_t channel, const std::string &name) override;
 
     /*******************************************************************
      * Frontend corrections API
@@ -249,6 +251,8 @@ class SoapySidekiq : public SoapySDR::Device
     void validateChannel(int direction, size_t channel) const;
     /** Require a named gain element advertised for the selected channel. */
     void validateGainName(int direction, size_t channel, const std::string &name) const;
+    /** Read the configured RF port; empty when reporting is unavailable. */
+    std::string currentAntenna(int direction, size_t channel) const;
     /** Existing card-specific RX index conversion. */
     struct GainProfile
     {
