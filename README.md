@@ -211,6 +211,13 @@ Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle
 with the SDK's current actual rate, preserving fractional Hz. Missing rates,
 unsupported directions, unknown selectors, and nanosecond overflow raise errors.
 
+Stream activation/deactivation accepts flags `0` for immediate operation, or
+`SOAPY_SDR_HAS_TIME` with `timeNs=0` for the driver's existing next-PPS behavior.
+Absolute timed starts/stops, additional flags, and finite-burst activation
+(`numElems != 0`) return `SOAPY_SDR_NOT_SUPPORTED`. TX writes accept flags `0`;
+timed writes, end-of-burst, and fragment flags are unsupported. As in the
+SoapySDR contract, `timeNs` is ignored when `HAS_TIME` is absent.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE

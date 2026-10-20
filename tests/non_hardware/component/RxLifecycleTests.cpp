@@ -21,6 +21,7 @@
 #define SOAPY_SDR_TX 0
 #define SOAPY_SDR_HAS_TIME 4
 #define SOAPY_SDR_STREAM_ERROR -2
+#define SOAPY_SDR_NOT_SUPPORTED -1
 #define DEFAULT_NUM_BUFFERS 1
 #define SoapySDR_logf(...) ((void)0)
 #define SoapySDR_log(...) ((void)0)
@@ -351,4 +352,45 @@ TEST_CASE("RX timestamp setup rejects omitted actual rate before hardware start"
     sdk.omit_rate = true;
     REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::invalid_argument);
     REQUIRE_EQ(sdk.starts, 0u);
+}
+
+TEST_CASE("activation rejects unsupported flags bursts and absolute times before starting")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+    {
+        SoapySidekiq device;
+        auto *stream = device.setupRx();
+        device.active_rx_stream->direction = direction;
+        for (const int flags : {1, 2, SOAPY_SDR_HAS_TIME | 2, -1})
+            REQUIRE_EQ(device.activateStream(stream, flags, 0, 0), SOAPY_SDR_NOT_SUPPORTED);
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 1), SOAPY_SDR_NOT_SUPPORTED);
+        REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 1),
+                   SOAPY_SDR_NOT_SUPPORTED);
+        for (const long long time : {-1LL, 1LL, 1000000000LL})
+            REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, time, 0),
+                       SOAPY_SDR_NOT_SUPPORTED);
+        REQUIRE_EQ(sdk.starts + sdk.stops + sdk.rate_reads + sdk.frequency_reads, 0u);
+        device.active_rx_stream->direction = SOAPY_SDR_RX;
+    }
+}
+TEST_CASE("RX stop rejects unsupported options without stopping the active session")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    sdk.provide_packet = true;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    for (const int flags : {1, SOAPY_SDR_HAS_TIME | 2, -1})
+        REQUIRE_EQ(device.deactivateStream(stream, flags, 0), SOAPY_SDR_NOT_SUPPORTED);
+    REQUIRE_EQ(device.deactivateStream(stream, SOAPY_SDR_HAS_TIME, 1), SOAPY_SDR_NOT_SUPPORTED);
+    REQUIRE_EQ(sdk.stops, 0u);
+    REQUIRE(device.rx_session->running());
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+}
+TEST_CASE("immediate RX activation ignores timeNs when HAS_TIME is absent")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    sdk.provide_packet = true;
+    REQUIRE_EQ(device.activateStream(stream, 0, 123, 0), 0);
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 123), 0);
 }
