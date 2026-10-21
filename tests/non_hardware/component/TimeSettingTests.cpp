@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -52,6 +53,17 @@ int skiq_write_timestamp_update_on_1pps(std::uint8_t card, std::uint64_t rf, std
 class SoapySidekiq
 {
   public:
+    bool configuration_blocked{};
+    unsigned configuration_attempts{};
+    // Inject admission here; real retained-ownership serialization is covered
+    // by RxLifecycleTests and RxStreamSessionTests.
+    void configureWhileRxInactive(const std::function<void()> &configure)
+    {
+        ++configuration_attempts;
+        if (configuration_blocked)
+            throw std::logic_error("RX owns hardware");
+        configure();
+    }
     std::uint8_t card{5};
     SoapySidekiq()
     {
@@ -147,4 +159,18 @@ TEST_CASE("SDK frequency read failure prevents immediate and PPS updates")
     for (const auto &selector : {"now", "1pps"})
         REQUIRE_THROWS_AS(device.setHardwareTime(0, selector), std::runtime_error);
     REQUIRE_EQ(sdk.immediate_writes + sdk.pps_writes, 0u);
+}
+
+TEST_CASE("RX ownership rejects immediate and PPS time updates before clock reads")
+{
+    SoapySidekiq device;
+    device.configuration_blocked = true;
+    for (const auto &selector : {"", "now", "1pps"})
+        REQUIRE_THROWS_AS(device.setHardwareTime(1500000000, selector), std::logic_error);
+    REQUIRE_EQ(sdk.reads + sdk.immediate_writes + sdk.pps_writes, 0u);
+    REQUIRE_EQ(sdk.rf + sdk.system, std::uint64_t{0});
+    device.configuration_blocked = false;
+    device.setHardwareTime(1500000000, "now");
+    REQUIRE_EQ(sdk.immediate_writes, 1u);
+    REQUIRE_EQ(sdk.system, std::uint64_t{60000000});
 }

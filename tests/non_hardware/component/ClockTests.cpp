@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -66,6 +67,17 @@ class SoapySidekiq
             std::uint32_t ref_clock_freq{40000000};
         } rf_param;
     } param;
+    bool configuration_blocked{};
+    unsigned configuration_attempts{};
+    // Inject admission here; real retained-ownership serialization is covered
+    // by RxLifecycleTests and RxStreamSessionTests.
+    void configureWhileRxInactive(const std::function<void()> &configure)
+    {
+        ++configuration_attempts;
+        if (configuration_blocked)
+            throw std::logic_error("RX owns hardware");
+        configure();
+    }
     std::uint8_t card{5};
     SoapySidekiq()
     {
@@ -184,4 +196,18 @@ TEST_CASE("external clock rate errors report the correct SDK operation")
         message = error.what();
     }
     REQUIRE(message.find("skiq_read_ext_ref_clock_freq failed: -95") != std::string::npos);
+}
+
+TEST_CASE("RX ownership rejects clock changes before touching the reference")
+{
+    SoapySidekiq device;
+    device.configuration_blocked = true;
+    for (const auto &source : device.listClockSources())
+        REQUIRE_THROWS_AS(device.setClockSource(source), std::logic_error);
+    REQUIRE_EQ(sdk.reads + sdk.writes + sdk.rate_reads, 0u);
+    REQUIRE_EQ(sdk.source, skiq_ref_clock_internal);
+    device.configuration_blocked = false;
+    device.setClockSource("external_clock");
+    REQUIRE_EQ(sdk.writes, 1u);
+    REQUIRE_EQ(sdk.source, skiq_ref_clock_external);
 }
