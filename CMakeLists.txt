@@ -50,7 +50,8 @@ message(STATUS "Sidekiq_LIBRARIES - ${Sidekiq_LIBRARIES}")
 message(STATUS "Sidekiq_BUILD_CONFIG - ${Sidekiq_BUILD_CONFIG}")
 message(STATUS "Sidekiq_PKG_LIBRARY_DIRS - ${Sidekiq_PKG_LIBRARY_DIRS}")
 
-SOAPY_SDR_MODULE_UTIL(
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SoapyModule.cmake")
+soapy_sidekiq_add_module(
     TARGET SidekiqSupport
     SOURCES
         SoapySidekiq.hpp

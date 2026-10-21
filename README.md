@@ -32,6 +32,10 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Module installs respect `CMAKE_INSTALL_PREFIX`, `cmake --install --prefix`, and
+`DESTDIR` staging, including with SoapySDR 0.4.0/0.4.1's older module helper.
+An explicit module prefix does not install beside the SoapySDR dependency.
+
 The build respects `CXX`, `-DCMAKE_CXX_COMPILER=...`, and CMake toolchain files.
 The module requests C++17 without compiler extensions. For example:
 
