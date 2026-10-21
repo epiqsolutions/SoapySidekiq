@@ -134,6 +134,14 @@ build directory.
 tree, or copies a compile database into the repository root. Use the database
 generated in the selected build directory directly.
 
+## Constructor topology selection
+
+The optional `topology` device argument selects an SDK topology ID. An explicit
+request on a card without topology support raises an argument error instead of
+silently retaining a different configuration. Supported cards pass the ID to
+the SDK and report application failures with card/topology/status context.
+Omit the argument to retain the card's default topology behavior.
+
 ## Streaming limitations
 
 The current streaming implementation supports:
@@ -143,6 +151,12 @@ The current streaming implementation supports:
 - one requested channel per stream
 
 Simultaneous RX and TX are supported. Multi-channel Soapy streams are not currently implemented.
+
+There are no configurable per-stream arguments. `getStreamArgsInfo()` returns
+an empty list; the former `bufflen` advertisement was unused by `setupStream()`.
+Query `getStreamMTU()` after setup for the actual buffer sample count. RX uses
+the SDK's balanced receive mode. Set the device constructor argument
+`tx_block_size` to choose a validated TX payload size before stream setup.
 
 TX accepts CS16 or normalized CF32 and requires each nonempty `writeStream`
 request to contain a whole number of `getStreamMTU()` samples, with at most
