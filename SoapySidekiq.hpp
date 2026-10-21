@@ -413,7 +413,7 @@ class SoapySidekiq : public SoapySDR::Device
     std::vector<uint32_t> tx_sample_rates;
     std::vector<uint32_t> tx_bandwidths;
     std::timed_mutex tx_status_mutex;
-    uint32_t tx_underruns{};   // Guarded by tx_status_mutex; reset after successful SDK start.
+    uint32_t tx_underruns{}; // Guarded by tx_status_mutex; reset after successful SDK start.
     uint32_t current_tx_block_size{};
 
     //  setting
