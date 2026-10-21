@@ -164,6 +164,14 @@ skiq_tx_hdl_t SoapySidekiq::getFirstTxHandle(void) const
 // Acquire constructor callback resources as one transaction. No stream can be
 // active yet, so failed registration can be unwound before SDK initialization
 // is released by the constructor's outer rollback guard.
+void SoapySidekiq::configureWhileRxInactive(const std::function<void()> &configure)
+{
+    if (rx_session != nullptr)
+        rx_session->configureInactive(configure);
+    else
+        configure();
+}
+
 void SoapySidekiq::initializeTxCallbacks()
 {
     registerInstance(card, this);

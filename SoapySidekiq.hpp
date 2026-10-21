@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <functional>
 #include <sidekiq_api.h>
 
 #include <condition_variable>
@@ -245,6 +246,9 @@ class SoapySidekiq : public SoapySDR::Device
     };
 
   private:
+    /** Serialize coupled RX/TX rate changes with the RX session's hardware ownership. */
+    void configureWhileRxInactive(const std::function<void()> &configure);
+
     /** Throwing activation implementation behind the public stream-status boundary. */
     int activateStreamImpl(SoapySDR::Stream *stream, int flags, long long timeNs, size_t numElems);
 
