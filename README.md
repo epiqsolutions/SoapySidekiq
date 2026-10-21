@@ -178,6 +178,20 @@ write admission.
 CF32 components clip to [-1, 1], infinities clip to the corresponding endpoint,
 and NaN converts to zero before scaling to the card's TX full scale.
 
+The constructor argument `tx_buffer_count` selects 1–30000 preallocated host TX
+blocks; the compatibility default remains 30000. It is independent of
+`tx_block_size`, which defaults to 16380 complex samples. For example,
+`driver=sidekiq,card=0,tx_buffer_count=1024` uses 1024 blocks. Smaller pools reduce
+host memory and the number of outstanding sends, and may reach back-pressure
+sooner; writes retain their timeout and accepted-prefix contract.
+
+Payload plus SDK header storage is `4 * (tx_block_size + 4) * tx_buffer_count`
+bytes, excluding allocator, shared-owner, and status overhead. At the default
+block size this is 64 MiB for 1024 blocks and about 1.83 GiB for 30000 blocks.
+The limit bounds the count, rather than the total bytes; a larger block size
+also increases memory use. A lower default awaits throughput/latency measurements
+on supported cards.
+
 `listSampleRates()` retains a compatibility list spaced at 250 kHz within the
 SDK's reported bounds. It does not enumerate the exact profiles of cards with
 discrete rate support; the SDK validates each requested rate.
@@ -239,8 +253,17 @@ Sample-rate and bandwidth setters in either direction reject changes while RX
 owns hardware or a receive worker, since RX/TX clocks may be coupled. Successfully
 deactivate RX before changing them; a failed stop or failed worker still blocks
 these setters. Activation captures its timing snapshot under the same lock.
-Configure clocks and timestamp selection before activating RX; stop and reactivate
-RX after changing them so it captures a fresh timing snapshot.
+Clock source, PPS source, hardware-time updates, and `timetype` changes use the
+same inactive-RX guard. Configure them before activating RX. Rejection occurs
+before SDK reads/writes, kernel PPS fallback, or timestamp-selection cache changes.
+A hardware-time update scheduled for PPS can still take effect after this setter
+returns; configure and observe the intended PPS edge before capturing data. The
+guard does not cancel scheduled SDK updates or a blocking PPS start.
+
+RX read exceptions from allocation or timestamp arithmetic return
+`SOAPY_SDR_STREAM_ERROR` with flags and output timestamp cleared. A failing
+log sink cannot replace that error result. After an unrepresentable timestamp,
+deactivate and reactivate with a valid timestamp epoch before continuing.
 
 `getHardwareTime` uses system time for the empty selector or `sys_timestamp`.
 Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle
@@ -267,11 +290,23 @@ into logged `SOAPY_SDR_STREAM_ERROR` results. Unsupported options still return
 stream is already active or still owns a PPS startup thread, including a failed
 PPS start. This keeps repeated activation from replacing a joinable thread.
 
+Status-returning stream calls contain exceptions from user-installed diagnostic
+sinks. Logging failures do not turn a successful activation into an error,
+replace an SDK failure code, or hide an already accepted TX sample prefix.
+This diagnostic policy does not suppress backend failures.
+
 SDK stop failures from `deactivateStream()` return `SOAPY_SDR_STREAM_ERROR` and
 retain stream ownership so the caller can retry. TX stops keep new writes
 blocked after failure. `closeStream()` raises an exception if RX hardware
 cannot be stopped and retains the stream for recovery; active TX must be
 deactivated successfully before it can be closed.
+
+Device destruction closes TX write/status admission, drains admitted calls, and
+joins TX PPS startup before stopping TX, releasing stream storage, and removing
+callbacks. A pending SDK PPS start can still keep shutdown waiting for its edge;
+this cleanup does not cancel that SDK call. Accepted contexts retain their
+individual blocks and completion state; callbacks that never arrive remain an
+unresolved SDK shutdown lifetime issue.
 
 ## Sensors
 

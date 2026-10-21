@@ -63,22 +63,31 @@ also keeps a per-run log in `logs/`. The suite writes its CTest output to
 `build/non_hardware/suite.log`. The final line reports the number of
 individual cases, rather than only the number of aggregate CTest executables.
 
-The TX write regression executable compiles the `writeStream` method body
-directly from `Streaming.cpp` against a minimal device and synchronous SDK
-fixture. CMake regenerates that body when the production source changes and
-fails configuration if the method boundaries cannot be found. These tests
-compare every sample in three CF32 and CS16 packets. They exercise successful
-input advancement, not hardware setup, allocation rollback, asynchronous
-callbacks, queue-full handling, or conversion clipping policy. CF32 coverage
-includes negative normalized components, zero, and both signed full-scale
-endpoints. The ASan/UBSan configuration also enables `float-cast-overflow` and
-stops on sanitizer errors.
+The TX write regression executable compiles production TX methods against a
+minimal device and scripted SDK boundary. CMake regenerates the extracted
+bodies when production sources change and fails configuration if their
+boundaries cannot be found. Cases compare every sample across multi-block
+CF32/CS16 writes and cover clipping, shared deadlines, queue-full and busy-block
+back-pressure, accepted prefixes and suffix retries, allocation/conversion
+rollback, synchronous and deferred/out-of-order completion, cancellation, and
+status polling. These fixtures do not construct a real SDK device or establish
+physical RF behavior. The ASan/UBSan configuration also enables
+`float-cast-overflow` and stops on sanitizer errors.
 
-The PPS write-gate regressions inject completed successful and failed startup
-results. They verify that a failed start rejects repeated writes without SDK
-submissions, while a successful start permits subsequent packets. They do not
-exercise the blocking SDK startup call, activation/reset behavior, or real PPS
-edges.
+PPS cases cover both injected completed results and the actual production
+activation/worker path. A controlled fake SDK call waits for an explicit test
+edge: writes time out while pending, wake on success/failure publication, and
+restart through an immediate activation without inheriting the old gate.
+Deactivation cancels a waiting writer, retains the configured token/pool, and
+joins startup before calling the hardware stop for either stop mode. Active
+close is rejected without freeing the pool. The fake edge is always released
+during test cleanup, including assertion failures.
+
+These tests deliberately observe that deactivation remains blocked until the
+pending SDK start returns. They do not establish cancellation of that SDK call,
+real PPS timing, RX/TX start synchronization on a card, or full device teardown
+while a real PPS edge is absent. The separate shutdown fixture checks device
+cleanup ordering with an injected worker, rather than this SDK startup call.
 
 The TX fixture also extracts the production native-format method to check
 separate RX/TX host scales. The SDK unpacked-sample table specifies X2/X4/X40
@@ -126,3 +135,53 @@ cmake --build build/non_hardware-asan --parallel
 tests/run_logged.sh non_hardware_asan \
     tests/non_hardware/run_suite.sh build/non_hardware-asan
 ```
+
+Stream diagnostic regressions install throwing log sinks while actual production
+methods encounter TX preparation failure after an accepted prefix, activation
+success/error, SDK status-read failure, failed-stop retry, and RX activation
+validation failure followed by retry. They verify backend results/admission and
+reservation/context cleanup survive failed diagnostics.
+
+TX completion contexts retain shared bookkeeping rather than a device pointer.
+Late-completion cases destroy the fixture device before invoking the production
+callback and replace the stream state before completing an older reservation.
+The production completion storage and locking are used with an instrumented
+condition variable to preserve the existing wait-boundary tests. These cases
+verify bookkeeping lifetime and stream isolation. The block-ownership cases
+below extend them; callback delivery/quiescence after SDK shutdown is unverified.
+
+TX blocks use a preallocated pool of shared owners with an injected SDK
+allocator/deleter. Accepted contexts retain their own block through completion.
+Allocation-failure cases run the production pool-initialization transaction at
+each failed prefix and verify rollback preserves the published pool, bookkeeping,
+and write index. Production close tests release unused storage while a pending
+block retains its payload across close/replacement and completes afterward.
+The device-destruction completion case also checks block lifetime. This does not
+prove that SDK shutdown delivers every outstanding callback.
+
+TX shutdown cases execute the production destructor, pool initialization, and
+shared stop/drain helpers with tracked SDK calls and owned stream tokens. They
+cover cleanup order, repeated shutdown, failed-stop retry, already-stopped
+hardware, throwing diagnostics, idle destruction, blocks retained past SDK exit,
+and joining a pending PPS worker before stop. A production activation case
+checks that a post-start diagnostic failure preserves TX hardware ownership.
+The pending worker is released by the fixture; no bounded SDK PPS cancellation
+or guarantee of callback delivery is established.
+
+Constructor-option tests bound `tx_buffer_count` to 1–30000 and reject malformed
+values. Production writer cases use one- and two-block pools to verify ring
+wrap, synchronous reuse, delayed-completion back-pressure, accepted prefixes, and
+suffix retry. Default pool tuning still requires hardware throughput measurements.
+
+Stream-method fixtures read the shared, RX, and TX implementation units. Complete
+methods are extracted by signature and their unindented closing brace, preserving
+the real bodies without depending on which implementation file contains the next
+method. Multi-method fixtures compose their required bodies explicitly. The SDK
+module builds and links all three units; these fixtures still use injected SDK
+operations and do not replace a real module build.
+
+The RX read boundary regression uses the real session/queue with a first-sample
+timestamp just below int64 nanosecond overflow. It consumes one sample, then
+checks that the next partial timestamp produces a stream error with cleared
+metadata and untouched output, even when diagnostics throw. CS16 and CF32 both
+recover after deactivation and reactivation with a representable epoch.

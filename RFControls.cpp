@@ -415,6 +415,7 @@ SoapySDR::Range SoapySidekiq::getGainRange(const int direction, const size_t cha
 void SoapySidekiq::setFrequency(const int direction, const size_t channel, const double frequency,
                                 const SoapySDR::Kwargs &args)
 {
+    (void)args; // Only direct RF tuning is implemented; no tuning arguments are advertised.
     validateChannel(direction, channel);
     int status = 0;
 
@@ -547,7 +548,8 @@ SoapySDR::RangeList SoapySidekiq::getFrequencyRange(const int direction, const s
         }
         if (min > max)
             throw std::runtime_error("skiq_read_rx_LO_freq_range returned an inverted range");
-        results.push_back(SoapySDR::Range(min, max));
+        // SDK bounds are integers; the SoapySDR range ABI uses doubles.
+        results.push_back(SoapySDR::Range(static_cast<double>(min), static_cast<double>(max)));
     }
     else if (direction == SOAPY_SDR_TX)
     {
@@ -562,7 +564,8 @@ SoapySDR::RangeList SoapySidekiq::getFrequencyRange(const int direction, const s
         }
         if (min > max)
             throw std::runtime_error("skiq_read_tx_LO_freq_range returned an inverted range");
-        results.push_back(SoapySDR::Range(min, max));
+        // SDK bounds are integers; the SoapySDR range ABI uses doubles.
+        results.push_back(SoapySDR::Range(static_cast<double>(min), static_cast<double>(max)));
     }
     else
     {
