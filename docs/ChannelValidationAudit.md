@@ -64,6 +64,15 @@ covers normalization and rejection without SDK side effects. The
 opaque-handle lookup before dereference and invalid/foreign-token rejection.
 Their fake devices do not reproduce full SDK construction or hardware setup.
 
+[Concrete stream-token cases](../tests/sdk_integration/StreamTokenTests.cpp)
+now exercise all seven token-taking methods on the actual class with null,
+inaccessible, and closed tokens. No replacement allocation occurs before the
+closed-token checks, avoiding address-reuse ambiguity. Additional cases cover
+wrong directions, unsupported flags/times/bursts, invalid counts/buffers, and
+negative timeouts before SDK transfer. Scripted block-size queries and transmit
+attempts are recorded, and valid tokens remain usable after rejected controls.
+These supplement the focused fixtures and do not establish hardware behavior.
+
 `readStreamStatus` reports a stream-relative channel mask: bit zero identifies
 the sole channel in that stream, regardless of its logical device channel or
 SDK handle. Device-wide time APIs intentionally use the first mapped available

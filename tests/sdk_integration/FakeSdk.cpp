@@ -342,6 +342,10 @@ extern "C"
 
     int32_t skiq_read_rx_block_size(uint8_t, skiq_rx_stream_mode_t)
     {
+        std::lock_guard<std::mutex> lock(mutex);
+        const int status = record("skiq_read_rx_block_size");
+        if (status != 0)
+            return status;
         return static_cast<int32_t>(SKIQ_RX_HEADER_SIZE_IN_BYTES + 8);
     }
 
@@ -451,6 +455,9 @@ extern "C"
     int32_t skiq_transmit(uint8_t, skiq_tx_hdl_t, skiq_tx_block_t *block, void *context)
     {
         std::lock_guard<std::mutex> lock(mutex);
+        const int forced_status = record("skiq_transmit");
+        if (forced_status != 0)
+            return forced_status;
         if (!script.tx_active || script.callback == nullptr)
             return -EINVAL;
         if (!script.send_results.empty())
