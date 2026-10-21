@@ -18,6 +18,7 @@
 #include <cstring>
 #include <cinttypes>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -322,6 +323,11 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("skiq_read_num_rx_chans failed (card " + std::to_string(card) +
                                  ", status " + std::to_string(status) + ")");
     }
+    if (channels > std::size(param.rx_param))
+        throw std::runtime_error("skiq_read_num_rx_chans returned too many channels (card " +
+                                 std::to_string(card) + ", channels " + std::to_string(channels) +
+                                 ", table capacity " + std::to_string(std::size(param.rx_param)) +
+                                 ")");
     num_rx_channels = channels;
 
     for (size_t chan = 0; chan < num_rx_channels; chan++)
@@ -338,6 +344,11 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("skiq_read_num_tx_chans failed (card " + std::to_string(card) +
                                  ", status " + std::to_string(status) + ")");
     }
+    if (channels > std::size(param.tx_param))
+        throw std::runtime_error("skiq_read_num_tx_chans returned too many channels (card " +
+                                 std::to_string(card) + ", channels " + std::to_string(channels) +
+                                 ", table capacity " + std::to_string(std::size(param.tx_param)) +
+                                 ")");
     num_tx_channels = channels;
     for (size_t chan = 0; chan < num_tx_channels; chan++)
     {

@@ -372,6 +372,16 @@ target_link_libraries(antenna_tests PRIVATE non_hardware_test_options)
 add_test(NAME antenna.all COMMAND antenna_tests)
 set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
 
+extract_settings_method(constructor_counts "    status = skiq_read_num_rx_chans("
+    "    uint8_t tmp_resolution")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ConstructorChannelCounts.inc" "${constructor_counts}")
+add_executable(constructor_channel_count_tests support/TestMain.cpp component/ConstructorChannelCountTests.cpp)
+target_include_directories(constructor_channel_count_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(constructor_channel_count_tests PRIVATE non_hardware_test_options)
+add_test(NAME constructor-channel-counts.all COMMAND constructor_channel_count_tests)
+set_tests_properties(constructor-channel-counts.all PROPERTIES LABELS "component;non-hardware")
+
 extract_settings_method(topology_configuration "    if (options.topology.has_value())"
     "    status = skiq_read_parameters(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TopologyConfiguration.inc" "${topology_configuration}")
@@ -570,7 +580,7 @@ endif()
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
-            topology_configuration_tests channel_metadata_tests
+            constructor_channel_count_tests topology_configuration_tests channel_metadata_tests
             identification_tests sensor_metadata_tests
             sample_rate_capability_tests frequency_tests
             rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests
