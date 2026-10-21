@@ -28,6 +28,20 @@ as the local naming and ownership reference:
 These are conventions for focused new work. Existing code has formatting and
 warning debt; adopting the baseline does not authorize a whole-tree rewrite.
 
+## Device implementation boundary
+
+Applications use the SoapySDR device and opaque stream API. The root
+`SoapySidekiq.hpp` declares the module's concrete implementation; it is not an
+installed application header. Keep stream tokens, callback contexts, workers,
+and completion helpers private. Portable reusable contracts belong under
+`include/SoapySidekiq` and are tested independently of device construction.
+
+Forward-declare owned implementation types where their definitions are only
+needed by out-of-line methods. Include those definitions directly in the source
+files that use them. The device constructor and destructor stay out of line so
+its `unique_ptr` owners can destroy forward-declared RX types with complete
+definitions. The SDK types stored by value still require the SDK header.
+
 ## Reproducible tool versions
 
 The initial Linux CI baseline is Ubuntu 22.04, GCC **11**, Clang **14**,

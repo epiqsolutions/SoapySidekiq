@@ -11,6 +11,7 @@
 #include <limits>
 
 #include "SoapySidekiq.hpp"
+#include <SoapySidekiq/RxStreamSession.hpp>
 #include <exception>
 #include <SoapySDR/Formats.hpp>
 #include <SoapySidekiq/Diagnostic.hpp>
