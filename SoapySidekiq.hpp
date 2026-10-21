@@ -485,14 +485,14 @@ class SoapySidekiq : public SoapySDR::Device
      * Callers serialize writes; tx_mutex does not protect this index or payload access.
      * Individual slot reservations are protected by tx_completion->mutex.
      */
-    uint32_t currTXBuffIndex{};
+    uint32_t tx_block_index{};
 
     /** Consume an accepted context without device access or unwinding through the SDK. */
     static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                      void *p_user) noexcept;
 
     /** Per-send context: owned by writeStream until accepted, then by completion. */
-    struct passedStruct
+    struct TxSendContext
     {
         /** Retain this stream's reservations and notification state through late completion. */
         std::shared_ptr<TxCompletion> completion;

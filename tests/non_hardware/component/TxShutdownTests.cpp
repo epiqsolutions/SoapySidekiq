@@ -146,24 +146,24 @@ class SoapySidekiq
     };
     using TxCompletion = soapy_sidekiq::TxCompletionState<>;
     using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
-    struct passedStruct
+    struct TxSendContext
     {
         inline static unsigned live{};
         std::shared_ptr<TxCompletion> completion;
         std::shared_ptr<skiq_tx_block_t> block;
         std::uint32_t txIndex{};
-        passedStruct()
+        TxSendContext()
         {
             ++live;
         }
-        ~passedStruct()
+        ~TxSendContext()
         {
             --live;
         }
     };
     std::uint8_t card{3};
     std::uint32_t tx_buffer_count{DEFAULT_NUM_BUFFERS};
-    std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
+    std::uint32_t current_tx_block_size{252}, tx_block_index{};
     std::mutex tx_mutex;
     ObservedCondition tx_cv;
     std::timed_mutex tx_status_mutex;
@@ -419,7 +419,7 @@ TEST_CASE(
     for (const bool unexpected_slot : {false, true})
     {
         auto device = std::make_unique<SoapySidekiq>();
-        auto context = std::make_unique<SoapySidekiq::passedStruct>();
+        auto context = std::make_unique<SoapySidekiq::TxSendContext>();
         context->completion = device->tx_completion;
         context->block = device->tx_blocks->block(0);
         context->completion->slots[0] = unexpected_slot ? 0 : 1;
@@ -438,7 +438,7 @@ TEST_CASE(
         sdk.throw_log = true;
         device.reset();
         REQUIRE_EQ(sdk.exits, 1u);
-        REQUIRE_EQ(SoapySidekiq::passedStruct::live, 1u);
+        REQUIRE_EQ(SoapySidekiq::TxSendContext::live, 1u);
         REQUIRE_EQ(skiq_tx_block_t::live, 1u);
         REQUIRE(!bookkeeping.expired());
         REQUIRE(!block.expired());
@@ -448,7 +448,7 @@ TEST_CASE(
         SoapySidekiq::tx_complete_callback(0, data, completing);
         REQUIRE_EQ(observed->completed, std::uint64_t{1});
         REQUIRE_EQ(observed->slots[0], 0);
-        REQUIRE_EQ(SoapySidekiq::passedStruct::live, 0u);
+        REQUIRE_EQ(SoapySidekiq::TxSendContext::live, 0u);
         REQUIRE_EQ(skiq_tx_block_t::live, 0u);
         REQUIRE(block.expired());
         observed.reset();
