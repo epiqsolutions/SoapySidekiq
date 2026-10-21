@@ -44,13 +44,22 @@
 #define SKIQ_TX_ASYNC_SEND_QUEUE_FULL 1
 #define DEFAULT_NUM_BUFFERS 3
 std::function<void()> log_hook;
-static void completionLog()
+// Evaluate diagnostic arguments as the real logging API does, even for a quiet sink.
+enum
+{
+    SOAPY_SDR_TRACE,
+    SOAPY_SDR_DEBUG,
+    SOAPY_SDR_INFO,
+    SOAPY_SDR_WARNING,
+    SOAPY_SDR_ERROR
+};
+template <typename... Args> static void completionLog(int, const char *, Args &&...)
 {
     if (log_hook)
         log_hook();
 }
-#define SoapySDR_logf(...) completionLog()
-#define SoapySDR_log(...) completionLog()
+#define SoapySDR_logf(...) completionLog(__VA_ARGS__)
+#define SoapySDR_log(...) completionLog(__VA_ARGS__)
 
 namespace SoapySDR { struct Stream {}; }
 struct skiq_tx_block_t
@@ -280,7 +289,7 @@ public:
   std::vector<std::vector<std::int16_t>> transmitted;
   bool complete_on_worker{};
   bool defer_completion{};
-  std::vector<passedStruct *> pending;
+  std::vector<passedStruct *> deferred_contexts;
   std::vector<int> send_results;
   std::size_t attempts{};
   bool reject_notifies{true};
@@ -296,7 +305,7 @@ public:
     {
         if (_tx_streaming_thread.joinable())
             _tx_streaming_thread.join();
-        for (auto *context : pending)
+        for (auto *context : deferred_contexts)
             delete context;
     }
 
@@ -353,7 +362,7 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
     device.transmitted.emplace_back(block->data, block->data + 2 * device.current_tx_block_size);
     if (device.defer_completion)
     {
-        device.pending.push_back(context);
+        device.deferred_contexts.push_back(context);
         return 0;
     }
     if (device.complete_on_worker)
@@ -670,17 +679,17 @@ TEST_CASE("accepted TX contexts survive submission until out-of-order completion
     REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
                                   2 * device.current_tx_block_size, flags, 0, 0),
                static_cast<int>(2 * device.current_tx_block_size));
-    REQUIRE_EQ(device.pending.size(), std::size_t{2});
+    REQUIRE_EQ(device.deferred_contexts.size(), std::size_t{2});
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{2});
     REQUIRE_EQ(device.tx_completion->slots[0], 1);
     REQUIRE_EQ(device.tx_completion->slots[1], 1);
-    for (auto it = device.pending.rbegin(); it != device.pending.rend(); ++it)
+    for (auto it = device.deferred_contexts.rbegin(); it != device.deferred_contexts.rend(); ++it)
     {
         auto *context = *it;
         device.tx_complete(0, device.tx_blocks->block(context->txIndex).get(), context->txIndex);
         delete context;
     }
-    device.pending.clear();
+    device.deferred_contexts.clear();
     REQUIRE_EQ(device.tx_completion->slots[0], 0);
     REQUIRE_EQ(device.tx_completion->slots[1], 0);
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
@@ -1483,15 +1492,18 @@ TEST_CASE("hard TX submission failures preserve accepted prefixes and permit exa
             REQUIRE_EQ(device.currTXBuffIndex, static_cast<std::uint32_t>(accepted));
             REQUIRE_EQ(device.tx_completion->slots[accepted], 0);
             REQUIRE_EQ(passedStruct::live.load(), deferred ? accepted : std::size_t{0});
-            const void *suffix[]{input.data() + 2 * prefix};
-            REQUIRE_EQ(device.writeStream(stream, suffix, 3 * block - prefix, flags, 0, 0),
-                       static_cast<int>(3 * block - prefix));
+            // The preceding assertion establishes a positive in-range accepted prefix.
+            const auto prefix_samples = static_cast<std::size_t>(prefix);
+            const void *suffix[]{input.data() + 2 * prefix_samples};
+            REQUIRE_EQ(device.writeStream(stream, suffix, 3 * block - prefix_samples, flags, 0, 0),
+                       static_cast<int>(3 * block - prefix_samples));
             REQUIRE_EQ(device.transmitted.size(), std::size_t{3});
             for (std::size_t packet = 0; packet < 3; ++packet)
             {
                 const auto first = input.begin() + static_cast<std::ptrdiff_t>(2 * block * packet);
                 REQUIRE(device.transmitted[packet] ==
-                        std::vector<std::int16_t>(first, first + 2 * block));
+                        std::vector<std::int16_t>(first,
+                                                  first + static_cast<std::ptrdiff_t>(2 * block)));
             }
             REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
             REQUIRE_EQ(passedStruct::live.load(), deferred ? std::size_t{3} : std::size_t{0});
@@ -1643,9 +1655,9 @@ TEST_CASE(
     REQUIRE_EQ(device->writeStream(reinterpret_cast<SoapySDR::Stream *>(&device->handle), buffers,
                                    device->current_tx_block_size, flags, 0, 100000),
                static_cast<int>(device->current_tx_block_size));
-    REQUIRE_EQ(device->pending.size(), std::size_t{1});
-    auto *context = device->pending.back();
-    device->pending.clear(); // The simulated SDK retains this accepted context.
+    REQUIRE_EQ(device->deferred_contexts.size(), std::size_t{1});
+    auto *context = device->deferred_contexts.back();
+    device->deferred_contexts.clear(); // The simulated SDK retains this accepted context.
     const std::weak_ptr<TxCompletion> retained = device->tx_completion;
     const std::weak_ptr<skiq_tx_block_t> retained_block = context->block;
     device.reset();
@@ -1723,9 +1735,9 @@ TEST_CASE("closing TX retains accepted blocks until completion and isolates a re
     int flags = 0;
     REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 100000),
                static_cast<int>(device.current_tx_block_size));
-    REQUIRE_EQ(device.pending.size(), std::size_t{1});
-    std::unique_ptr<passedStruct> accepted(device.pending.back());
-    device.pending.clear();
+    REQUIRE_EQ(device.deferred_contexts.size(), std::size_t{1});
+    std::unique_ptr<passedStruct> accepted(device.deferred_contexts.back());
+    device.deferred_contexts.clear();
     const std::weak_ptr<skiq_tx_block_t> retained = accepted->block;
     stop_status = 0;
     REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
@@ -1829,14 +1841,14 @@ TEST_CASE("small TX pools retain accepted prefixes under back-pressure and retry
         const auto accepted = device.writeStream(
             stream, buffers, (count + 1) * device.current_tx_block_size, flags, 0, 0);
         REQUIRE_EQ(accepted, static_cast<int>(count * device.current_tx_block_size));
-        REQUIRE_EQ(device.pending.size(), static_cast<std::size_t>(count));
-        for (auto *context : device.pending)
+        REQUIRE_EQ(device.deferred_contexts.size(), static_cast<std::size_t>(count));
+        for (auto *context : device.deferred_contexts)
         {
             auto *block = context->block.get();
             REQUIRE_EQ(block->data[0], 41);
             device.tx_complete_callback(0, block, context);
         }
-        device.pending.clear();
+        device.deferred_contexts.clear();
         device.defer_completion = false;
         const void *suffix[]{input.data() + 2 * accepted};
         REQUIRE_EQ(
