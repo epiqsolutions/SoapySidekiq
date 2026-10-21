@@ -172,12 +172,11 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     tx_buffer_count = options.tx_buffer_count;
     tx_completion = std::make_shared<TxCompletion>(tx_buffer_count);
 
-    /* Register our own logging function before initializing the library */
+    // Initialization can emit SDK diagnostics, so register the adapter first.
     skiq_register_logging(logging_handler);
 
     SoapySDR_logf(SOAPY_SDR_TRACE, "in constructor", card);
 
-    /* We need to set some default parameters in case the user does not */
     rxUseShort = true;
     txUseShort = true;
     iq_swap = true;
@@ -196,7 +195,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
     SoapySDR_logf(SOAPY_SDR_INFO, "Sidekiq opening card %u", card);
 
-    /* init sidekiq */
     status = skiq_init(type, level, &card, 1);
     if (status != 0)
     {
@@ -257,7 +255,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
     SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, part type is %s", card, part_str.c_str());
 
-    /* set iq order to iq instead of qi */
     if (iq_swap)
     {
         SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, setting iq mode to I then Q", this->card);
@@ -322,7 +319,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
     uint8_t rx_resolution = 0;
 
-    /* Every card can have a different iq resolution.  */
+    // Use the selected card's ADC width rather than assuming full 16-bit samples.
     status = skiq_read_rx_iq_resolution(card, &rx_resolution);
     if (status != 0)
     {

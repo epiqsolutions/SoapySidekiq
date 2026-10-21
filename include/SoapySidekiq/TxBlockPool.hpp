@@ -30,7 +30,7 @@ namespace soapy_sidekiq
 template <typename Block> class TxBlockPool
 {
   public:
-    /** Allocate count blocks of samples complex samples each, or unwind completely. */
+    /** Allocate count blocks, each holding samples complex samples; unwind on failure. */
     template <typename Allocate, typename Release>
     TxBlockPool(std::size_t count, std::uint32_t samples, Allocate allocate, Release release)
     {

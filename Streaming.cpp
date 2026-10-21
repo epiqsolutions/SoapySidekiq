@@ -157,7 +157,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction, const std::stri
         }
         SoapySDR_logf(SOAPY_SDR_INFO, "System Timestamp Freq: %llu", this->sys_freq);
 
-        /* set rx source as iq data */
         if (iq_swap)
         {
             status = skiq_write_iq_order_mode(card, skiq_iq_order_iq);
@@ -174,7 +173,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction, const std::stri
             SoapySDR_logf(SOAPY_SDR_INFO, "RX is set to I then Q order");
         }
 
-        /* set a modest rx timeout to make skiq_receive blocking*/
+        // Bound each blocking receive so the worker can observe its stop request.
         status = skiq_set_rx_transfer_timeout(card, 100000);
         if (status != 0)
         {
@@ -431,7 +430,6 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
 
         const skiq_tx_hdl_t tx_handle = stream_handle->tx_handle;
 
-        /* set as iq data */
         if (iq_swap)
         {
             status = skiq_write_iq_order_mode(card, skiq_iq_order_iq);
@@ -512,7 +510,6 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
         // A new activation must not inherit a failed PPS start's write gate.
         first_transmit = false;
 
-        /* start tx streaming */
         if (flags == SOAPY_SDR_HAS_TIME)
         {
             /* The SDK call blocks until the PPS edge. Keep activateStream

@@ -1,17 +1,17 @@
 # Development update release notes
 
 Unreleased draft, 2026-10-21. Integration status checked against master
-`7370025cb7acf130588086b576904360069a70d5`: the TX ownership stack
-([#110](https://github.com/epiqsolutions/SoapySidekiq/pull/110)), diagnostic
-containment ([#107](https://github.com/epiqsolutions/SoapySidekiq/pull/107)), stream
-decomposition ([#104](https://github.com/epiqsolutions/SoapySidekiq/pull/104)), and
-private device boundary ([#111](https://github.com/epiqsolutions/SoapySidekiq/pull/111))
-are on master, together with the compatibility fixes and component formatting
-in [#114](https://github.com/epiqsolutions/SoapySidekiq/pull/114),
-[#115](https://github.com/epiqsolutions/SoapySidekiq/pull/115), and
-[#116](https://github.com/epiqsolutions/SoapySidekiq/pull/116).
-Draft card/API contributions #80–#86 remain pending. Pin the final release commit
-and refresh the validation matrix before publishing a release. No new hardware
+`d5424eac7fb93a603a237ff7fbd92ac1ba53421c`, through #135. The TX ownership,
+diagnostic containment, source decomposition, private device boundary, legacy
+SoapySDR compatibility, and production/fixture cleanup are merged. Later work
+adds RF/session interaction coverage, documented SDK lifetime evidence, and an
+optional concrete-driver integration test with a scripted SDK.
+
+Draft card/API contributions #80–#86 are excluded from the current software
+completion pass. They remain pending and are not included in these capability
+claims. See the [software closeout record](validation/2026-10-21-software-closeout.md)
+for the exact checked source and remaining gates. Pin the final release commit
+and refresh its validation matrix before publishing a release. No new hardware
 run is claimed here.
 
 ## Behavior changes and fixes
@@ -37,15 +37,26 @@ run is claimed here.
   their supported choices and report backend operation/status. Configuration
   changes that affect RX rate/timing require successful RX deactivation first.
   See the [main README](../README.md) for individual API contracts and the
-  [channel audit](https://github.com/epiqsolutions/SoapySidekiq/pull/113) for the audited entry points.
+  [channel audit](ChannelValidationAudit.md) for the audited entry points.
 - Stream errors and timeouts use SoapySDR status results. Integrated diagnostic
   containment keeps a failing log sink from replacing a stream result or
   accepted TX prefix. Control APIs retain throwing error boundaries; sensors
   retain their documented legacy fallback values; C callbacks contain exceptions.
+- RF setters and activation use validated fresh SDK readback; unused retained
+  rate/bandwidth snapshots have been removed. Scripted RF/session tests cover
+  RX ownership rejection, failed-stop retention, coupled-clock updates, and
+  fresh fractional-rate timestamps on restart. Physical RF continuity is a
+  separate hardware check.
 - The build uses C++17, target-scoped SDK linkage/warnings, configurable
   toolchains, SDK-free test presets, sanitizer presets, and isolated installs.
   Examples use finite operation and explicit cleanup, with a noninteractive
   hardware API diagnostic available under `tests/hardware`.
+
+- The optional [concrete-driver test](../tests/sdk_integration/README.md)
+  compiles the real device, registry adapter, backend, and lifecycle owners
+  against installed SDK headers without linking the SDK library or opening
+  hardware. It supplements the detailed portable fixtures; it does not emulate
+  SDK transport, physical PPS timing, or multiple-device SDK ownership.
 
 ## Compatibility and remaining limits
 
@@ -87,8 +98,8 @@ run is claimed here.
 
 | Environment | Evidence and scope |
 | --- | --- |
-| Linux x86, GCC 11 / Clang 14, SDK 4.26, SoapySDR 0.8.1 | Repeated full module build/link, isolated install, and module-load checks during the series. Portable normal/ASan-UBSan cases and CI cover focused components; totals vary by PR and must be rerun on the final tree. |
-| Linux x86, GCC 11, SDK 4.26, SoapySDR 0.4.0 | PRs #114/#115 build against the real tagged library, verify ABI `0.4-2`, module loading, install relocation, and staging. No hardware opened with this SoapySDR version. |
+| Linux x86, GCC 11 / Clang 14, SDK 4.26, SoapySDR 0.8.1 | Software closeout checks the full module build/link, isolated install, and loading. All 482 portable cases pass with GCC, Clang, and ASan/UBSan. Three separate concrete-driver cases pass with GCC, Clang, and ASan/UBSan. Hardware behavior and the final release tree remain separate. |
+| Linux x86, GCC 11, SDK 4.26, SoapySDR 0.4.0 | The real tagged library, ABI `0.4-2`, builds/loads the module and runs all three scripted concrete-driver cases. Earlier #114/#115/checkpoint evidence covers relocation and staging. No hardware opened with this SoapySDR version. |
 | AArch64 GCC 11.4, SDK 4.26, target-built SoapySDR | Full cross-build/link/install and ELF checks passed during the series. Target execution and final release-tree validation remain separate. |
 | TSan | Instrumented binaries build; this host cannot start the runtime because of an unexpected memory mapping. A compatible-host run remains required. |
 
