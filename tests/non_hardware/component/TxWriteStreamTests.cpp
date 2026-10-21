@@ -155,8 +155,11 @@ int skiq_start_tx_streaming(std::uint8_t, unsigned)
     return recordActivation("start");
 }
 int pps_start_status{};
+std::function<void()> pps_start_hook;
 int skiq_start_tx_streaming_on_1pps(std::uint8_t, skiq_tx_hdl_t, int)
 {
+    if (pps_start_hook)
+        pps_start_hook();
     return pps_start_status;
 }
 std::vector<std::uint32_t> underrun_counts;
@@ -298,7 +301,7 @@ public:
     std::timed_mutex tx_status_mutex;
     std::uint32_t tx_underruns{};
     int readStreamStatus(SoapySDR::Stream *, std::size_t &, int &, long long &, long);
-    void tx_streaming_start(skiq_tx_hdl_t);
+    void tx_streaming_start(skiq_tx_hdl_t) noexcept;
     int writeStream(SoapySDR::Stream *, const void *const *, std::size_t,
                     int &, long long, long);
     static void completeTx(const std::shared_ptr<TxCompletion> &, std::uint32_t);
@@ -1837,4 +1840,110 @@ TEST_CASE("small TX pools retain accepted prefixes under back-pressure and retry
             static_cast<int>(device.current_tx_block_size));
         REQUIRE_EQ(device.tx_completion->completed, static_cast<std::uint64_t>(count + 1));
     }
+}
+
+TEST_CASE("writes before first activation reject admission without waiting or submitting")
+{
+    SoapySidekiq device;
+    // Match the device's constructed/setup state: a token exists, but the
+    // activation path has not opened admission or completed a startup gate.
+    device.tx_stream_active = false;
+    device.tx_writes_stopping = true;
+    device.first_transmit = true;
+    device.tx_start_finished = false;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    for (const std::size_t count : {std::size_t{0}, std::size_t{device.current_tx_block_size}})
+        REQUIRE_EQ(device.writeStream(stream, buffers, count, flags, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE(device.transmitted.empty());
+    REQUIRE(device.tx_cv.deadlines.empty());
+    REQUIRE(device.tx_completion->changed.deadlines.empty());
+    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("immediate and PPS deactivation keep empty and nonempty writes outside admission")
+{
+    for (const int stop_flags : {0, SOAPY_SDR_HAS_TIME})
+    {
+        SoapySidekiq device;
+        auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+        stop_status = 0;
+        stop_calls = 0;
+        REQUIRE_EQ(device.deactivateStream(stream, stop_flags, 0), 0);
+        REQUIRE_EQ(stop_calls, 1);
+        REQUIRE(!device.tx_stream_active);
+        REQUIRE(device.tx_writes_stopping);
+        REQUIRE(device.active_tx_stream.get() == &device.handle);
+        const auto prior_waits = device.tx_completion->changed.deadlines.size();
+        std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+        const void *buffers[]{input.data()};
+        int flags = 0;
+        for (const std::size_t count : {std::size_t{0}, std::size_t{device.current_tx_block_size}})
+            REQUIRE_EQ(device.writeStream(stream, buffers, count, flags, 0, 0),
+                       SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_EQ(device.tx_completion->changed.deadlines.size(), prior_waits);
+        REQUIRE(device.tx_cv.deadlines.empty());
+        REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+        REQUIRE_EQ(device.attempts, std::size_t{0});
+        REQUIRE(device.transmitted.empty());
+        REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
+        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    }
+}
+
+TEST_CASE("PPS worker publishes success before a throwing reentrant diagnostic sink")
+{
+    SoapySidekiq device;
+    pps_start_status = 0;
+    pps_start_hook = {};
+    device.tx_underruns = 99;
+    bool logged = false, published = false;
+    soapy_sidekiq::ScopeExit restore([]() noexcept { log_hook = {}; });
+    log_hook = [&]
+    {
+        std::scoped_lock lock(device.tx_mutex, device.tx_status_mutex);
+        logged = true;
+        published =
+            device.tx_start_finished && device.tx_start_status == 0 && device.tx_underruns == 0;
+        throw std::runtime_error("diagnostic sink failed");
+    };
+    std::thread worker([&] { device.tx_streaming_start(7); });
+    worker.join();
+    REQUIRE(logged);
+    REQUIRE(published);
+    REQUIRE(device.tx_start_finished);
+    REQUIRE_EQ(device.tx_start_status, 0);
+}
+
+TEST_CASE("unexpected PPS backend exceptions wake writers with a retained startup error")
+{
+    SoapySidekiq device;
+    device.first_transmit = true;
+    device.tx_start_finished = false;
+    soapy_sidekiq::ScopeExit restore(
+        []() noexcept
+        {
+            pps_start_hook = {};
+            wait_hook = {};
+        });
+    pps_start_hook = [] { throw std::runtime_error("backend failed"); };
+    wait_hook = [&] { device.tx_streaming_start(7); };
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 1000000),
+               SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(device.tx_start_finished);
+    REQUIRE_EQ(device.tx_start_status, SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(device.first_transmit);
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 0),
+               SOAPY_SDR_STREAM_ERROR);
 }
