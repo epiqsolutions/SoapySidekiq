@@ -22,13 +22,13 @@
 #include <SoapySDR/Types.hpp>
 #include <SoapySDR/Version.h>
 #include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/DeviceOptions.hpp>
 #include <SoapySidekiq/TxCompletionState.hpp>
 #include <SoapySidekiq/TxBlockPool.hpp>
 
 inline constexpr int DEFAULT_SAMPLE_RATE = 20000000;
 inline constexpr int DEFAULT_BANDWIDTH = 18000000;
 inline constexpr int DEFAULT_FREQUENCY = 1000000000;
-inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
 inline constexpr int DEFAULT_SLEEP_US = 1;
 inline constexpr int SLEEP_1SEC = 1000000;
 inline constexpr unsigned long long NANOS_IN_SEC = 1000000000ULL;
@@ -320,9 +320,9 @@ class SoapySidekiq : public SoapySDR::Device
     //  tx
     std::mutex tx_mutex;
     std::condition_variable tx_cv;
+    std::uint32_t tx_buffer_count{soapy_sidekiq::defaultTxBufferCount};
     using TxCompletion = soapy_sidekiq::TxCompletionState<>;
-    std::shared_ptr<TxCompletion> tx_completion{
-        std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS)};
+    std::shared_ptr<TxCompletion> tx_completion;
     // Written with tx_mutex and tx_completion->mutex held; read with either held.
     bool tx_writes_stopping{true};
     std::size_t active_tx_writers{};        // Guarded by tx_completion->mutex.

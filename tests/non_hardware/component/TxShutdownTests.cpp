@@ -113,6 +113,7 @@ class SoapySidekiq
     using TxCompletion = soapy_sidekiq::TxCompletionState<>;
     using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
     std::uint8_t card{3};
+    std::uint32_t tx_buffer_count{DEFAULT_NUM_BUFFERS};
     std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
     std::mutex tx_mutex;
     std::condition_variable tx_cv;

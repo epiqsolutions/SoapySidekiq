@@ -403,8 +403,8 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
 
 void SoapySidekiq::initializeTxBuffers()
 {
-    auto completion = std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS);
-    auto blocks = std::make_unique<TxBlocks>(DEFAULT_NUM_BUFFERS, current_tx_block_size,
+    auto completion = std::make_shared<TxCompletion>(tx_buffer_count);
+    auto blocks = std::make_unique<TxBlocks>(tx_buffer_count, current_tx_block_size,
                                              skiq_tx_block_allocate, skiq_tx_block_free);
     tx_completion = std::move(completion);
     tx_blocks = std::move(blocks);
@@ -1040,7 +1040,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             curr_block++;
 
             // move the index into the transmit block array
-            currTXBuffIndex = (currTXBuffIndex + 1) % DEFAULT_NUM_BUFFERS;
+            currTXBuffIndex = (currTXBuffIndex + 1) % tx_buffer_count;
 
             // move the pointer to the next block in the writeStream buffer
             inbuff_ptr += input_block_bytes;

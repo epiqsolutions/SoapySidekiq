@@ -254,6 +254,7 @@ public:
     std::thread _tx_streaming_thread;
     bool first_transmit{false}, txUseShort{false}, iq_swap{true};
     std::uint32_t p_tx_block_index{};
+    std::uint32_t tx_buffer_count{DEFAULT_NUM_BUFFERS};
     std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
     std::uint8_t card{};
     double maxValue{32767};
@@ -334,7 +335,7 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
         // earlier queued packet completing during this SDK call.
         if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL && device.reject_notifies)
         {
-            const auto prior_index = (context->txIndex + 1) % DEFAULT_NUM_BUFFERS;
+            const auto prior_index = (context->txIndex + 1) % device.tx_buffer_count;
             {
                 std::lock_guard<std::mutex> lock(device.tx_completion->mutex);
                 device.tx_completion->slots[prior_index] = 1;
@@ -1700,4 +1701,65 @@ TEST_CASE("throwing diagnostics after immediate TX start retain ownership for de
     REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
     REQUIRE_EQ(stop_calls, before + 1);
     REQUIRE(!device.tx_stream_active);
+}
+
+TEST_CASE("configured small TX pools wrap their own ring across synchronous multi-block writes")
+{
+    for (const std::uint32_t count : {1u, 2u})
+    {
+        SoapySidekiq device;
+        device.tx_buffer_count = count;
+        device.initializeTxBuffers();
+        device.tx_completion->fixture_owner = &device;
+        device.txUseShort = true;
+        REQUIRE_EQ(device.tx_completion->slots.size(), static_cast<std::size_t>(count));
+        std::vector<std::int16_t> input(12 * device.current_tx_block_size);
+        for (std::size_t block = 0; block < 6; ++block)
+            std::fill_n(input.begin() +
+                            static_cast<std::ptrdiff_t>(2 * block * device.current_tx_block_size),
+                        2 * device.current_tx_block_size, static_cast<std::int16_t>(block + 1));
+        const void *buffers[]{input.data()};
+        int flags = 0;
+        REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                      6 * device.current_tx_block_size, flags, 0, 100000),
+                   static_cast<int>(6 * device.current_tx_block_size));
+        REQUIRE_EQ(device.currTXBuffIndex, 6u % count);
+        REQUIRE_EQ(device.transmitted.size(), std::size_t{6});
+        for (std::size_t block = 0; block < 6; ++block)
+            REQUIRE_EQ(device.transmitted[block].front(), static_cast<std::int16_t>(block + 1));
+    }
+}
+
+TEST_CASE("small TX pools retain accepted prefixes under back-pressure and retry the suffix")
+{
+    for (const std::uint32_t count : {1u, 2u})
+    {
+        SoapySidekiq device;
+        device.tx_buffer_count = count;
+        device.initializeTxBuffers();
+        device.tx_completion->fixture_owner = &device;
+        device.txUseShort = true;
+        device.defer_completion = true;
+        std::vector<std::int16_t> input(2 * (count + 1) * device.current_tx_block_size, 41);
+        const void *buffers[]{input.data()};
+        int flags = 0;
+        auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+        const auto accepted = device.writeStream(
+            stream, buffers, (count + 1) * device.current_tx_block_size, flags, 0, 0);
+        REQUIRE_EQ(accepted, static_cast<int>(count * device.current_tx_block_size));
+        REQUIRE_EQ(device.pending.size(), static_cast<std::size_t>(count));
+        for (auto *context : device.pending)
+        {
+            auto *block = context->block.get();
+            REQUIRE_EQ(block->data[0], 41);
+            device.tx_complete_callback(0, block, context);
+        }
+        device.pending.clear();
+        device.defer_completion = false;
+        const void *suffix[]{input.data() + 2 * accepted};
+        REQUIRE_EQ(
+            device.writeStream(stream, suffix, device.current_tx_block_size, flags, 0, 100000),
+            static_cast<int>(device.current_tx_block_size));
+        REQUIRE_EQ(device.tx_completion->completed, static_cast<std::uint64_t>(count + 1));
+    }
 }

@@ -149,3 +149,8 @@ and joining a pending PPS worker before stop. A production activation case
 checks that a post-start diagnostic failure preserves TX hardware ownership.
 The pending worker is released by the fixture; no bounded SDK PPS cancellation
 or guarantee of callback delivery is established.
+
+Constructor-option tests bound `tx_buffer_count` to 1–30000 and reject malformed
+values. Production writer cases use one- and two-block pools to verify ring
+wrap, synchronous reuse, delayed-completion back-pressure, accepted prefixes, and
+suffix retry. Default pool tuning still requires hardware throughput measurements.

@@ -176,6 +176,8 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     skiq_iq_order_t iq_order;
     // Reject all malformed constructor input before registering or opening SDK state.
     const auto options = soapy_sidekiq::parseDeviceOptions(args);
+    tx_buffer_count = options.tx_buffer_count;
+    tx_completion = std::make_shared<TxCompletion>(tx_buffer_count);
 
     /* Register our own logging function before initializing the library */
     skiq_register_logging( logging_handler );

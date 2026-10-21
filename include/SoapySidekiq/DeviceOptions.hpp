@@ -16,6 +16,10 @@ namespace soapy_sidekiq
 /** Default Sidekiq TX payload size used when no constructor override is given. */
 inline constexpr std::uint32_t defaultTxBlockSize = 16380;
 
+/** Preserve the legacy pool by default while bounding constructor overrides. */
+inline constexpr std::uint32_t defaultTxBufferCount = 30000;
+inline constexpr std::uint32_t maxTxBufferCount = 30000;
+
 /** SDK packet limits for the driver's unpacked, single-channel TX payload. */
 inline constexpr std::uint32_t txHeaderWords = 4;
 inline constexpr std::uint32_t txPacketIncrementWords = 256;
@@ -30,6 +34,8 @@ struct DeviceOptions
     std::optional<std::uint8_t> topology;
     /** TX block size in complex samples. */
     std::uint32_t tx_block_size{defaultTxBlockSize};
+    /** Number of preallocated host TX blocks, independent of payload size. */
+    std::uint32_t tx_buffer_count{defaultTxBufferCount};
     /** Optional Soapy clock-source name. */
     std::optional<std::string> clock_source;
     /** Optional Soapy time-source name. */
