@@ -292,7 +292,10 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_read_sys_timestamp_freq failed: (card %d), status %d",
                            card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_sys_timestamp_freq failed during RX setup (card " +
+                                     std::to_string(card) + ", channel " + std::to_string(channel) +
+                                     ", handle " + std::to_string(rx_handle) + ", status " +
+                                     std::to_string(status) + ")");
         }
         SoapySDR_logf(SOAPY_SDR_INFO, "System Timestamp Freq: %llu", this->sys_freq);
 
@@ -303,9 +306,12 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             if (status != 0)
             {
                 SoapySDR_logf(SOAPY_SDR_ERROR,
-                             "skiq_write_rx_data_src failed (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
+                              "skiq_write_iq_order_mode failed (card %u) status %d", card, status);
+                throw std::runtime_error(
+                    "skiq_write_iq_order_mode failed during RX setup (card " +
+                    std::to_string(card) + ", channel " + std::to_string(channel) + ", handle " +
+                    std::to_string(rx_handle) + ", IQ order I then Q, status " +
+                    std::to_string(status) + ")");
             }
             SoapySDR_logf(SOAPY_SDR_INFO, "RX is set to I then Q order");
         }
@@ -317,7 +323,10 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_set_rx_transfer_timeout failed, (card %u) status %d",
                           card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_set_rx_transfer_timeout failed during RX setup (card " +
+                                     std::to_string(card) + ", channel " + std::to_string(channel) +
+                                     ", handle " + std::to_string(rx_handle) +
+                                     ", timeout 100000 us, status " + std::to_string(status) + ")");
         }
 
         // Keep the handle locally owned until RX setup is ready to publish it.
@@ -368,7 +377,10 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_read_sys_timestamp_freq failed: (card %d), status %d",
                            card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_sys_timestamp_freq failed during TX setup (card " +
+                                     std::to_string(card) + ", channel " + std::to_string(channel) +
+                                     ", handle " + std::to_string(tx_handle) + ", status " +
+                                     std::to_string(status) + ")");
         }
 
         // Timestamp setup must succeed before committing TX memory ownership.
