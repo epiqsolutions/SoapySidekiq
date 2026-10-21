@@ -18,6 +18,7 @@
 #include <cstring>
 #include <cinttypes>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -80,17 +81,14 @@ void logging_handler(int32_t priority, const char *message) noexcept
     }
 }
 
-/*****************************************************************************/
-/** This is the callback function for once the data has completed being sent.
-    There is no guarantee that the complete callback will be in the order that
-    the data was sent, this function just increments the completion count and
-    signals the main thread that there is space available to send more packets.
-
-    @param status status of the transmit packet completed
-    @param p_block reference to the completed transmit block
-    @param p_user reference to the user data
-    @return void
-*/
+/**
+ * Release a reserved TX slot and publish progress before calling diagnostics.
+ * @param status SDK completion status; currently not interpreted here.
+ * @param p_data SDK block pointer; storage ownership is handled outside this method.
+ * @param txIndex Reserved slot index associated with the accepted submission.
+ * Completions may arrive out of order. The shared status lock protects slot
+ * availability and the progress counter used by writers waiting on queue space.
+ */
 void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex)
 {
     if (txIndex >= DEFAULT_NUM_BUFFERS || !p_tx_status)
@@ -163,15 +161,19 @@ skiq_tx_hdl_t SoapySidekiq::getFirstTxHandle(void) const
     return getTxHandle(0);
 }
 
+void SoapySidekiq::configureWhileRxInactive(const std::function<void()> &configure)
+{
+    if (rx_session != nullptr)
+        rx_session->configureInactive(configure);
+    else
+        configure();
+}
+
 // Acquire constructor callback resources as one transaction. No stream can be
 // active yet, so failed registration can be unwound before SDK initialization
 // is released by the constructor's outer rollback guard.
 void SoapySidekiq::initializeTxCallbacks()
 {
-    registerInstance(card, this);
-    soapy_sidekiq::ScopeExit registry_rollback([this]() noexcept
-                                               { unregisterInstance(card, this); });
-
     const int status =
         skiq_register_tx_complete_callback(card, &SoapySidekiq::tx_complete_callback);
     if (status != 0)
@@ -186,7 +188,6 @@ void SoapySidekiq::initializeTxCallbacks()
     // final potentially throwing operation in the device constructor.
     SoapySDR_logf(SOAPY_SDR_TRACE, "leaving constructor", card);
     callback_rollback.release();
-    registry_rollback.release();
 }
 
 // Constructor
@@ -322,6 +323,11 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("skiq_read_num_rx_chans failed (card " + std::to_string(card) +
                                  ", status " + std::to_string(status) + ")");
     }
+    if (channels > std::size(param.rx_param))
+        throw std::runtime_error("skiq_read_num_rx_chans returned too many channels (card " +
+                                 std::to_string(card) + ", channels " + std::to_string(channels) +
+                                 ", table capacity " + std::to_string(std::size(param.rx_param)) +
+                                 ")");
     num_rx_channels = channels;
 
     for (size_t chan = 0; chan < num_rx_channels; chan++)
@@ -338,6 +344,11 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("skiq_read_num_tx_chans failed (card " + std::to_string(card) +
                                  ", status " + std::to_string(status) + ")");
     }
+    if (channels > std::size(param.tx_param))
+        throw std::runtime_error("skiq_read_num_tx_chans returned too many channels (card " +
+                                 std::to_string(card) + ", channels " + std::to_string(channels) +
+                                 ", table capacity " + std::to_string(std::size(param.tx_param)) +
+                                 ")");
     num_tx_channels = channels;
     for (size_t chan = 0; chan < num_tx_channels; chan++)
     {
@@ -432,7 +443,6 @@ SoapySidekiq::~SoapySidekiq(void)
     delete active_rx_stream;
     active_rx_stream = nullptr;
 
-    unregisterInstance(card, this);
     skiq_register_tx_complete_callback(card, nullptr);
 
     p_tx_status.reset();

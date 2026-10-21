@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -143,6 +144,17 @@ class SoapySidekiq
     void validateChannel(int, std::size_t) const;
     skiq_rx_hdl_t getRxHandle(std::size_t) const;
     skiq_tx_hdl_t getTxHandle(std::size_t) const;
+    bool configuration_blocked{};
+    unsigned configuration_attempts{};
+    // Script the device/session boundary; the real ownership gate is covered
+    // by RxLifecycleTests and RxStreamSessionTests.
+    void configureWhileRxInactive(const std::function<void()> &configure)
+    {
+        ++configuration_attempts;
+        if (configuration_blocked)
+            throw std::logic_error("RX owns hardware");
+        configure();
+    }
     void setSampleRate(int, std::size_t, double);
     double getSampleRate(int, std::size_t) const;
     void setBandwidth(int, std::size_t, double);
@@ -465,4 +477,25 @@ TEST_CASE("initial RF snapshots skip absent directions and support empty devices
         REQUIRE_EQ(device.tx_bandwidths.size(), std::size_t{device.num_tx_channels});
         REQUIRE_EQ(sdk.reads, direction < 0 ? 0u : 2u);
     }
+}
+
+TEST_CASE("RX and TX rate or bandwidth setters reject active RX before SDK access")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (const bool bandwidth : {false, true})
+        {
+            SoapySidekiq device;
+            device.configuration_blocked = true;
+            const auto rate = device.cachedRate(direction, 1);
+            const auto width = device.cachedBandwidth(direction, 1);
+            if (bandwidth)
+                REQUIRE_THROWS_AS(device.setBandwidth(direction, 1, 1000000), std::logic_error);
+            else
+                REQUIRE_THROWS_AS(device.setSampleRate(direction, 1, 2000000), std::logic_error);
+            REQUIRE_EQ(device.configuration_attempts, 1u);
+            REQUIRE_EQ(sdk.reads, 0u);
+            REQUIRE_EQ(sdk.writes, 0u);
+            REQUIRE_EQ(device.cachedRate(direction, 1), rate);
+            REQUIRE_EQ(device.cachedBandwidth(direction, 1), width);
+        }
 }

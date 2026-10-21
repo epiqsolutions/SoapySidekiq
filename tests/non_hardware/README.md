@@ -100,7 +100,10 @@ oracle checks 1,000 blocks with eight partial reads each. The RX lifecycle
 fixture compiles the production close/deactivate methods and RX activation
 branch with the real RxStreamSession, an injected receive failure, and fake
 SDK start/stop calls. It covers close/reuse, stop failure with retry, and
-already-stopped hardware. Stream setup, actual SDK I/O, and destructor cleanup
+already-stopped hardware. Configuration cases reject rate/bandwidth writes in
+either direction while RX retains ownership, including worker and stop failures.
+A concurrent session test holds configuration open and verifies activation waits
+before reading its snapshot and starting hardware. Stream setup, actual SDK I/O, and destructor cleanup
 are outside that fixture's coverage.
 
 The session component cases additionally cover concurrent activation during
@@ -123,3 +126,9 @@ cmake --build build/non_hardware-asan --parallel
 tests/run_logged.sh non_hardware_asan \
     tests/non_hardware/run_suite.sh build/non_hardware-asan
 ```
+
+The RX read boundary regression uses the real session/queue with a first-sample
+timestamp just below int64 nanosecond overflow. It consumes one sample, then
+checks that the next partial timestamp produces a stream error with cleared
+metadata and untouched output, even when diagnostics throw. CS16 and CF32 both
+recover after deactivation and reactivation with a representable epoch.

@@ -6,7 +6,6 @@
 #include <SoapySidekiq/ScopeExit.hpp>
 
 #include <cstdint>
-#include <new>
 #include <string>
 
 struct skiq_tx_block_t
@@ -17,14 +16,13 @@ namespace
 enum class Failure
 {
     none,
-    registry,
     sdk,
     logging
 };
 struct State
 {
     Failure fail{};
-    bool registry{}, callback{};
+    bool callback{};
     bool invalid_cleanup{};
     std::string events;
 } state;
@@ -63,7 +61,7 @@ void reset(Failure failure)
 void requireReleased(const std::string &events)
 {
     REQUIRE_EQ(state.events, events);
-    REQUIRE(!state.registry && !state.callback);
+    REQUIRE(!state.callback);
     REQUIRE(!state.invalid_cleanup);
 }
 } // namespace
@@ -73,34 +71,13 @@ class SoapySidekiq
   public:
     std::uint8_t card{3};
     static void tx_complete_callback(int32_t, skiq_tx_block_t *, void *) {}
-    static void registerInstance(std::uint8_t, SoapySidekiq *)
-    {
-        state.events += "R";
-        if (state.fail == Failure::registry)
-            throw std::bad_alloc();
-        state.registry = true;
-    }
-    static void unregisterInstance(std::uint8_t, SoapySidekiq *)
-    {
-        state.events += "r";
-        state.invalid_cleanup |= !state.registry || state.callback;
-        state.registry = false;
-    }
     void initializeTxCallbacks();
 };
 
 // Only the API calls are replaced; execute the actual production method body.
 #include "TxCallbackInitialization.inc"
 
-TEST_CASE("TX callback setup acquires no registration when registry allocation throws")
-{
-    reset(Failure::registry);
-    SoapySidekiq device;
-    REQUIRE_THROWS_AS(device.initializeTxCallbacks(), std::bad_alloc);
-    requireReleased("R");
-}
-
-TEST_CASE("TX callback setup releases registry ownership on SDK failure")
+TEST_CASE("TX callback setup reports SDK failure without unregistering an unacquired callback")
 {
     reset(Failure::sdk);
     SoapySidekiq device;
@@ -113,7 +90,7 @@ TEST_CASE("TX callback setup releases registry ownership on SDK failure")
     {
         REQUIRE(std::string(error.what()).find("card 3, status -17") != std::string::npos);
     }
-    requireReleased("RSr");
+    requireReleased("S");
 }
 
 TEST_CASE("TX callback setup unregisters the callback if final logging throws")
@@ -121,7 +98,7 @@ TEST_CASE("TX callback setup unregisters the callback if final logging throws")
     reset(Failure::logging);
     SoapySidekiq device;
     REQUIRE_THROWS_AS(device.initializeTxCallbacks(), std::runtime_error);
-    requireReleased("RSLsr");
+    requireReleased("SLs");
 }
 
 TEST_CASE("successful TX callback setup transfers resources to the device")
@@ -129,8 +106,8 @@ TEST_CASE("successful TX callback setup transfers resources to the device")
     reset(Failure::none);
     SoapySidekiq device;
     device.initializeTxCallbacks();
-    REQUIRE_EQ(state.events, std::string("RSL"));
-    REQUIRE(state.registry && state.callback);
+    REQUIRE_EQ(state.events, std::string("SL"));
+    REQUIRE(state.callback);
     REQUIRE(!state.invalid_cleanup);
 }
 
@@ -139,11 +116,11 @@ TEST_CASE("failed TX callback setup can be retried without leftover registration
     reset(Failure::logging);
     SoapySidekiq device;
     REQUIRE_THROWS_AS(device.initializeTxCallbacks(), std::runtime_error);
-    requireReleased("RSLsr");
+    requireReleased("SLs");
     state.events.clear();
     state.fail = Failure::none;
     device.initializeTxCallbacks();
-    REQUIRE_EQ(state.events, std::string("RSL"));
-    REQUIRE(state.registry && state.callback);
+    REQUIRE_EQ(state.events, std::string("SL"));
+    REQUIRE(state.callback);
     REQUIRE(!state.invalid_cleanup);
 }

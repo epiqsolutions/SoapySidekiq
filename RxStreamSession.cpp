@@ -30,6 +30,28 @@ RxStreamSession::~RxStreamSession()
 
 int RxStreamSession::activate(const RxSessionConfiguration &configuration)
 {
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    return activateLocked(configuration);
+}
+
+int RxStreamSession::activateConfigured(const std::function<RxSessionConfiguration()> &prepare)
+{
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    if (active_ || receive_thread_.joinable())
+        throw std::logic_error("RX stream session still owns hardware or a worker");
+    return activateLocked(prepare());
+}
+
+void RxStreamSession::configureInactive(const std::function<void()> &configure)
+{
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    if (active_ || receive_thread_.joinable())
+        throw std::logic_error("Deactivate RX successfully before changing rate or bandwidth");
+    configure();
+}
+
+int RxStreamSession::activateLocked(const RxSessionConfiguration &configuration)
+{
     if (configuration.block_samples == 0 ||
         configuration.block_samples > std::numeric_limits<std::size_t>::max() / 2)
     {
@@ -45,8 +67,7 @@ int RxStreamSession::activate(const RxSessionConfiguration &configuration)
         throw std::invalid_argument("system timestamp frequency must be positive");
     }
 
-    // Serialize start/stop so only one worker can own the backend at a time.
-    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    // The caller holds the lifecycle lock through configuration and startup.
     if (active_ || receive_thread_.joinable())
     {
         throw std::logic_error("RX stream session is already active");
