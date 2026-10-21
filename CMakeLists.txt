@@ -65,6 +65,7 @@ SOAPY_SDR_MODULE_UTIL(
         SidekiqRxBackend.cpp
         Registration.cpp
         Settings.cpp
+        DeviceLifecycle.cpp
         TimeClock.cpp
         RFControls.cpp
         Streaming.cpp
