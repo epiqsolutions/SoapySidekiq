@@ -465,7 +465,7 @@ void SoapySidekiq::setFrequency(const int direction, const size_t channel, const
     else
     {
         SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
+        throw std::invalid_argument("setFrequency: invalid direction " + std::to_string(direction));
     }
 }
 
@@ -517,7 +517,7 @@ double SoapySidekiq::getFrequency(const int direction, const size_t channel) con
     else
     {
         SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
+        throw std::invalid_argument("getFrequency: invalid direction " + std::to_string(direction));
     }
 
     return 0;
@@ -567,7 +567,8 @@ SoapySDR::RangeList SoapySidekiq::getFrequencyRange(const int direction, const s
     else
     {
         SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
+        throw std::invalid_argument("getFrequencyRange: invalid direction " +
+                                    std::to_string(direction));
     }
 
     return results;
