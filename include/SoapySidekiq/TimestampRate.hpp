@@ -15,7 +15,10 @@ namespace detail
 /** Quotient and remainder of an overflow-safe product division. */
 struct ProductDivision
 {
-    std::uint64_t quotient, remainder;
+    /** Whole result of the scaled integer division. */
+    std::uint64_t quotient;
+    /** Remainder in units of the supplied divisor. */
+    std::uint64_t remainder;
 };
 /** Compute value * multiplier / divisor; value must be strictly below divisor. */
 inline ProductDivision multiplyDivide(std::uint64_t value, std::uint64_t multiplier,
@@ -57,8 +60,12 @@ inline ProductDivision multiplyDivide(std::uint64_t value, std::uint64_t multipl
 /** Whole nanoseconds and the exact fractional nanosecond remainder. */
 struct TimestampPhase
 {
+    /** Whole signed nanoseconds after truncation. */
     std::int64_t nanoseconds;
-    std::uint64_t remainder, denominator;
+    /** Fractional nanosecond numerator retained for later sample offsets. */
+    std::uint64_t remainder;
+    /** Positive divisor for the fractional nanosecond remainder. */
+    std::uint64_t denominator;
 };
 
 /** Exact positive rate, represented as numerator/denominator ticks per second. */

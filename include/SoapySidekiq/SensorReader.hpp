@@ -75,8 +75,11 @@ private:
 /** Signed raw accelerometer axes returned by Sidekiq. */
 struct AccelerometerReading
 {
+    /** Signed X acceleration component in thousandths of standard gravity. */
     std::int16_t x{};
+    /** Signed Y acceleration component in thousandths of standard gravity. */
     std::int16_t y{};
+    /** Signed Z acceleration component in thousandths of standard gravity. */
     std::int16_t z{};
 };
 
