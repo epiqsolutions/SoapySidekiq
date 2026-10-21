@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <functional>
 #include <sidekiq_api.h>
 
 #include <condition_variable>
@@ -245,6 +246,9 @@ class SoapySidekiq : public SoapySDR::Device
     };
 
   private:
+    /** Serialize coupled RX/TX rate changes with the RX session's hardware ownership. */
+    void configureWhileRxInactive(const std::function<void()> &configure);
+
     /** Throwing activation implementation behind the public stream-status boundary. */
     int activateStreamImpl(SoapySDR::Stream *stream, int flags, long long timeNs, size_t numElems);
 
@@ -364,10 +368,6 @@ class SoapySidekiq : public SoapySDR::Device
     // This function calls the tx_complete method.
     static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                      void *p_user) noexcept;
-
-    static void registerInstance(uint8_t card, SoapySidekiq *instance);
-    static void unregisterInstance(uint8_t card, SoapySidekiq *instance);
-    static SoapySidekiq *getInstanceForCard(uint8_t card);
 
   public:
     /** Per-send context: owned by writeStream until accepted, then by completion. */
