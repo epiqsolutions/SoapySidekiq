@@ -150,6 +150,11 @@ request to contain a whole number of `getStreamMTU()` samples, with at most
 counts or null nonempty buffers return `SOAPY_SDR_STREAM_ERROR`; a zero-length
 write returns zero without reading buffers. If back-pressure accepts only a
 prefix, advance the input by that many complex samples and retry the suffix.
+A hard SDK submission failure or packet preparation failure returns
+`SOAPY_SDR_STREAM_ERROR` if no samples were accepted; otherwise it returns the accepted prefix. The rejected packet's
+reservation/context are released, while accepted packets retain completion
+ownership.
+
 CF32 components clip to [-1, 1], infinities clip to the corresponding endpoint,
 and NaN converts to zero before scaling to the card's TX full scale.
 
