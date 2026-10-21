@@ -4,6 +4,7 @@
  */
 
 #include "SoapySidekiq.hpp"
+#include <SoapySidekiq/RxStreamSession.hpp>
 #include <SoapySidekiq/DeviceOptions.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySidekiq/SidekiqRxBackend.hpp>

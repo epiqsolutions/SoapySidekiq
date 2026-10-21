@@ -22,7 +22,13 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 #include <SoapySDR/Version.h>
-#include <SoapySidekiq/RxStreamSession.hpp>
+// The owners are destroyed out of line; users of this declaration do not need
+// the RX worker, queue, or sample-conversion definitions.
+namespace soapy_sidekiq
+{
+class RxStreamBackend;
+class RxStreamSession;
+} // namespace soapy_sidekiq
 
 inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
 
@@ -231,6 +237,8 @@ class SoapySidekiq : public SoapySDR::Device
     double getReferenceClockRate(void) const;
 #endif
 
+  private:
+    /** Device-owned token; callers receive only an opaque SoapySDR::Stream pointer. */
     struct StreamHandle
     {
         int direction;
@@ -239,7 +247,6 @@ class SoapySidekiq : public SoapySDR::Device
         skiq_tx_hdl_t tx_handle;
     };
 
-  private:
     /** Serialize coupled RX/TX rate changes with the RX session's hardware ownership. */
     void configureWhileRxInactive(const std::function<void()> &configure);
 
@@ -353,7 +360,6 @@ class SoapySidekiq : public SoapySDR::Device
     static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                      void *p_user) noexcept;
 
-  public:
     /** Per-send context: owned by writeStream until accepted, then by completion. */
     struct passedStruct
     {
