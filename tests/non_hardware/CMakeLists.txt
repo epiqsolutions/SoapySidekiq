@@ -195,7 +195,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../TimeClock.c
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../TimeClock.cpp" time_clock_source)
 string(APPEND settings_source "\n${time_clock_source}")
 string(FIND "${settings_source}" "void logging_handler(" log_start)
-string(FIND "${settings_source}" "void SoapySidekiq::tx_complete(" log_end)
+string(FIND "${settings_source}" "void SoapySidekiq::completeTx(" log_end)
 if(log_start LESS 0 OR log_end LESS log_start)
     message(FATAL_ERROR "Could not locate the production SDK logging callback")
 endif()
@@ -210,7 +210,7 @@ add_test(NAME sdk-logging.all COMMAND sdk_logging_tests)
 set_tests_properties(sdk-logging.all PROPERTIES LABELS "component;non-hardware")
 
 # TX wait regressions use real completion publication, not a duplicated notifier.
-string(FIND "${settings_source}" "void SoapySidekiq::tx_complete(" completion_start)
+string(FIND "${settings_source}" "void SoapySidekiq::completeTx(" completion_start)
 string(FIND "${settings_source}" "bool equalsIgnoreCase(" completion_end)
 if(completion_start LESS 0 OR completion_end LESS completion_start)
     message(FATAL_ERROR "Could not locate the production TX completion method")

@@ -123,3 +123,11 @@ cmake --build build/non_hardware-asan --parallel
 tests/run_logged.sh non_hardware_asan \
     tests/non_hardware/run_suite.sh build/non_hardware-asan
 ```
+
+TX completion contexts retain shared bookkeeping rather than a device pointer.
+Late-completion cases destroy the fixture device before invoking the production
+callback and replace the stream state before completing an older reservation.
+The production completion storage and locking are used with an instrumented
+condition variable to preserve the existing wait-boundary tests. These cases
+verify bookkeeping lifetime and stream isolation, not SDK block lifetime or
+callback delivery/quiescence after SDK shutdown.

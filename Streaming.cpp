@@ -57,18 +57,20 @@ SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle(SoapySDR::Stream *str
 void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                         void *p_user) noexcept
 {
+    (void)status;
+    (void)p_data;
     // Completion owns the accepted submission's context, including on every
     // diagnostic/exception path. Never unwind through the SDK's C boundary.
     std::unique_ptr<passedStruct> instance(static_cast<passedStruct *>(p_user));
     try
     {
-        if (instance == nullptr || instance->classAddr == nullptr)
+        if (instance == nullptr || instance->completion == nullptr)
         {
             SoapySDR_log(SOAPY_SDR_ERROR, "tx_complete callback received invalid user data");
             return;
         }
 
-        instance->classAddr->tx_complete(status, p_data, instance->txIndex);
+        completeTx(instance->completion, instance->txIndex);
     }
     catch (...)
     {
@@ -150,14 +152,14 @@ SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(
 void SoapySidekiq::stopTxWrites()
 {
     {
-        std::scoped_lock lock(tx_mutex, tx_buf_mutex);
+        std::scoped_lock lock(tx_mutex, tx_completion->mutex);
         tx_writes_stopping = true;
     }
     tx_cv.notify_all();
-    tx_buf_cv.notify_all();
-    std::unique_lock<std::mutex> lock(tx_buf_mutex);
-    tx_buf_cv.wait(lock,
-                   [this] { return active_tx_writers == 0 && active_tx_status_readers == 0; });
+    tx_completion->changed.notify_all();
+    std::unique_lock<std::mutex> lock(tx_completion->mutex);
+    tx_completion->changed.wait(
+        lock, [this] { return active_tx_writers == 0 && active_tx_status_readers == 0; });
 }
 
 void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
@@ -351,6 +353,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         stream_handle->channel = channel;
         stream_handle->rx_handle = skiq_rx_hdl_end;
         stream_handle->tx_handle = tx_handle;
+        auto completion = std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS);
         for (int i = 0; i < DEFAULT_NUM_BUFFERS; ++i)
         {
             p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
@@ -365,6 +368,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
                 throw std::bad_alloc();
             }
         }
+        tx_completion = std::move(completion);
         currTXBuffIndex = 0;
 
         active_tx_stream = stream_handle.release();
@@ -668,7 +672,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
 
         tx_stream_active = true;
         {
-            std::scoped_lock lock(tx_mutex, tx_buf_mutex);
+            std::scoped_lock lock(tx_mutex, tx_completion->mutex);
             tx_writes_stopping = false;
         }
     }
@@ -884,7 +888,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
     }
 
     {
-        std::lock_guard<std::mutex> lock(tx_buf_mutex);
+        std::lock_guard<std::mutex> lock(tx_completion->mutex);
         if (tx_writes_stopping)
             return SOAPY_SDR_STREAM_ERROR;
         ++active_tx_writers;
@@ -893,10 +897,10 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         [this]() noexcept
         {
             {
-                std::lock_guard<std::mutex> lock(tx_buf_mutex);
+                std::lock_guard<std::mutex> lock(tx_completion->mutex);
                 --active_tx_writers;
             }
-            tx_buf_cv.notify_all();
+            tx_completion->changed.notify_all();
         });
 
     // TX has no partial-block staging. Reject malformed requests before PPS
@@ -960,10 +964,11 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         {
             // The predicate and completion updates share a mutex, so completion
             // cannot disappear between testing the slot and sleeping.
-            std::unique_lock<std::mutex> lock(tx_buf_mutex);
-            if (!tx_buf_cv.wait_until(
+            std::unique_lock<std::mutex> lock(tx_completion->mutex);
+            if (!tx_completion->changed.wait_until(
                     lock, deadline,
-                    [this] { return tx_writes_stopping || p_tx_status[currTXBuffIndex] == 0; }))
+                    [this]
+                    { return tx_writes_stopping || tx_completion->slots[currTXBuffIndex] == 0; }))
             {
                 return curr_block == 0 ? SOAPY_SDR_TIMEOUT
                                        : static_cast<int>(curr_block * current_tx_block_size);
@@ -971,8 +976,8 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             if (tx_writes_stopping)
                 return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
                                        : static_cast<int>(curr_block * current_tx_block_size);
-            p_tx_status[currTXBuffIndex] = 1;
-            observed_completions = complete_count;
+            tx_completion->slots[currTXBuffIndex] = 1;
+            observed_completions = tx_completion->completed;
         }
 
         {
@@ -982,11 +987,11 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             soapy_sidekiq::ScopeExit reservation(
                 [this, block_index]() noexcept
                 {
-                    std::lock_guard<std::mutex> lock(tx_buf_mutex);
-                    p_tx_status[block_index] = 0;
+                    std::lock_guard<std::mutex> lock(tx_completion->mutex);
+                    tx_completion->slots[block_index] = 0;
                 });
             auto context = std::make_unique<passedStruct>();
-            context->classAddr = this;
+            context->completion = tx_completion;
             context->txIndex = block_index;
 
             // Pointer to the location in the output buffer to copy to.
@@ -1021,15 +1026,16 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         {
             // A completion during skiq_transmit must satisfy this predicate
             // immediately; wait only when no completion has made progress.
-            std::unique_lock<std::mutex> lock(tx_buf_mutex);
+            std::unique_lock<std::mutex> lock(tx_completion->mutex);
             const bool progressed =
                 tx_writes_stopping ||
                 (Clock::now() < deadline &&
-                 tx_buf_cv.wait_until(lock, deadline,
-                                      [this, observed_completions] {
-                                          return tx_writes_stopping ||
-                                                 complete_count != observed_completions;
-                                      }));
+                 tx_completion->changed.wait_until(lock, deadline,
+                                                   [this, observed_completions] {
+                                                       return tx_writes_stopping ||
+                                                              tx_completion->completed !=
+                                                                  observed_completions;
+                                                   }));
             if (tx_writes_stopping)
                 return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
                                        : static_cast<int>(curr_block * current_tx_block_size);
@@ -1079,7 +1085,7 @@ int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, i
         return SOAPY_SDR_STREAM_ERROR;
 
     {
-        std::lock_guard<std::mutex> lock(tx_buf_mutex);
+        std::lock_guard<std::mutex> lock(tx_completion->mutex);
         if (tx_writes_stopping)
             return SOAPY_SDR_STREAM_ERROR;
         ++active_tx_status_readers;
@@ -1088,10 +1094,10 @@ int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, i
         [this]() noexcept
         {
             {
-                std::lock_guard<std::mutex> lock(tx_buf_mutex);
+                std::lock_guard<std::mutex> lock(tx_completion->mutex);
                 --active_tx_status_readers;
             }
-            tx_buf_cv.notify_all();
+            tx_completion->changed.notify_all();
         });
 
     using Clock = std::chrono::steady_clock;
@@ -1110,7 +1116,7 @@ int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, i
                 return SOAPY_SDR_TIMEOUT;
             bool pending = false;
             {
-                std::scoped_lock lock(tx_mutex, tx_buf_mutex);
+                std::scoped_lock lock(tx_mutex, tx_completion->mutex);
                 if (tx_writes_stopping)
                     return SOAPY_SDR_STREAM_ERROR;
                 pending = first_transmit && !tx_start_finished;
@@ -1146,9 +1152,9 @@ int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, i
             return SOAPY_SDR_TIMEOUT;
         // The SDK exposes a counter, not an event wait. Bound polling and let
         // stopTxWrites wake this call promptly without consuming the timeout.
-        std::unique_lock<std::mutex> lock(tx_buf_mutex);
+        std::unique_lock<std::mutex> lock(tx_completion->mutex);
         const auto wake = std::min(deadline, now + std::chrono::milliseconds(1));
-        if (tx_buf_cv.wait_until(lock, wake, [this] { return tx_writes_stopping; }))
+        if (tx_completion->changed.wait_until(lock, wake, [this] { return tx_writes_stopping; }))
             return SOAPY_SDR_STREAM_ERROR;
     }
 }
