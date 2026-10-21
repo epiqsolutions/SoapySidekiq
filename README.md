@@ -152,12 +152,23 @@ The current streaming implementation supports:
 
 Simultaneous RX and TX are supported. Multi-channel Soapy streams are not currently implemented.
 
+There are no configurable per-stream arguments. `getStreamArgsInfo()` returns
+an empty list; the former `bufflen` advertisement was unused by `setupStream()`.
+Query `getStreamMTU()` after setup for the actual buffer sample count. RX uses
+the SDK's balanced receive mode. Set the device constructor argument
+`tx_block_size` to choose a validated TX payload size before stream setup.
+
 TX accepts CS16 or normalized CF32 and requires each nonempty `writeStream`
 request to contain a whole number of `getStreamMTU()` samples, with at most
 `INT_MAX` samples per call. It does not stage partial hardware blocks. Invalid
 counts or null nonempty buffers return `SOAPY_SDR_STREAM_ERROR`; a zero-length
 write returns zero without reading buffers. If back-pressure accepts only a
 prefix, advance the input by that many complex samples and retry the suffix.
+A hard SDK submission failure or packet preparation failure returns
+`SOAPY_SDR_STREAM_ERROR` if no samples were accepted; otherwise it returns the accepted prefix. The rejected packet's
+reservation/context are released, while accepted packets retain completion
+ownership.
+
 CF32 components clip to [-1, 1], infinities clip to the corresponding endpoint,
 and NaN converts to zero before scaling to the card's TX full scale.
 
