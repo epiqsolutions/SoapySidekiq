@@ -23,7 +23,7 @@ void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
     (void)p_data;
     // Completion owns the accepted submission's context, including on every
     // diagnostic/exception path. Never unwind through the SDK's C boundary.
-    std::unique_ptr<passedStruct> instance(static_cast<passedStruct *>(p_user));
+    std::unique_ptr<TxSendContext> instance(static_cast<TxSendContext *>(p_user));
     try
     {
         if (instance == nullptr || instance->completion == nullptr)
@@ -152,7 +152,7 @@ void SoapySidekiq::initializeTxBuffers()
                                              skiq_tx_block_allocate, skiq_tx_block_free);
     tx_completion = std::move(completion);
     tx_blocks = std::move(blocks);
-    currTXBuffIndex = 0;
+    tx_block_index = 0;
 }
 
 int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs,
@@ -267,7 +267,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
             if (!tx_completion->changed.wait_until(
                     lock, deadline,
                     [this]
-                    { return tx_writes_stopping || tx_completion->slots[currTXBuffIndex] == 0; }))
+                    { return tx_writes_stopping || tx_completion->slots[tx_block_index] == 0; }))
             {
                 return curr_block == 0 ? SOAPY_SDR_TIMEOUT
                                        : static_cast<int>(curr_block * current_tx_block_size);
@@ -275,7 +275,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
             if (tx_writes_stopping)
                 return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
                                        : static_cast<int>(curr_block * current_tx_block_size);
-            tx_completion->slots[currTXBuffIndex] = 1;
+            tx_completion->slots[tx_block_index] = 1;
             observed_completions = tx_completion->completed;
         }
 
@@ -283,14 +283,14 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
         {
             // Until the SDK accepts this block, unwind its reservation on any
             // allocation, conversion, or submission failure.
-            const auto block_index = currTXBuffIndex;
+            const auto block_index = tx_block_index;
             soapy_sidekiq::ScopeExit reservation(
                 [this, block_index]() noexcept
                 {
                     std::lock_guard<std::mutex> lock(tx_completion->mutex);
                     tx_completion->slots[block_index] = 0;
                 });
-            auto context = std::make_unique<passedStruct>();
+            auto context = std::make_unique<TxSendContext>();
             context->completion = tx_completion;
             context->block = tx_blocks->block(block_index);
             context->txIndex = block_index;
@@ -378,7 +378,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
             curr_block++;
 
             // move the index into the transmit block array
-            currTXBuffIndex = (currTXBuffIndex + 1) % tx_buffer_count;
+            tx_block_index = (tx_block_index + 1) % tx_buffer_count;
 
             // move the pointer to the next block in the writeStream buffer
             inbuff_ptr += input_block_bytes;

@@ -89,18 +89,18 @@ void skiq_tx_block_free(skiq_tx_block_t *block) noexcept
 }
 class SoapySidekiq;
 struct TxCompletion;
-struct passedStruct
+struct TxSendContext
 {
     inline static std::atomic<std::size_t> live{};
     inline static bool fail_allocation{};
     std::shared_ptr<TxCompletion> completion;
     std::shared_ptr<skiq_tx_block_t> block;
     std::uint32_t txIndex{};
-    passedStruct()
+    TxSendContext()
     {
         ++live;
     }
-    ~passedStruct()
+    ~TxSendContext()
     {
         --live;
     }
@@ -115,7 +115,7 @@ struct passedStruct
         ::operator delete(pointer);
     }
 };
-int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *, passedStruct *);
+int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *, TxSendContext *);
 using skiq_tx_hdl_t = unsigned;
 using skiq_rx_hdl_t = unsigned;
 int stop_status{}, stop_calls{};
@@ -271,7 +271,7 @@ public:
   bool first_transmit{false}, txUseShort{false}, iq_swap{true};
   std::uint32_t p_tx_block_index{};
   std::uint32_t tx_buffer_count{DEFAULT_NUM_BUFFERS};
-  std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
+  std::uint32_t current_tx_block_size{252}, tx_block_index{};
   std::uint8_t card{};
   double maxValue{32767};
   double txMaxValue{32767};
@@ -289,7 +289,7 @@ public:
   std::vector<std::vector<std::int16_t>> transmitted;
   bool complete_on_worker{};
   bool defer_completion{};
-  std::vector<passedStruct *> deferred_contexts;
+  std::vector<TxSendContext *> deferred_contexts;
   std::vector<int> send_results;
   std::size_t attempts{};
   bool reject_notifies{true};
@@ -337,7 +337,7 @@ public:
 #include "TxCompletionCallback.inc"
 
 /** Capture each accepted packet and complete its ownership synchronously. */
-int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *context)
+int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, TxSendContext *context)
 {
     auto &device = *context->completion->fixture_owner;
     if (device.on_submit)
@@ -596,7 +596,7 @@ TEST_CASE("TX never overwrites a busy SDK block before completion")
                static_cast<int>(device.current_tx_block_size));
     REQUIRE(original_payload_preserved);
     REQUIRE(device.transmitted[0] == input);
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("queue-full TX retries release context and retain the input block")
@@ -613,9 +613,9 @@ TEST_CASE("queue-full TX retries release context and retain the input block")
     REQUIRE_EQ(device.attempts, std::size_t{3});
     REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
     REQUIRE(device.transmitted[0] == input);
-    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{1});
+    REQUIRE_EQ(device.tx_block_index, std::uint32_t{1});
     REQUIRE_EQ(device.tx_completion->slots[0], 0);
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("hard TX errors release reservation and context before a retry")
@@ -629,13 +629,13 @@ TEST_CASE("hard TX errors release reservation and context before a retry")
                                   device.current_tx_block_size, flags, 0, 0),
                SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.tx_completion->slots[0], 0);
-    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(device.tx_block_index, std::uint32_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
                                   device.current_tx_block_size, flags, 0, 0),
                static_cast<int>(device.current_tx_block_size));
     REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("CF32 conversion failure releases its reserved TX block and context")
@@ -650,7 +650,7 @@ TEST_CASE("CF32 conversion failure releases its reserved TX block and context")
                SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.tx_completion->slots[0], 0);
     REQUIRE_EQ(device.attempts, std::size_t{0});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("callback context allocation failure releases its reserved TX block")
@@ -659,14 +659,14 @@ TEST_CASE("callback context allocation failure releases its reserved TX block")
     std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
     const void *buffers[]{input.data()};
     int flags = 0;
-    passedStruct::fail_allocation = true;
-    soapy_sidekiq::ScopeExit restore([]() noexcept { passedStruct::fail_allocation = false; });
+    TxSendContext::fail_allocation = true;
+    soapy_sidekiq::ScopeExit restore([]() noexcept { TxSendContext::fail_allocation = false; });
     REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
                                   device.current_tx_block_size, flags, 0, 0),
                SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.tx_completion->slots[0], 0);
     REQUIRE_EQ(device.attempts, std::size_t{0});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("accepted TX contexts survive submission until out-of-order completion")
@@ -680,7 +680,7 @@ TEST_CASE("accepted TX contexts survive submission until out-of-order completion
                                   2 * device.current_tx_block_size, flags, 0, 0),
                static_cast<int>(2 * device.current_tx_block_size));
     REQUIRE_EQ(device.deferred_contexts.size(), std::size_t{2});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{2});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{2});
     REQUIRE_EQ(device.tx_completion->slots[0], 1);
     REQUIRE_EQ(device.tx_completion->slots[1], 1);
     for (auto it = device.deferred_contexts.rbegin(); it != device.deferred_contexts.rend(); ++it)
@@ -692,7 +692,7 @@ TEST_CASE("accepted TX contexts survive submission until out-of-order completion
     device.deferred_contexts.clear();
     REQUIRE_EQ(device.tx_completion->slots[0], 0);
     REQUIRE_EQ(device.tx_completion->slots[1], 0);
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("pending PPS startup respects zero and finite write timeouts")
@@ -779,7 +779,7 @@ TEST_CASE("busy TX blocks respect zero and finite timeouts without payload write
                    SOAPY_SDR_TIMEOUT);
         REQUIRE_EQ(device.attempts, std::size_t{0});
         REQUIRE_EQ(device.tx_completion->slots[0], 1);
-        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+        REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
         REQUIRE(std::all_of(std::begin(device.tx_blocks->block(0)->data),
                             std::end(device.tx_blocks->block(0)->data),
                             [](auto sample) { return sample == 123; }));
@@ -800,8 +800,8 @@ TEST_CASE("queue-full TX waits time out and leave submission resources retryable
                                       device.current_tx_block_size, flags, 0, timeout),
                    SOAPY_SDR_TIMEOUT);
         REQUIRE_EQ(device.tx_completion->slots[0], 0);
-        REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
-        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+        REQUIRE_EQ(device.tx_block_index, std::uint32_t{0});
+        REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     }
     REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
                                   device.current_tx_block_size, flags, 0, 0),
@@ -823,9 +823,9 @@ TEST_CASE("TX back-pressure after a submitted prefix returns that sample count")
                                   2 * device.current_tx_block_size, flags, 0, 0),
                static_cast<int>(device.current_tx_block_size));
     REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
-    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{1});
+    REQUIRE_EQ(device.tx_block_index, std::uint32_t{1});
     REQUIRE_EQ(device.tx_completion->slots[1], 0);
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     // The caller can resume from the returned prefix without repeating it.
     const void *remainder[]{input.data() + 2 * device.current_tx_block_size};
     REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), remainder,
@@ -903,7 +903,7 @@ TEST_CASE("TX rejects partial and unrepresentable sample counts before PPS waits
         REQUIRE_EQ(device.writeStream(stream, nullptr, count, flags, 0, 0), SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.attempts, std::size_t{0});
     REQUIRE(device.tx_cv.deadlines.empty());
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 TEST_CASE("TX zero-length and null-buffer requests never submit or wait")
 {
@@ -919,7 +919,7 @@ TEST_CASE("TX zero-length and null-buffer requests never submit or wait")
                SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.attempts, std::size_t{0});
     REQUIRE(device.tx_cv.deadlines.empty());
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 TEST_CASE("production CF32 writes clip exceptional values at each supported TX scale")
 {
@@ -983,13 +983,13 @@ TEST_CASE("CF32 suffix retry after back-pressure preserves input stride and pack
                         [](auto value) { return value == -32767; }));
     REQUIRE(std::all_of(device.transmitted[1].begin(), device.transmitted[1].end(),
                         [](auto value) { return value == 32767; }));
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("TX callback releases context after throwing diagnostics and publishes completion first")
 {
     SoapySidekiq device;
-    auto *context = new passedStruct;
+    auto *context = new TxSendContext;
     context->completion = device.tx_completion;
     context->txIndex = 0;
     // An unexpected prior status exercises the diagnostic path.
@@ -1008,7 +1008,7 @@ TEST_CASE("TX callback releases context after throwing diagnostics and publishes
     SoapySidekiq::tx_complete_callback(0, device.tx_blocks->block(0).get(), context);
     REQUIRE(published);
     REQUIRE(unlocked);
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("TX callback contains invalid-user diagnostics and frees ownerless contexts")
@@ -1016,21 +1016,21 @@ TEST_CASE("TX callback contains invalid-user diagnostics and frees ownerless con
     log_hook = [] { throw std::runtime_error("injected log failure"); };
     soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
     SoapySidekiq::tx_complete_callback(0, nullptr, nullptr);
-    SoapySidekiq::tx_complete_callback(0, nullptr, new passedStruct);
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    SoapySidekiq::tx_complete_callback(0, nullptr, new TxSendContext);
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("TX callback rejects out-of-range indices without touching status storage")
 {
     SoapySidekiq device;
-    auto *context = new passedStruct;
+    auto *context = new TxSendContext;
     context->completion = device.tx_completion;
     context->txIndex = DEFAULT_NUM_BUFFERS;
     log_hook = [] { throw std::runtime_error("injected log failure"); };
     soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
     SoapySidekiq::tx_complete_callback(0, nullptr, context);
     REQUIRE_EQ(device.tx_completion->completed, std::uint64_t{0});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     for (const auto slot : device.tx_completion->slots)
         REQUIRE_EQ(slot, 0);
 }
@@ -1071,7 +1071,7 @@ static void checkCancelledWrite(bool pps, bool queue_full, bool partial)
     REQUIRE(device.tx_writes_stopping);
     REQUIRE(!device.tx_stream_active);
     REQUIRE_EQ(stop_calls, 1);
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     const auto attempts = device.attempts;
     int flags = 0;
     REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 0),
@@ -1489,9 +1489,9 @@ TEST_CASE("hard TX submission failures preserve accepted prefixes and permit exa
             const int prefix = device.writeStream(stream, buffers, 3 * block, flags, 0, 0);
             REQUIRE_EQ(prefix, static_cast<int>(accepted * block));
             REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
-            REQUIRE_EQ(device.currTXBuffIndex, static_cast<std::uint32_t>(accepted));
+            REQUIRE_EQ(device.tx_block_index, static_cast<std::uint32_t>(accepted));
             REQUIRE_EQ(device.tx_completion->slots[accepted], 0);
-            REQUIRE_EQ(passedStruct::live.load(), deferred ? accepted : std::size_t{0});
+            REQUIRE_EQ(TxSendContext::live.load(), deferred ? accepted : std::size_t{0});
             // The preceding assertion establishes a positive in-range accepted prefix.
             const auto prefix_samples = static_cast<std::size_t>(prefix);
             const void *suffix[]{input.data() + 2 * prefix_samples};
@@ -1506,9 +1506,9 @@ TEST_CASE("hard TX submission failures preserve accepted prefixes and permit exa
                                                   first + static_cast<std::ptrdiff_t>(2 * block)));
             }
             REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
-            REQUIRE_EQ(passedStruct::live.load(), deferred ? std::size_t{3} : std::size_t{0});
+            REQUIRE_EQ(TxSendContext::live.load(), deferred ? std::size_t{3} : std::size_t{0});
         }
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("TX preparation failures preserve prior submissions and release unsent reservations")
@@ -1526,19 +1526,19 @@ TEST_CASE("TX preparation failures preserve prior submissions and release unsent
             device.on_submit = [&]
             {
                 if (allocation)
-                    passedStruct::fail_allocation = true;
+                    TxSendContext::fail_allocation = true;
                 else
                     device.txMaxValue = 0;
             };
             soapy_sidekiq::ScopeExit restore([]() noexcept
-                                             { passedStruct::fail_allocation = false; });
+                                             { TxSendContext::fail_allocation = false; });
             REQUIRE_EQ(device.writeStream(stream, buffers, 2 * block, flags, 0, 0),
                        static_cast<int>(block));
             REQUIRE_EQ(device.tx_completion->slots[1], 0);
             REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
             REQUIRE_EQ(device.attempts, std::size_t{1});
-            REQUIRE_EQ(passedStruct::live.load(), deferred ? std::size_t{1} : std::size_t{0});
-            passedStruct::fail_allocation = false;
+            REQUIRE_EQ(TxSendContext::live.load(), deferred ? std::size_t{1} : std::size_t{0});
+            TxSendContext::fail_allocation = false;
             device.txMaxValue = 32767;
             device.on_submit = {};
             const void *suffix[]{input.data() + 2 * block};
@@ -1546,7 +1546,7 @@ TEST_CASE("TX preparation failures preserve prior submissions and release unsent
                        static_cast<int>(block));
             REQUIRE_EQ(device.transmitted.size(), std::size_t{2});
         }
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("TX activation SDK failures return stream errors and allow a clean retry")
@@ -1669,7 +1669,7 @@ TEST_CASE(
     SoapySidekiq::tx_complete_callback(0, nullptr, context);
     REQUIRE_EQ(state->completed, std::uint64_t{1});
     REQUIRE_EQ(state->slots[0], 0);
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     state.reset();
     REQUIRE(retained.expired());
     REQUIRE(retained_block.expired());
@@ -1678,7 +1678,7 @@ TEST_CASE(
 TEST_CASE("old stream completions cannot release a new stream reservation")
 {
     SoapySidekiq device;
-    auto *context = new passedStruct;
+    auto *context = new TxSendContext;
     context->completion = device.tx_completion;
     context->txIndex = 0;
     const auto old = context->completion;
@@ -1690,7 +1690,7 @@ TEST_CASE("old stream completions cannot release a new stream reservation")
     REQUIRE_EQ(old->completed, std::uint64_t{1});
     REQUIRE_EQ(device.tx_completion->slots[0], 1);
     REQUIRE_EQ(device.tx_completion->completed, std::uint64_t{0});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("TX block allocation failure unwinds its prefix without replacing published owners")
@@ -1701,7 +1701,7 @@ TEST_CASE("TX block allocation failure unwinds its prefix without replacing publ
         const auto *pool = device.tx_blocks.get();
         const auto completion = device.tx_completion;
         const auto live = skiq_tx_block_t::live.load();
-        device.currTXBuffIndex = 2;
+        device.tx_block_index = 2;
         fail_block_allocation = block_allocations + prefix;
         soapy_sidekiq::ScopeExit restore(
             []() noexcept { fail_block_allocation = std::numeric_limits<std::size_t>::max(); });
@@ -1709,7 +1709,7 @@ TEST_CASE("TX block allocation failure unwinds its prefix without replacing publ
         REQUIRE_EQ(skiq_tx_block_t::live.load(), live);
         REQUIRE(device.tx_blocks.get() == pool);
         REQUIRE(device.tx_completion == completion);
-        REQUIRE_EQ(device.currTXBuffIndex, 2u);
+        REQUIRE_EQ(device.tx_block_index, 2u);
     }
 }
 
@@ -1736,7 +1736,7 @@ TEST_CASE("closing TX retains accepted blocks until completion and isolates a re
     REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 100000),
                static_cast<int>(device.current_tx_block_size));
     REQUIRE_EQ(device.deferred_contexts.size(), std::size_t{1});
-    std::unique_ptr<passedStruct> accepted(device.deferred_contexts.back());
+    std::unique_ptr<TxSendContext> accepted(device.deferred_contexts.back());
     device.deferred_contexts.clear();
     const std::weak_ptr<skiq_tx_block_t> retained = accepted->block;
     stop_status = 0;
@@ -1817,7 +1817,7 @@ TEST_CASE("configured small TX pools wrap their own ring across synchronous mult
         REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
                                       6 * device.current_tx_block_size, flags, 0, 100000),
                    static_cast<int>(6 * device.current_tx_block_size));
-        REQUIRE_EQ(device.currTXBuffIndex, 6u % count);
+        REQUIRE_EQ(device.tx_block_index, 6u % count);
         REQUIRE_EQ(device.transmitted.size(), std::size_t{6});
         for (std::size_t block = 0; block < 6; ++block)
             REQUIRE_EQ(device.transmitted[block].front(), static_cast<std::int16_t>(block + 1));
@@ -1939,7 +1939,7 @@ TEST_CASE(
                    static_cast<int>(device.current_tx_block_size));
         REQUIRE_EQ(device.attempts, before + 1);
         REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
-        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+        REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     }
 }
 
@@ -2011,7 +2011,7 @@ TEST_CASE("deactivation cancels PPS-gated writes but joins pending SDK startup b
         REQUIRE(!stopped.load());
         REQUIRE_EQ(device.attempts, std::size_t{0});
         REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
-        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+        REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
         release.set_value();
         edge_released = true;
         REQUIRE_EQ(stopping.get(), 0);
@@ -2043,8 +2043,8 @@ TEST_CASE("writes before first activation reject admission without waiting or su
     REQUIRE(device.transmitted.empty());
     REQUIRE(device.tx_cv.deadlines.empty());
     REQUIRE(device.tx_completion->changed.deadlines.empty());
-    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(device.tx_block_index, std::uint32_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("immediate and PPS deactivation keep empty and nonempty writes outside admission")
@@ -2072,8 +2072,8 @@ TEST_CASE("immediate and PPS deactivation keep empty and nonempty writes outside
         REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
         REQUIRE_EQ(device.attempts, std::size_t{0});
         REQUIRE(device.transmitted.empty());
-        REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
-        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+        REQUIRE_EQ(device.tx_block_index, std::uint32_t{0});
+        REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     }
 }
 
@@ -2124,7 +2124,7 @@ TEST_CASE("unexpected PPS backend exceptions wake writers with a retained startu
     REQUIRE_EQ(device.tx_start_status, SOAPY_SDR_STREAM_ERROR);
     REQUIRE(device.first_transmit);
     REQUIRE_EQ(device.attempts, std::size_t{0});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
     REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 0),
                SOAPY_SDR_STREAM_ERROR);
 }
@@ -2133,13 +2133,13 @@ TEST_CASE("throwing diagnostics preserve the accepted TX prefix after preparatio
 {
     SoapySidekiq device;
     device.txUseShort = true;
-    device.on_submit = [] { passedStruct::fail_allocation = true; };
+    device.on_submit = [] { TxSendContext::fail_allocation = true; };
     log_hook = [] { throw std::runtime_error("injected diagnostic failure"); };
     soapy_sidekiq::ScopeExit restore(
         []() noexcept
         {
             log_hook = {};
-            passedStruct::fail_allocation = false;
+            TxSendContext::fail_allocation = false;
         });
     std::vector<std::int16_t> input(4 * device.current_tx_block_size, 17);
     const void *buffers[]{input.data()};
@@ -2152,7 +2152,7 @@ TEST_CASE("throwing diagnostics preserve the accepted TX prefix after preparatio
     REQUIRE_EQ(device.tx_completion->slots[0], 0);
     REQUIRE_EQ(device.tx_completion->slots[1], 0);
     REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
-    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    REQUIRE_EQ(TxSendContext::live.load(), std::size_t{0});
 }
 
 TEST_CASE("throwing diagnostics cannot replace TX activation status stop retry or status errors")

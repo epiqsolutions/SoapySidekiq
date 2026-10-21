@@ -426,7 +426,7 @@ class SoapySidekiq : public SoapySDR::Device
     std::unique_ptr<TxBlocks> tx_blocks;
     /** Prepare all block owners and bookkeeping before publishing a TX stream. */
     void initializeTxBuffers();
-    uint32_t currTXBuffIndex{};
+    uint32_t tx_block_index{};
 
     // TX callback static function
     // The registration requires a static function instead of a method so
@@ -436,7 +436,7 @@ class SoapySidekiq : public SoapySDR::Device
                                      void *p_user) noexcept;
 
     /** Per-send context: owned by writeStream until accepted, then by completion. */
-    struct passedStruct
+    struct TxSendContext
     {
         /** Retain this stream's reservations and notification state through late completion. */
         std::shared_ptr<TxCompletion> completion;
