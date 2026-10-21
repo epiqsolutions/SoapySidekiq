@@ -333,6 +333,25 @@ for acceleration. A temperature value of `0` alone therefore cannot distinguish
 a valid reading from a failed read. Metadata requests for unknown keys raise
 an argument error.
 
+## Validation and development status
+
+Use the SDK-free [non-hardware suite](tests/non_hardware/README.md) and presets
+above for portable regressions. Native SDK builds and isolated module discovery
+are separate checks; module loading alone does not open a card or validate RF.
+
+The [hardware tools](tests/hardware/README.md) cover capability/readback,
+counter/format validation, finite captures, paired tones, and PPS. Capability
+queries and counter checks do not need an external RF generator or analyzer.
+Tone/full-duplex checks need a documented RF path; calibrated absolute power or
+sensitivity needs suitable calibrated equipment. Follow the
+[post-update procedure](tests/hardware/POST_UPDATE_VALIDATION.md) for the newer
+ownership, shutdown, configuration, and buffering changes.
+
+The [development release notes](docs/RELEASE_NOTES.md) distinguish pending update
+work, local build/sanitizer checks, and the earlier reported hardware matrix.
+They are an unreleased draft. Final candidate review, compatible-host TSan,
+relevant hardware follow-up, and evidence collection remain release checks.
+
 ## License
 
 - https://github.com/pothosware/SoapySidekiq/blob/master/LICENSE
