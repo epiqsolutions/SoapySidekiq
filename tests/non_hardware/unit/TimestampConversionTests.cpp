@@ -165,8 +165,9 @@ TEST_CASE("nanosecond to tick conversion agrees with a wide integer oracle")
     };
     for (unsigned trial = 0; trial < 10000; ++trial)
     {
-        const auto time =
-            next() & static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+        // The mask proves the explicit signed conversion is representable.
+        const auto time = static_cast<std::int64_t>(
+            next() & static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
         const auto frequency = next() | 1ULL;
         const auto expected = static_cast<uint128>(time) * frequency / 1000000000ULL;
         if (expected > std::numeric_limits<std::uint64_t>::max())
