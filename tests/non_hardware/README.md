@@ -173,3 +173,9 @@ the real bodies without depending on which implementation file contains the next
 method. Multi-method fixtures compose their required bodies explicitly. The SDK
 module builds and links all three units; these fixtures still use injected SDK
 operations and do not replace a real module build.
+
+The RX read boundary regression uses the real session/queue with a first-sample
+timestamp just below int64 nanosecond overflow. It consumes one sample, then
+checks that the next partial timestamp produces a stream error with cleared
+metadata and untouched output, even when diagnostics throw. CS16 and CF32 both
+recover after deactivation and reactivation with a representable epoch.

@@ -253,8 +253,17 @@ Sample-rate and bandwidth setters in either direction reject changes while RX
 owns hardware or a receive worker, since RX/TX clocks may be coupled. Successfully
 deactivate RX before changing them; a failed stop or failed worker still blocks
 these setters. Activation captures its timing snapshot under the same lock.
-Configure clocks and timestamp selection before activating RX; stop and reactivate
-RX after changing them so it captures a fresh timing snapshot.
+Clock source, PPS source, hardware-time updates, and `timetype` changes use the
+same inactive-RX guard. Configure them before activating RX. Rejection occurs
+before SDK reads/writes, kernel PPS fallback, or timestamp-selection cache changes.
+A hardware-time update scheduled for PPS can still take effect after this setter
+returns; configure and observe the intended PPS edge before capturing data. The
+guard does not cancel scheduled SDK updates or a blocking PPS start.
+
+RX read exceptions from allocation or timestamp arithmetic return
+`SOAPY_SDR_STREAM_ERROR` with flags and output timestamp cleared. A failing
+log sink cannot replace that error result. After an unrepresentable timestamp,
+deactivate and reactivate with a valid timestamp epoch before continuing.
 
 `getHardwareTime` uses system time for the empty selector or `sys_timestamp`.
 Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle

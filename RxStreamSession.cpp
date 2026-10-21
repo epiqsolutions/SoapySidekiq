@@ -46,7 +46,8 @@ void RxStreamSession::configureInactive(const std::function<void()> &configure)
 {
     std::lock_guard<std::mutex> lock(lifecycle_mutex_);
     if (active_ || receive_thread_.joinable())
-        throw std::logic_error("Deactivate RX successfully before changing rate or bandwidth");
+        throw std::logic_error(
+            "Deactivate RX successfully before changing stream timing configuration");
     configure();
 }
 

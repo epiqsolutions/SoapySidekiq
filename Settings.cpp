@@ -142,8 +142,12 @@ void SoapySidekiq::writeSetting(const std::string &key, const std::string &value
     {
         if (value != "rf_timestamp" && value != "sys_timestamp")
             throw std::invalid_argument("Invalid timetype: " + value);
-        timetype = value;
-        rfTimeSource = value == "rf_timestamp";
+        configureWhileRxInactive(
+            [&]
+            {
+                timetype = value;
+                rfTimeSource = value == "rf_timestamp";
+            });
     }
     else if (equalsIgnoreCase(key, "sys_clock_freq") || equalsIgnoreCase(key, "full_scale") ||
              equalsIgnoreCase(key, "overload") || equalsIgnoreCase(key, "cal_offset"))

@@ -5,11 +5,36 @@
 #include "SoapySidekiq.hpp"
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <vector>
 
 int SoapySidekiq::readStream(SoapySDR::Stream *stream, void *const *buffs, const size_t numElems,
                              int &flags, long long &timeNs, const long timeoutUs)
+{
+    try
+    {
+        return readStreamImpl(stream, buffs, numElems, flags, timeNs, timeoutUs);
+    }
+    catch (const std::exception &error)
+    {
+        flags = 0;
+        timeNs = 0;
+        try
+        {
+            SoapySDR_logf(SOAPY_SDR_ERROR, "RX read failed (card %u): %s", card, error.what());
+        }
+        catch (...)
+        {
+            // A failing diagnostic cannot replace the streaming error result.
+        }
+        return SOAPY_SDR_STREAM_ERROR;
+    }
+}
+
+int SoapySidekiq::readStreamImpl(SoapySDR::Stream *stream, void *const *buffs,
+                                 const size_t numElems, int &flags, long long &timeNs,
+                                 const long timeoutUs)
 {
     const StreamHandle *stream_handle = findStreamHandle(stream);
     if (stream_handle == nullptr)

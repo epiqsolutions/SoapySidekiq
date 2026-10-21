@@ -22,7 +22,9 @@ inline constexpr std::uint32_t maxTxBufferCount = 30000;
 
 /** SDK packet limits for the driver's unpacked, single-channel TX payload. */
 inline constexpr std::uint32_t txHeaderWords = 4;
+/** Required packet-size increment, including the SDK TX header, in words. */
 inline constexpr std::uint32_t txPacketIncrementWords = 256;
+/** Maximum unpacked complex-sample payload after reserving SDK TX header words. */
 inline constexpr std::uint32_t maxTxBlockSize = 65536 - txHeaderWords;
 
 /** Validated constructor settings used to initialize one device. */

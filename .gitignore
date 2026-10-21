@@ -51,13 +51,12 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-#unique things to ignore
+# Local build and test artifacts
 *.swp
-.cache/*
-build/*
-*.json
-!/CMakePresets.json
+/.cache/
+/build/
+/compile_commands.json
 /CMakeUserPresets.json
-out.txt
+/out.txt
 /logs/*
 !/logs/README.md
