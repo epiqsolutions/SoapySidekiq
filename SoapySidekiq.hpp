@@ -365,10 +365,6 @@ class SoapySidekiq : public SoapySDR::Device
     static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                      void *p_user) noexcept;
 
-    static void registerInstance(uint8_t card, SoapySidekiq *instance);
-    static void unregisterInstance(uint8_t card, SoapySidekiq *instance);
-    static SoapySidekiq *getInstanceForCard(uint8_t card);
-
   public:
     /** Per-send context: owned by writeStream until accepted, then by completion. */
     struct passedStruct

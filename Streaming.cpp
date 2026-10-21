@@ -6,7 +6,6 @@
 #include <cstring>
 #include <unistd.h>
 #include <iostream>
-#include <unordered_map>
 #include <vector>
 #include <string>
 #include <thread>
@@ -26,9 +25,6 @@
 
 namespace
 {
-std::mutex g_instance_registry_mutex;
-std::unordered_map<uint8_t, SoapySidekiq *> g_instance_registry;
-
 /** Translate a SoapySDR direction constant or reject an unknown value. */
 soapy_sidekiq::StreamDirection streamDirection(const int direction)
 {
@@ -56,29 +52,6 @@ SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle(SoapySDR::Stream *str
     if (stream == reinterpret_cast<SoapySDR::Stream *>(active_tx_stream))
         return active_tx_stream;
     return nullptr;
-}
-
-void SoapySidekiq::registerInstance(uint8_t card, SoapySidekiq *instance)
-{
-    std::lock_guard<std::mutex> lock(g_instance_registry_mutex);
-    g_instance_registry[card] = instance;
-}
-
-void SoapySidekiq::unregisterInstance(uint8_t card, SoapySidekiq *instance)
-{
-    std::lock_guard<std::mutex> lock(g_instance_registry_mutex);
-    const auto it = g_instance_registry.find(card);
-    if (it != g_instance_registry.end() && it->second == instance)
-    {
-        g_instance_registry.erase(it);
-    }
-}
-
-SoapySidekiq *SoapySidekiq::getInstanceForCard(uint8_t card)
-{
-    std::lock_guard<std::mutex> lock(g_instance_registry_mutex);
-    const auto it = g_instance_registry.find(card);
-    return (it != g_instance_registry.end()) ? it->second : nullptr;
 }
 
 void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
