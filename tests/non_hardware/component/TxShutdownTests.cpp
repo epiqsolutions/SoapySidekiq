@@ -122,7 +122,7 @@ class SoapySidekiq
     bool tx_writes_stopping{}, tx_stream_active{true};
     std::size_t active_tx_writers{}, active_tx_status_readers{};
     std::thread _tx_streaming_thread;
-    StreamHandle *active_tx_stream{}, *active_rx_stream{};
+    std::unique_ptr<StreamHandle> active_tx_stream, active_rx_stream;
     std::unique_ptr<RxSession> rx_session{std::make_unique<RxSession>()};
     std::unique_ptr<int> rx_backend{std::make_unique<int>()};
     SoapySidekiq()
@@ -131,8 +131,8 @@ class SoapySidekiq
         sdk.events.reserve(64);
         worker_finished = true;
         initializeTxBuffers();
-        active_tx_stream = new StreamHandle(true);
-        active_rx_stream = new StreamHandle(false);
+        active_tx_stream = std::make_unique<StreamHandle>(true);
+        active_rx_stream = std::make_unique<StreamHandle>(false);
     }
     ~SoapySidekiq();
     void initializeTxBuffers();

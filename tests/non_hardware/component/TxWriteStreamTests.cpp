@@ -244,47 +244,46 @@ public:
       int direction{SOAPY_SDR_TX};
       unsigned tx_handle{}, rx_handle{};
   };
-    StreamHandle handle;
-    StreamHandle *active_tx_stream{&handle};
-    StreamHandle *active_rx_stream{};
-    UnusedRxSession *rx_session{};
-    bool tx_stream_active{true};
-    bool tx_writes_stopping{};
-    std::size_t active_tx_writers{}, active_tx_status_readers{};
-    std::thread _tx_streaming_thread;
-    bool first_transmit{false}, txUseShort{false}, iq_swap{true};
-    std::uint32_t p_tx_block_index{};
-    std::uint32_t tx_buffer_count{DEFAULT_NUM_BUFFERS};
-    std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
-    std::uint8_t card{};
-    double maxValue{32767};
-    double txMaxValue{32767};
-    std::uint8_t num_rx_channels{1}, num_tx_channels{1};
-    std::size_t getNumChannels(int) const;
-    void validateChannel(int, std::size_t) const;
-    using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
-    std::unique_ptr<TxBlocks> tx_blocks;
-    void initializeTxBuffers();
-    std::shared_ptr<TxCompletion> tx_completion{
-        std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS)};
-    std::mutex tx_mutex;
-    FixtureCondition tx_cv;
-    bool tx_start_finished{};
-    int tx_start_status{};
-    std::vector<std::vector<std::int16_t>> transmitted;
-    bool complete_on_worker{};
-    bool defer_completion{};
-    std::vector<passedStruct *> pending;
-    std::vector<int> send_results;
-    std::size_t attempts{};
-    bool reject_notifies{true};
-    std::function<void()> on_submit;
+  std::unique_ptr<StreamHandle> active_tx_stream{std::make_unique<StreamHandle>()};
+  StreamHandle &handle{*active_tx_stream};
+  std::unique_ptr<StreamHandle> active_rx_stream;
+  UnusedRxSession *rx_session{};
+  bool tx_stream_active{true};
+  bool tx_writes_stopping{};
+  std::size_t active_tx_writers{}, active_tx_status_readers{};
+  std::thread _tx_streaming_thread;
+  bool first_transmit{false}, txUseShort{false}, iq_swap{true};
+  std::uint32_t p_tx_block_index{};
+  std::uint32_t tx_buffer_count{DEFAULT_NUM_BUFFERS};
+  std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
+  std::uint8_t card{};
+  double maxValue{32767};
+  double txMaxValue{32767};
+  std::uint8_t num_rx_channels{1}, num_tx_channels{1};
+  std::size_t getNumChannels(int) const;
+  void validateChannel(int, std::size_t) const;
+  using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
+  std::unique_ptr<TxBlocks> tx_blocks;
+  void initializeTxBuffers();
+  std::shared_ptr<TxCompletion> tx_completion{std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS)};
+  std::mutex tx_mutex;
+  FixtureCondition tx_cv;
+  bool tx_start_finished{};
+  int tx_start_status{};
+  std::vector<std::vector<std::int16_t>> transmitted;
+  bool complete_on_worker{};
+  bool defer_completion{};
+  std::vector<passedStruct *> pending;
+  std::vector<int> send_results;
+  std::size_t attempts{};
+  bool reject_notifies{true};
+  std::function<void()> on_submit;
 
-    SoapySidekiq()
-    {
-        initializeTxBuffers();
-        tx_completion->fixture_owner = this;
-    }
+  SoapySidekiq()
+  {
+      initializeTxBuffers();
+      tx_completion->fixture_owner = this;
+  }
 
     ~SoapySidekiq()
     {
@@ -1089,7 +1088,7 @@ TEST_CASE("failed SDK stop keeps stream ownership and closes write admission unt
         stop_status = -EIO;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), SOAPY_SDR_STREAM_ERROR);
         REQUIRE(device.tx_stream_active);
-        REQUIRE(device.active_tx_stream == &device.handle);
+        REQUIRE(device.active_tx_stream.get() == &device.handle);
         REQUIRE(device.tx_writes_stopping);
         stop_status = 0;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), 0);
@@ -1619,7 +1618,7 @@ TEST_CASE("already stopped TX hardware deactivates successfully for immediate an
         stop_status = -ENODEV;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), 0);
         REQUIRE(!device.tx_stream_active);
-        REQUIRE(device.active_tx_stream == &device.handle);
+        REQUIRE(device.active_tx_stream.get() == &device.handle);
         REQUIRE(device.tx_writes_stopping);
     }
     stop_status = 0;
@@ -1709,8 +1708,7 @@ TEST_CASE("closing TX retains accepted blocks until completion and isolates a re
 {
     const auto baseline = skiq_tx_block_t::live.load();
     SoapySidekiq device;
-    device.active_tx_stream = new SoapySidekiq::StreamHandle(device.handle);
-    auto *stream = reinterpret_cast<SoapySDR::Stream *>(device.active_tx_stream);
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(device.active_tx_stream.get());
     device.txUseShort = true;
     device.defer_completion = true;
     std::vector<std::int16_t> input(2 * device.current_tx_block_size, 29);

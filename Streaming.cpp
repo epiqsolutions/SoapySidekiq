@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <iostream>
 #include <vector>
+#include <utility>
 #include <string>
 #include <thread>
 #include <mutex>
@@ -47,10 +48,10 @@ SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle(SoapySDR::Stream *str
     // handles need not point to accessible memory.
     if (stream == nullptr)
         return nullptr;
-    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_rx_stream))
-        return active_rx_stream;
-    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_tx_stream))
-        return active_tx_stream;
+    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get()))
+        return active_rx_stream.get();
+    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_tx_stream.get()))
+        return active_tx_stream.get();
     return nullptr;
 }
 
@@ -168,8 +169,7 @@ void SoapySidekiq::shutdownTx() noexcept
     {
         // Destruction must continue even if a diagnostic sink throws.
     }
-    delete active_tx_stream;
-    active_tx_stream = nullptr;
+    active_tx_stream.reset();
     // Pending contexts retain accepted blocks and completion storage themselves.
     tx_blocks.reset();
 }
@@ -321,8 +321,8 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         stream_handle->channel = channel;
         stream_handle->rx_handle = rx_handle;
         stream_handle->tx_handle = skiq_tx_hdl_end;
-        active_rx_stream = stream_handle.release();
-        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream);
+        active_rx_stream = std::move(stream_handle);
+        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get());
     }
     else if (direction == SOAPY_SDR_TX)
     {
@@ -374,8 +374,8 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         stream_handle->tx_handle = tx_handle;
         initializeTxBuffers();
 
-        active_tx_stream = stream_handle.release();
-        return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream);
+        active_tx_stream = std::move(stream_handle);
+        return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream.get());
     }
     else
     {
@@ -420,9 +420,9 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
             }
         }
 
-        if (active_rx_stream == stream_handle)
+        if (active_rx_stream.get() == stream_handle)
         {
-            active_rx_stream = nullptr;
+            active_rx_stream.reset();
         }
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
@@ -436,13 +436,11 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
         if (status != 0)
             throw std::runtime_error("Cannot close TX stream after failed deactivation: " +
                                      std::to_string(status));
-        active_tx_stream = nullptr;
+        active_tx_stream.reset();
 
         // An accepted SDK submission retains its own block through completion.
         tx_blocks.reset();
     }
-
-    delete stream_handle;
 }
 
 size_t SoapySidekiq::getStreamMTU(SoapySDR::Stream *stream) const
@@ -501,7 +499,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
 
     if (stream_handle->direction == SOAPY_SDR_RX)
     {
-        if (active_rx_stream != stream_handle)
+        if (active_rx_stream.get() != stream_handle)
         {
             throw std::runtime_error("RX stream is not the active device RX stream");
         }
@@ -572,7 +570,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
     {
-        if (active_tx_stream != stream_handle)
+        if (active_tx_stream.get() != stream_handle)
         {
             throw std::runtime_error("TX stream is not the active device TX stream");
         }
@@ -706,7 +704,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
 
     if (stream_handle->direction == SOAPY_SDR_RX)
     {
-        if (active_rx_stream != stream_handle)
+        if (active_rx_stream.get() != stream_handle)
         {
             return SOAPY_SDR_STREAM_ERROR;
         }
@@ -732,7 +730,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
     {
-        if (active_tx_stream != stream_handle)
+        if (active_tx_stream.get() != stream_handle)
         {
             return SOAPY_SDR_STREAM_ERROR;
         }
@@ -761,7 +759,8 @@ int SoapySidekiq::readStream(SoapySDR::Stream *stream,
     if (stream_handle == nullptr)
         return SOAPY_SDR_STREAM_ERROR;
     if (stream_handle->direction != SOAPY_SDR_RX) return SOAPY_SDR_NOT_SUPPORTED;
-    if (active_rx_stream != stream_handle) return SOAPY_SDR_STREAM_ERROR;
+    if (active_rx_stream.get() != stream_handle)
+        return SOAPY_SDR_STREAM_ERROR;
     if (rx_session == nullptr) return SOAPY_SDR_STREAM_ERROR;
     flags = 0;
     timeNs = 0;
@@ -837,7 +836,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
     {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
-    if (active_tx_stream != stream_handle)
+    if (active_tx_stream.get() != stream_handle)
     {
         return SOAPY_SDR_STREAM_ERROR;
     }
@@ -1054,7 +1053,7 @@ int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, i
         return SOAPY_SDR_STREAM_ERROR;
     if (stream_handle->direction != SOAPY_SDR_TX)
         return SOAPY_SDR_NOT_SUPPORTED;
-    if (active_tx_stream != stream_handle)
+    if (active_tx_stream.get() != stream_handle)
         return SOAPY_SDR_STREAM_ERROR;
     chanMask = 0;
     flags = 0;

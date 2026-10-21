@@ -307,7 +307,8 @@ class SoapySidekiq : public SoapySDR::Device
     std::string timetype{};
     std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
-    StreamHandle *active_rx_stream{};
+    /** Own the RX token; the opaque Soapy handle borrows its stable address. */
+    std::unique_ptr<StreamHandle> active_rx_stream;
 
     uint8_t num_rx_channels{};
     std::vector<uint32_t> rx_sample_rates;
@@ -337,7 +338,8 @@ class SoapySidekiq : public SoapySDR::Device
     int tx_start_status{};
     bool tx_stream_active{};
     bool first_transmit{};
-    StreamHandle *active_tx_stream{};
+    /** Own the TX token until close or device shutdown. */
+    std::unique_ptr<StreamHandle> active_tx_stream;
 
     uint8_t num_tx_channels{};
     std::vector<uint32_t> tx_sample_rates;
