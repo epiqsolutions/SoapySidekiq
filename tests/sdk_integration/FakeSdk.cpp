@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -14,6 +16,26 @@ namespace scripted_sdk
 {
 std::mutex mutex;
 Script script;
+namespace
+{
+std::condition_variable tx_pps_changed;
+}
+
+bool waitForTxPps()
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    return tx_pps_changed.wait_for(lock, std::chrono::seconds(2),
+                                   [] { return script.tx_pps_entered; });
+}
+
+void releaseTxPps() noexcept
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        script.tx_pps_released = true;
+    }
+    tx_pps_changed.notify_all();
+}
 
 void reset(const std::string &failure)
 {
@@ -359,6 +381,38 @@ extern "C"
             script.tx_active = true;
             script.tx_handle = handle;
         }
+        return status;
+    }
+
+    int32_t skiq_start_tx_streaming_on_1pps(uint8_t card, skiq_tx_hdl_t handle, uint64_t timestamp)
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        const int status = record("skiq_start_tx_streaming_on_1pps");
+        if (card != card_id || !script.initialized || timestamp != 0)
+            return -EINVAL;
+        script.tx_pps_entered = true;
+        tx_pps_changed.notify_all();
+        tx_pps_changed.wait(lock, [] { return script.tx_pps_released; });
+        script.calls.emplace_back("TX PPS returned");
+        if (status == 0)
+        {
+            script.tx_active = true;
+            script.tx_handle = handle;
+        }
+        return status;
+    }
+
+    int32_t skiq_stop_tx_streaming_on_1pps(uint8_t card, skiq_tx_hdl_t, uint64_t timestamp)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        ++script.tx_stops;
+        const int status = record("skiq_stop_tx_streaming_on_1pps");
+        if (card != card_id || !script.initialized || timestamp != 0)
+            return -EINVAL;
+        if (!script.tx_active)
+            return -ENODEV;
+        if (status == 0)
+            script.tx_active = false;
         return status;
     }
 

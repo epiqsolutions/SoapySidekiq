@@ -93,6 +93,13 @@ The registered cases cover:
   and leave the native-format output unchanged. This is one registered case;
   inherited defaults and excluded draft API additions are outside its inventory.
 
+- Two concrete PPS lifecycle cases hold the real TX startup worker inside a
+  scripted SDK call. Immediate RX remains usable, zero-time writes time out,
+  deactivation cancels a waiting writer before startup returns, and PPS stop
+  follows the worker's success/error return. A destructor case retains SDK state
+  until the held worker finishes, then checks stop/unregister/exit order.
+  Cleanup guards release the script before joining futures on assertion failure.
+
 Scripts use model/handle metadata and controlled sample values for host-path
 testing; they do not advertise a physical card's capabilities. SDK transport
 behavior, physical RF/PPS timing, callback quiescence/missing callbacks, and
