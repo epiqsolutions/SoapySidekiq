@@ -245,6 +245,9 @@ class SoapySidekiq : public SoapySDR::Device
     };
 
   private:
+    /** Throwing activation implementation behind the public stream-status boundary. */
+    int activateStreamImpl(SoapySDR::Stream *stream, int flags, long long timeNs, size_t numElems);
+
     /** Resolve only this device's currently owned opaque stream tokens. */
     StreamHandle *findStreamHandle(SoapySDR::Stream *stream) const noexcept;
 
@@ -290,7 +293,6 @@ class SoapySidekiq : public SoapySDR::Device
     skiq_part_t part;
     skiq_param_t param;
     uint8_t card{};
-    std::string serial{};
     std::string timeSource{};
     uint32_t resolution{};
     double maxValue{};   // RX ADC full scale.
