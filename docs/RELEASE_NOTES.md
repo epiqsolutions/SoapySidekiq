@@ -60,9 +60,12 @@ run is claimed here.
   finite-burst activation are unsupported. Next-PPS activation is distinct from
   an absolute timestamp request; follow the documented flag/time combinations.
 - The SDK PPS start call can block until an edge. Deactivation joins that worker
-  and can therefore also wait for the edge. Writer timeout/cancellation does
-  not cancel SDK startup. A process timeout is a diagnostic outcome, not proof
-  of successful stream cleanup.
+  and therefore waits for SDK startup to return, whether by an edge or an error.
+  The SDK release history records missing-PPS timeout handling; this series has
+  not established a universal return bound or caller-controlled cancellation.
+  Writer timeout/cancellation does not cancel SDK startup. A process timeout is
+  a diagnostic outcome, not proof of successful stream cleanup. See the
+  [SDK lifetime review](SDK_LIFETIME.md) for the reviewed contracts and limits.
 - Retained TX storage protects a completion that arrives late. Delivery of every
   callback, release of contexts whose callbacks never arrive, and an SDK
   callback-quiescence barrier remain unresolved. Stop/unregister success alone
