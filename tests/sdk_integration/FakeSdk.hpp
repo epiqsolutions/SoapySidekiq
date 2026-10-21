@@ -48,6 +48,7 @@ struct Script
     std::vector<PendingSend> pending;
     std::vector<int> send_results;
     bool tx_pps_entered{}, tx_pps_released{};
+    unsigned pps_writer_waits{}, pps_joins{};
 };
 extern std::mutex mutex;
 extern Script script;

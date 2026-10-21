@@ -3,6 +3,7 @@
  * @brief Exercises the concrete device while its real PPS worker waits in the SDK.
  */
 #include "FakeSdk.hpp"
+#include "DriverTestHooks.hpp"
 #include "TestHarness.hpp"
 #include "SoapySidekiq.hpp"
 #include <SoapySidekiq/ScopeExit.hpp>
@@ -63,17 +64,22 @@ TEST_CASE("concrete pending PPS startup permits RX and joins before PPS TX stop"
         REQUIRE(scripted_sdk::snapshot().pending.empty());
         REQUIRE_EQ(device->deactivateStream(rx), 0);
 
+        const auto previous_waits = scripted_sdk::snapshot().pps_writer_waits;
         auto writer =
             std::async(std::launch::async,
                        [&] { return device->writeStream(tx, input, mtu, flags, 0, 2000000); });
         soapy_sidekiq::ScopeExit release_before_writer_join([]() noexcept
                                                             { scripted_sdk::releaseTxPps(); });
-        REQUIRE(writer.wait_for(20ms) == std::future_status::timeout);
+        REQUIRE(scripted_sdk::waitForDriverPoint(scripted_sdk::DriverTestPoint::writer_pps_wait,
+                                                 previous_waits));
+        const auto previous_joins = scripted_sdk::snapshot().pps_joins;
         auto stopped = std::async(std::launch::async, [&]
                                   { return device->deactivateStream(tx, SOAPY_SDR_HAS_TIME, 0); });
         // Release before the future's destructor joins, even if an assertion fails.
         soapy_sidekiq::ScopeExit release_before_join([]() noexcept
                                                      { scripted_sdk::releaseTxPps(); });
+        REQUIRE(scripted_sdk::waitForDriverPoint(scripted_sdk::DriverTestPoint::join_pps_worker,
+                                                 previous_joins));
         REQUIRE(stopped.wait_for(20ms) == std::future_status::timeout);
         REQUIRE_EQ(scripted_sdk::snapshot().tx_stops, 0u);
         // Cancelling the admitted writer must not wait for SDK startup to return.
@@ -103,8 +109,11 @@ TEST_CASE("concrete destructor joins held PPS startup before unregister and SDK 
     auto *tx = device->setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, {0});
     REQUIRE_EQ(device->activateStream(tx, SOAPY_SDR_HAS_TIME, 0), 0);
     REQUIRE(scripted_sdk::waitForTxPps());
+    const auto previous_joins = scripted_sdk::snapshot().pps_joins;
     auto destroyed = std::async(std::launch::async, [&] { device.reset(); });
     soapy_sidekiq::ScopeExit release_before_join([]() noexcept { scripted_sdk::releaseTxPps(); });
+    REQUIRE(scripted_sdk::waitForDriverPoint(scripted_sdk::DriverTestPoint::join_pps_worker,
+                                             previous_joins));
     REQUIRE(destroyed.wait_for(20ms) == std::future_status::timeout);
     REQUIRE_EQ(scripted_sdk::snapshot().tx_stops, 0u);
     REQUIRE_EQ(scripted_sdk::snapshot().exit_calls, 0u);

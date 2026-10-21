@@ -3,6 +3,7 @@
  * @brief Implements a hardware-free SDK script using the real SDK function types.
  */
 #include "FakeSdk.hpp"
+#include "DriverTestHooks.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -35,6 +36,27 @@ void releaseTxPps() noexcept
         script.tx_pps_released = true;
     }
     tx_pps_changed.notify_all();
+}
+
+void driverTestPoint(const DriverTestPoint point) noexcept
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        ++(point == DriverTestPoint::writer_pps_wait ? script.pps_writer_waits : script.pps_joins);
+    }
+    tx_pps_changed.notify_all();
+}
+
+bool waitForDriverPoint(const DriverTestPoint point, const unsigned previous_count)
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    return tx_pps_changed.wait_for(lock, std::chrono::seconds(2),
+                                   [&]
+                                   {
+                                       return (point == DriverTestPoint::writer_pps_wait
+                                                   ? script.pps_writer_waits
+                                                   : script.pps_joins) > previous_count;
+                                   });
 }
 
 void reset(const std::string &failure)

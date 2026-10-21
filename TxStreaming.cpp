@@ -16,6 +16,10 @@
 #include <thread>
 #include <utility>
 
+#ifdef SOAPYSIDEKIQ_DRIVER_TEST_HOOKS
+#include "tests/sdk_integration/DriverTestHooks.hpp"
+#endif
+
 void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                         void *p_user) noexcept
 {
@@ -79,7 +83,12 @@ int SoapySidekiq::stopTxStream(bool on_pps)
     // Cancelling a writer does not cancel SDK startup. Join after the SDK call
     // returns (edge or error), before stopping hardware or destroying device state.
     if (_tx_streaming_thread.joinable())
+    {
+#ifdef SOAPYSIDEKIQ_DRIVER_TEST_HOOKS
+        scripted_sdk::driverTestPoint(scripted_sdk::DriverTestPoint::join_pps_worker);
+#endif
         _tx_streaming_thread.join();
+    }
     if (!tx_stream_active || active_tx_stream == nullptr)
         return 0;
     const auto tx_handle = active_tx_stream->tx_handle;
@@ -227,6 +236,9 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
     {
         soapy_sidekiq::reportDiagnostic(
             [&] { SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start"); });
+#ifdef SOAPYSIDEKIQ_DRIVER_TEST_HOOKS
+        scripted_sdk::driverTestPoint(scripted_sdk::DriverTestPoint::writer_pps_wait);
+#endif
         std::unique_lock<std::mutex> lock(tx_mutex);
         if (!tx_cv.wait_until(lock, deadline,
                               [this] { return tx_start_finished || tx_writes_stopping; }))

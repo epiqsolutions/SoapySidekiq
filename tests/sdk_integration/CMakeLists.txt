@@ -28,6 +28,7 @@ endforeach()
 add_library(scripted_driver_objects OBJECT ${native_sources}
     FakeSdk.cpp DriverIntegrationTests.cpp PpsLifecycleTests.cpp
     ../non_hardware/support/TestMain.cpp)
+target_compile_definitions(scripted_driver_objects PRIVATE SOAPYSIDEKIQ_DRIVER_TEST_HOOKS=1)
 target_compile_features(scripted_driver_objects PRIVATE cxx_std_17)
 set_target_properties(scripted_driver_objects PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
