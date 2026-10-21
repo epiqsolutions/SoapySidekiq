@@ -27,9 +27,6 @@ inline constexpr int DEFAULT_SAMPLE_RATE = 20000000;
 inline constexpr int DEFAULT_BANDWIDTH = 18000000;
 inline constexpr int DEFAULT_FREQUENCY = 1000000000;
 inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
-inline constexpr int DEFAULT_SLEEP_US = 1;
-inline constexpr int SLEEP_1SEC = 1000000;
-inline constexpr unsigned long long NANOS_IN_SEC = 1000000000ULL;
 
 /**
  * @brief Owns a Sidekiq card's streams and callback state.
@@ -285,15 +282,11 @@ class SoapySidekiq : public SoapySDR::Device
     skiq_rx_hdl_t getFirstRxHandle(void) const;
     skiq_tx_hdl_t getFirstTxHandle(void) const;
 
-    long long convert_timestamp_to_nanos(const uint64_t timestamp,
-                                         const uint64_t timestamp_freq) const;
-
     //  sidekiq card
     std::string part_str;
     skiq_part_t part;
     skiq_param_t param;
     uint8_t card{};
-    std::string timeSource{};
     uint32_t resolution{};
     double maxValue{};   // RX ADC full scale.
     double txMaxValue{}; // TX host full scale accounts for DAC bit alignment.
@@ -345,14 +338,12 @@ class SoapySidekiq : public SoapySDR::Device
     //  setting
     bool iq_swap{};
     bool counter{};
-    bool log{};
     bool rfTimeSource{};
     uint64_t sys_freq{};
 
     // TX buffer
     skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
     uint32_t currTXBuffIndex{};
-    uint32_t p_tx_block_index{};
 
     // TX callback static function
     // The registration requires a static function instead of a method so
