@@ -96,6 +96,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
                                             const SoapySDR::Kwargs &args)
 {
     int status = 0;
+    (void)args; // No per-stream options are implemented.
     SoapySDR_logf(SOAPY_SDR_TRACE, "setupStream");
 
     const auto stream_direction = streamDirection(direction);
@@ -145,7 +146,8 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         // Validate before subtracting the header or publishing MTU-related sizes.
         rx_block_size_in_bytes = block_bytes;
         rx_block_size_in_words = block_bytes / word_bytes;
-        rx_payload_size_in_bytes = block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES;
+        rx_payload_size_in_bytes =
+            static_cast<uint32_t>(block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES);
         rx_payload_size_in_words = rx_payload_size_in_bytes / word_bytes;
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
@@ -168,7 +170,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         }
 
         // this has to be called after setting sample rate
-        int status = 0;
         status = skiq_read_sys_timestamp_freq(this->card, &this->sys_freq);
         if (status != 0)
         {
@@ -493,9 +494,9 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             SoapySDR_logf(SOAPY_SDR_INFO, "TX is set to I then Q order");
         }
 
-        //  tx block size
+        // Constructor validation bounds this payload to the SDK's uint16_t range.
         status =
-            skiq_write_tx_block_size(card, tx_handle, current_tx_block_size);
+            skiq_write_tx_block_size(card, tx_handle, static_cast<uint16_t>(current_tx_block_size));
         if (status != 0)
         {
             SoapySDR_logf(SOAPY_SDR_ERROR,
