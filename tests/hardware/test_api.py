@@ -55,8 +55,8 @@ def collect_checks(device, directions, channels=None, read_sensors=False):
 
     def stream_metadata(direction, channel):
         formats = list(device.getStreamFormats(direction, channel))
-        native, scale = device.getNativeStreamFormat(direction, channel)
-        scale = float(scale)
+        native_info = device.getNativeStreamFormat(direction, channel)
+        native, scale = native_info.format, float(native_info.fullScale)
         if native not in formats or not math.isfinite(scale) or scale <= 0:
             raise ValueError("native format/full scale disagrees with the advertised formats")
         return {"formats": formats, "native": native, "full_scale": scale,

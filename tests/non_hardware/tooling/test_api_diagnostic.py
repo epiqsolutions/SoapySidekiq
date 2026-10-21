@@ -30,7 +30,7 @@ class FakeDevice:
         self.calls = []
         self.failures = set()
         self.counts = {1: 2, 0: 1}
-        self.native = ("CS16", 32767)
+        self.native = SimpleNamespace(format="CS16", fullScale=32767)
         self.gain_range = span(0, 76, 1)
 
     def __getattr__(self, name):
@@ -109,7 +109,7 @@ class ApiDiagnosticTests(unittest.TestCase):
 
     def test_inconsistent_native_metadata_and_invalid_ranges_are_failures(self):
         device = FakeDevice()
-        device.native = ("UNKNOWN", float("nan"))
+        device.native = SimpleNamespace(format="UNKNOWN", fullScale=float("nan"))
         device.gain_range = span(10, 0)
         result = api.collect_checks(device, [("TX", 0)])
         self.assertEqual(result["summary"]["fail"], 2)
