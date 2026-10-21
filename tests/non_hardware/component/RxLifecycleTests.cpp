@@ -154,7 +154,7 @@ public:
     double maxValue{2048};
     std::uint64_t sys_freq{1000000};
     std::vector<std::uint32_t> rx_sample_rates{20000000};
-    StreamHandle *active_rx_stream{}, *active_tx_stream{};
+    std::unique_ptr<StreamHandle> active_rx_stream, active_tx_stream;
     FixtureBackend backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
     std::thread _tx_streaming_thread;
@@ -168,13 +168,13 @@ public:
     ~SoapySidekiq()
     {
         rx_session.reset();
-        delete active_rx_stream;
+        active_rx_stream.reset();
     }
     SoapySDR::Stream *setupRx()
     {
         REQUIRE(active_rx_stream == nullptr);
-        active_rx_stream = new StreamHandle;
-        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream);
+        active_rx_stream = std::make_unique<StreamHandle>();
+        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get());
     }
     void awaitWorkerFailure()
     {
@@ -487,14 +487,14 @@ TEST_CASE("failed RX deactivation returns a stream error and preserves hardware 
         auto *stream = device.setupRx();
         REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
         device.awaitWorkerFailure();
-        auto *const owner = device.active_rx_stream;
+        auto *const owner = device.active_rx_stream.get();
         sdk.stop_status = -EIO;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), SOAPY_SDR_STREAM_ERROR);
-        REQUIRE(device.active_rx_stream == owner);
+        REQUIRE(device.active_rx_stream.get() == owner);
         REQUIRE(sdk.streaming);
         REQUIRE_EQ(sdk.stop_on_pps, flags == SOAPY_SDR_HAS_TIME);
         REQUIRE_THROWS_AS(device.closeStream(stream), std::runtime_error);
-        REQUIRE(device.active_rx_stream == owner);
+        REQUIRE(device.active_rx_stream.get() == owner);
         REQUIRE(sdk.streaming);
         sdk.stop_status = 0;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), 0);

@@ -427,8 +427,7 @@ SoapySidekiq::~SoapySidekiq(void)
     }
     rx_session.reset();
     rx_backend.reset();
-    delete active_rx_stream;
-    active_rx_stream = nullptr;
+    active_rx_stream.reset();
 
     skiq_register_tx_complete_callback(card, nullptr);
 
