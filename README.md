@@ -32,6 +32,10 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Module installs respect `CMAKE_INSTALL_PREFIX`, `cmake --install --prefix`, and
+`DESTDIR` staging, including with SoapySDR 0.4.0/0.4.1's older module helper.
+An explicit module prefix does not install beside the SoapySDR dependency.
+
 The build respects `CXX`, `-DCMAKE_CXX_COMPILER=...`, and CMake toolchain files.
 The module requests C++17 without compiler extensions. For example:
 
@@ -328,6 +332,25 @@ The existing read API logs SDK failures and returns `0` for temperature or `{}`
 for acceleration. A temperature value of `0` alone therefore cannot distinguish
 a valid reading from a failed read. Metadata requests for unknown keys raise
 an argument error.
+
+## Validation and development status
+
+Use the SDK-free [non-hardware suite](tests/non_hardware/README.md) and presets
+above for portable regressions. Native SDK builds and isolated module discovery
+are separate checks; module loading alone does not open a card or validate RF.
+
+The [hardware tools](tests/hardware/README.md) cover capability/readback,
+counter/format validation, finite captures, paired tones, and PPS. Capability
+queries and counter checks do not need an external RF generator or analyzer.
+Tone/full-duplex checks need a documented RF path; calibrated absolute power or
+sensitivity needs suitable calibrated equipment. Follow the
+[post-update procedure](tests/hardware/POST_UPDATE_VALIDATION.md) for the newer
+ownership, shutdown, configuration, and buffering changes.
+
+The [development release notes](docs/RELEASE_NOTES.md) distinguish pending update
+work, local build/sanitizer checks, and the earlier reported hardware matrix.
+They are an unreleased draft. Final candidate review, compatible-host TSan,
+relevant hardware follow-up, and evidence collection remain release checks.
 
 ## License
 

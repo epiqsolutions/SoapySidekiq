@@ -1,5 +1,11 @@
 # Hardware integration test plan
 
+This is the historical campaign plan. Its pinned candidate, case counts, and
+acceptance goals describe that run; later implementation changes need the
+[post-update follow-up](POST_UPDATE_VALIDATION.md). In particular, pending SDK
+PPS startup can still block teardown until an edge arrives. The historical
+cleanup goal below does not establish bounded cancellation for the update.
+
 Candidate: `test/non-hardware-integration` at
 `4db75a965421a9ac79e2cce54fecf80bedfa79c8`.
 

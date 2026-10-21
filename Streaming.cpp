@@ -11,6 +11,7 @@
 #include <limits>
 
 #include "SoapySidekiq.hpp"
+#include <SoapySidekiq/RxStreamSession.hpp>
 #include <exception>
 #include <SoapySDR/Formats.hpp>
 #include <SoapySidekiq/Diagnostic.hpp>
@@ -114,16 +115,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
 
     if (direction == SOAPY_SDR_RX)
     {
-        if (active_rx_stream != nullptr)
-        {
-            throw std::runtime_error("only one RX stream per device is currently supported");
-        }
-
-        //  check the channel configuration
-        if (channels.size() > 1)
-        {
-            throw std::runtime_error("multi-channel RX streams are not currently supported");
-        }
         skiq_rx_hdl_t rx_handle = getRxHandle(channel);
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX channel %zu uses handle %u", channel, rx_handle);
@@ -144,31 +135,17 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error(
                 "skiq_read_rx_block_size returned an invalid unpacked block (card " +
                 std::to_string(card) + ", bytes " + std::to_string(block_bytes) + ")");
-        // Validate before subtracting the header or publishing MTU-related sizes.
-        rx_block_size_in_bytes = block_bytes;
-        rx_block_size_in_words = block_bytes / word_bytes;
-        rx_payload_size_in_bytes =
+        // Keep setup-only byte sizes local; only the payload sample count is
+        // needed by the configured stream's MTU and receive-session methods.
+        const auto payload_bytes =
             static_cast<uint32_t>(block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES);
-        rx_payload_size_in_words = rx_payload_size_in_bytes / word_bytes;
+        rx_payload_size_in_words = payload_bytes / word_bytes;
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
                       rx_payload_size_in_words);
 
-        if (format == "CS16")
-        {
-            rxUseShort = true;
-            SoapySDR_log(SOAPY_SDR_INFO, "Using format CS16");
-        }
-        else if (format == "CF32")
-        {
-            rxUseShort = false;
-            SoapySDR_log(SOAPY_SDR_INFO, "Using format CF32");
-        }
-        else
-        {
-            throw std::runtime_error("setupStream invalid format '" + format +
-                "' -- Only CS16 or CF32 is supported by SoapySidekiq module.");
-        }
+        rxUseShort = request.format == soapy_sidekiq::StreamFormat::cs16;
+        SoapySDR_logf(SOAPY_SDR_INFO, "Using format %s", format.c_str());
 
         // this has to be called after setting sample rate
         status = skiq_read_sys_timestamp_freq(this->card, &this->sys_freq);
@@ -223,38 +200,14 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         active_rx_stream = std::move(stream_handle);
         return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get());
     }
-    else if (direction == SOAPY_SDR_TX)
+    else
     {
-        if (active_tx_stream != nullptr)
-        {
-            throw std::runtime_error("only one TX stream per device is currently supported");
-        }
-
-        //  check the channel configuration
-        if (channels.size() > 1)
-        {
-            throw std::runtime_error("multi-channel TX streams are not currently supported");
-        }
         skiq_tx_hdl_t tx_handle = getTxHandle(channel);
 
         SoapySDR_logf(SOAPY_SDR_INFO, "TX channel %zu uses handle %u", channel, tx_handle);
 
-        if (format == "CS16")
-        {
-            txUseShort = true;
-            SoapySDR_log(SOAPY_SDR_INFO, "Using format CS16");
-        }
-        else if (format == "CF32")
-        {
-            txUseShort = false;
-            SoapySDR_log(SOAPY_SDR_INFO, "Using format CF32");
-        }
-        else
-        {
-            throw std::runtime_error(
-                "setupStream invalid format '" + format +
-                "' -- Only CS16 is supported by SoapySidekiq TX module.");
-        }
+        txUseShort = request.format == soapy_sidekiq::StreamFormat::cs16;
+        SoapySDR_logf(SOAPY_SDR_INFO, "Using format %s", format.c_str());
 
         status = skiq_read_sys_timestamp_freq(this->card, &this->sys_freq);
         if (status != 0)
@@ -278,10 +231,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
 
         active_tx_stream = std::move(stream_handle);
         return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream.get());
-    }
-    else
-    {
-        throw std::runtime_error("invalid direction");
     }
 }
 
@@ -414,18 +363,13 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             }
             if (tx_start_pending)
             {
-                /* if skiq_start_tx_streaming_on_1pps is called, then skiq_start_rx_streaming_on_1pps
-                 * is called the second one called will block until the first one finishes.
-                 * So the second one called will unblock 2 seconds later.
-                 * So warn the user */
+                // RX PPS startup may wait behind the outstanding TX start;
+                // the delay depends on observed edges, not a fixed duration.
                 soapy_sidekiq::reportDiagnostic(
                     [&]
                     {
-                        SoapySDR_logf(SOAPY_SDR_WARNING,
-                                      "The skiq_start_tx_streaming_on_1pps is"
-                                      " still blocked waiting for 1pps to occur"
-                                      " so calling activating a RX stream will be"
-                                      " delayed 2 seconds");
+                        SoapySDR_logf(SOAPY_SDR_WARNING, "RX PPS activation may wait for pending "
+                                                         "TX PPS startup and a later edge");
                     });
             }
         }
@@ -544,7 +488,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             return SOAPY_SDR_STREAM_ERROR;
         }
 
-        // running in aync mode
+        // Use asynchronous transfers with completion callbacks.
         status = skiq_write_tx_transfer_mode(card, tx_handle,
                                              skiq_tx_transfer_mode_async);
         if (status != 0)

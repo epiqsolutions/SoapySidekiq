@@ -72,8 +72,6 @@ class SoapySidekiq
     std::uint8_t num_rx_channels{2}, num_tx_channels{3};
     std::uint8_t card{5};
     void *active_rx_stream{}, *active_tx_stream{};
-    std::uint32_t rx_block_size_in_words{100}, rx_block_size_in_bytes{400},
-        rx_payload_size_in_bytes{376};
     SoapySDR::Stream *setupStream(int, const std::string &, const std::vector<std::size_t> &,
                                   const SoapySDR::Kwargs &);
     double maxValue{2047}, txMaxValue{8191};
@@ -188,9 +186,6 @@ TEST_CASE("RX setup rejects header-only short empty and misaligned SDK blocks be
         REQUIRE_THROWS_AS(device.setupStream(SOAPY_SDR_RX, "CS16", {1}, {}), std::runtime_error);
         REQUIRE_EQ(sdk_block_reads, 1u);
         REQUIRE_EQ(sdk_card, std::uint8_t{5});
-        REQUIRE_EQ(device.rx_block_size_in_bytes, std::uint32_t{400});
-        REQUIRE_EQ(device.rx_block_size_in_words, std::uint32_t{100});
-        REQUIRE_EQ(device.rx_payload_size_in_bytes, std::uint32_t{376});
         REQUIRE_EQ(device.rx_payload_size_in_words, std::uint32_t{1020});
     }
 }
@@ -202,9 +197,6 @@ TEST_CASE("RX setup computes payload and MTU sizes from validated SDK bytes")
         SoapySidekiq device;
         sdk_block_bytes = bytes;
         (void)device.setupStream(SOAPY_SDR_RX, "CS16", {1}, {});
-        REQUIRE_EQ(device.rx_block_size_in_bytes, static_cast<std::uint32_t>(bytes));
-        REQUIRE_EQ(device.rx_block_size_in_words, static_cast<std::uint32_t>(bytes / 4));
-        REQUIRE_EQ(device.rx_payload_size_in_bytes, static_cast<std::uint32_t>(bytes - 24));
         REQUIRE_EQ(device.rx_payload_size_in_words, static_cast<std::uint32_t>((bytes - 24) / 4));
     }
 }
@@ -225,5 +217,33 @@ TEST_CASE("RX setup SDK block-size errors retain operation card and status")
         REQUIRE(message.find("card 5") != std::string::npos);
         REQUIRE(message.find("status -5") != std::string::npos);
     }
-    REQUIRE_EQ(device.rx_block_size_in_bytes, std::uint32_t{400});
+    REQUIRE_EQ(device.rx_payload_size_in_words, std::uint32_t{1020});
+}
+
+TEST_CASE("setup rejects invalid requests through shared validation before any SDK block query")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+    {
+        SoapySidekiq device;
+        sdk_block_reads = 0;
+        for (const std::string format : {"", "CU8", "cf32"})
+            REQUIRE_THROWS_AS(device.setupStream(direction, format, {0}, {}),
+                              std::invalid_argument);
+        REQUIRE_THROWS_AS(device.setupStream(direction, "CS16", {0, 1}, {}), std::invalid_argument);
+        REQUIRE_THROWS_AS(
+            device.setupStream(direction, "CS16", {device.getNumChannels(direction)}, {}),
+            std::out_of_range);
+        REQUIRE_THROWS_AS(
+            device.setupStream(direction, "CF32", {std::numeric_limits<std::size_t>::max()}, {}),
+            std::out_of_range);
+        auto &owned = direction == SOAPY_SDR_RX ? device.active_rx_stream : device.active_tx_stream;
+        owned = &device;
+        REQUIRE_THROWS_AS(device.setupStream(direction, "CS16", {}, {}), std::logic_error);
+        REQUIRE_EQ(sdk_block_reads, 0u);
+        REQUIRE_EQ(device.rx_payload_size_in_words, std::uint32_t{1020});
+    }
+    SoapySidekiq device;
+    sdk_block_reads = 0;
+    REQUIRE_THROWS_AS(device.setupStream(-1, "CS16", {}, {}), std::invalid_argument);
+    REQUIRE_EQ(sdk_block_reads, 0u);
 }

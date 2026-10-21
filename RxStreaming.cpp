@@ -3,6 +3,7 @@
  * @brief Adapts queued native RX samples and timestamps to SoapySDR reads.
  */
 #include "SoapySidekiq.hpp"
+#include <SoapySidekiq/RxStreamSession.hpp>
 #include <chrono>
 #include <cstdint>
 #include <exception>

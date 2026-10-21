@@ -14,8 +14,7 @@
 
 namespace soapy_sidekiq
 {
-RxSampleQueue::RxSampleQueue(const std::size_t capacity_blocks)
-    : capacity_blocks_(capacity_blocks)
+RxSampleQueue::RxSampleQueue(const std::size_t capacity_blocks) : capacity_blocks_(capacity_blocks)
 {
     if (capacity_blocks_ == 0)
     {
@@ -71,9 +70,10 @@ RxPushStatus RxSampleQueue::push(const std::int16_t *samples, const std::size_t 
 {
     if (complex_samples == 0 || complex_samples > std::numeric_limits<std::size_t>::max() / 2)
         throw std::invalid_argument("RX sample count must be positive");
-    if (samples == nullptr) throw std::invalid_argument("RX samples cannot be null");
-    return push(std::vector<std::int16_t>(samples, samples + complex_samples * 2),
-                time_ns, sample_rate);
+    if (samples == nullptr)
+        throw std::invalid_argument("RX samples cannot be null");
+    return push(std::vector<std::int16_t>(samples, samples + complex_samples * 2), time_ns,
+                sample_rate);
 }
 
 RxPushStatus RxSampleQueue::pushTicks(const std::int16_t *samples,
@@ -84,9 +84,10 @@ RxPushStatus RxSampleQueue::pushTicks(const std::int16_t *samples,
 {
     if (complex_samples == 0 || complex_samples > std::numeric_limits<std::size_t>::max() / 2)
         throw std::invalid_argument("RX sample count must be positive");
-    if (samples == nullptr) throw std::invalid_argument("RX samples cannot be null");
-    return pushTicks(std::vector<std::int16_t>(samples, samples + complex_samples * 2),
-                     timestamp, timestamp_frequency, sample_rate);
+    if (samples == nullptr)
+        throw std::invalid_argument("RX samples cannot be null");
+    return pushTicks(std::vector<std::int16_t>(samples, samples + complex_samples * 2), timestamp,
+                     timestamp_frequency, sample_rate);
 }
 
 RxPushStatus RxSampleQueue::pushTicks(std::vector<std::int16_t> samples,
@@ -148,8 +149,7 @@ std::int64_t RxSampleQueue::blockTime(const Block &block) const
     // offset counts complex samples, which advance RF time by one tick each.
     const auto offset_phase = block.sample_rate.convert(block.offset);
     const auto offset_ns = offset_phase.nanoseconds;
-    if (offset_ns > 0 &&
-        block.time_ns > std::numeric_limits<std::int64_t>::max() - offset_ns)
+    if (offset_ns > 0 && block.time_ns > std::numeric_limits<std::int64_t>::max() - offset_ns)
     {
         throw std::overflow_error("RX timestamp does not fit in nanoseconds");
     }
@@ -172,10 +172,8 @@ std::int64_t RxSampleQueue::blockTime(const Block &block) const
     return time_ns;
 }
 
-RxReadResult RxSampleQueue::read(
-    std::int16_t *output,
-    const std::size_t requested_samples,
-    const std::chrono::microseconds timeout)
+RxReadResult RxSampleQueue::read(std::int16_t *output, const std::size_t requested_samples,
+                                 const std::chrono::microseconds timeout)
 {
     if (requested_samples != 0 && output == nullptr)
     {
@@ -192,9 +190,7 @@ RxReadResult RxSampleQueue::read(
 
     std::unique_lock<std::mutex> lock(mutex_);
     // Lifecycle transitions share the wake-up path with newly queued samples.
-    const auto ready = [this] {
-        return !blocks_.empty() || failed_ || !running_;
-    };
+    const auto ready = [this] { return !blocks_.empty() || failed_ || !running_; };
     if (!ready() && !data_available_.wait_for(lock, timeout, ready))
     {
         return {RxReadStatus::timeout, 0, 0, false};
@@ -211,12 +207,9 @@ RxReadResult RxSampleQueue::read(
         Block &block = blocks_.front();
         const std::size_t block_samples = block.samples.size() / 2;
         const std::size_t available = block_samples - block.offset;
-        const std::size_t to_copy =
-            std::min(available, requested_samples - result.samples);
-        std::memcpy(
-            output + result.samples * 2,
-            block.samples.data() + block.offset * 2,
-            to_copy * 2 * sizeof(std::int16_t));
+        const std::size_t to_copy = std::min(available, requested_samples - result.samples);
+        std::memcpy(output + result.samples * 2, block.samples.data() + block.offset * 2,
+                    to_copy * 2 * sizeof(std::int16_t));
         block.offset += to_copy;
         result.samples += to_copy;
         if (block.offset == block_samples)

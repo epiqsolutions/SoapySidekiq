@@ -35,14 +35,16 @@ enum class TxSampleAlignment
  * @throws std::invalid_argument for invalid widths or unknown alignment.
  */
 inline std::uint32_t txSampleFullScale(const std::uint8_t resolution,
-                                     const TxSampleAlignment alignment)
+                                       const TxSampleAlignment alignment)
 {
     const auto physical_scale = sampleFullScale(resolution);
     switch (alignment)
     {
-        case TxSampleAlignment::right_justified: return physical_scale;
-        case TxSampleAlignment::upper_bits: return sampleFullScale(16);
+    case TxSampleAlignment::right_justified:
+        return physical_scale;
+    case TxSampleAlignment::upper_bits:
+        return sampleFullScale(16);
     }
     throw std::invalid_argument("unsupported TX sample alignment");
 }
-}
+} // namespace soapy_sidekiq

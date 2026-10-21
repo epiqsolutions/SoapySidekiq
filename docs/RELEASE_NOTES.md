@@ -1,0 +1,109 @@
+# Development update release notes
+
+Unreleased draft, 2026-10-21. Integration status checked against master
+`7370025cb7acf130588086b576904360069a70d5`: the TX ownership stack
+([#110](https://github.com/epiqsolutions/SoapySidekiq/pull/110)), diagnostic
+containment ([#107](https://github.com/epiqsolutions/SoapySidekiq/pull/107)), stream
+decomposition ([#104](https://github.com/epiqsolutions/SoapySidekiq/pull/104)), and
+private device boundary ([#111](https://github.com/epiqsolutions/SoapySidekiq/pull/111))
+are on master, together with the compatibility fixes and component formatting
+in [#114](https://github.com/epiqsolutions/SoapySidekiq/pull/114),
+[#115](https://github.com/epiqsolutions/SoapySidekiq/pull/115), and
+[#116](https://github.com/epiqsolutions/SoapySidekiq/pull/116).
+Draft card/API contributions #80–#86 remain pending. Pin the final release commit
+and refresh the validation matrix before publishing a release. No new hardware
+run is claimed here.
+
+## Behavior changes and fixes
+
+- Discovery validates SDK results and constructor keywords before opening a
+  card. Logical channels use the SDK parameter table, including non-contiguous
+  handle maps. Invalid channels, names, numeric values, and unsupported stream
+  options produce explicit errors.
+- RX uses an owned worker/session and bounded sample queue. Partial reads retain
+  sample order and timestamp phase. Actual fractional rates, RF/system counter
+  conversion, and signed nanosecond overflow are checked. Worker failures wake
+  readers and preserve hardware ownership until stop succeeds.
+- TX accepts CS16 and normalized CF32 in whole-MTU requests. CF32 clips finite
+  out-of-range values and infinities; NaN maps to zero. Write deadlines cover
+  PPS, busy-buffer, and queue-full waits. Errors after accepted packets return
+  that accepted prefix so callers can advance once and retry the suffix.
+- TX deactivation closes admission, cancels waiting callers, and drains admitted
+  calls. The integrated ownership stack retains completion bookkeeping and SDK
+  blocks independently of the device and joins the PPS worker before teardown.
+  Its configurable `tx_buffer_count` accepts 1–30000; the compatibility default
+  remains 30000 pending hardware throughput/latency measurements.
+- Gain, calibration, RF port, settings, sensor, clock, and time APIs validate
+  their supported choices and report backend operation/status. Configuration
+  changes that affect RX rate/timing require successful RX deactivation first.
+  See the [main README](../README.md) for individual API contracts and the
+  [channel audit](https://github.com/epiqsolutions/SoapySidekiq/pull/113) for the audited entry points.
+- Stream errors and timeouts use SoapySDR status results. Integrated diagnostic
+  containment keeps a failing log sink from replacing a stream result or
+  accepted TX prefix. Control APIs retain throwing error boundaries; sensors
+  retain their documented legacy fallback values; C callbacks contain exceptions.
+- The build uses C++17, target-scoped SDK linkage/warnings, configurable
+  toolchains, SDK-free test presets, sanitizer presets, and isolated installs.
+  Examples use finite operation and explicit cleanup, with a noninteractive
+  hardware API diagnostic available under `tests/hardware`.
+
+## Compatibility and remaining limits
+
+- Minimum dependencies remain CMake 3.21, C++17, SoapySDR 0.4.0, and Sidekiq SDK
+  4.26.0. Master includes the 0.4 gain-range and relocatable module-install fixes in
+  [#114](https://github.com/epiqsolutions/SoapySidekiq/pull/114) and
+  [#115](https://github.com/epiqsolutions/SoapySidekiq/pull/115). Older range APIs
+  report bounds without step metadata. This is not a claim that every
+  intermediate SoapySDR/SDK version or platform has been tested.
+- One stream per direction and one logical channel per stream are supported.
+  Arbitrary partial-block TX staging, nonzero absolute-time TX scheduling, and
+  finite-burst activation are unsupported. Next-PPS activation is distinct from
+  an absolute timestamp request; follow the documented flag/time combinations.
+- The SDK PPS start call can block until an edge. Deactivation joins that worker
+  and can therefore also wait for the edge. Writer timeout/cancellation does
+  not cancel SDK startup. A process timeout is a diagnostic outcome, not proof
+  of successful stream cleanup.
+- Retained TX storage protects a completion that arrives late. Delivery of every
+  callback, release of contexts whose callbacks never arrive, and an SDK
+  callback-quiescence barrier remain unresolved. Stop/unregister success alone
+  is not treated as a documented callback barrier.
+- Process-wide SDK/card ownership is being addressed by draft
+  [#85](https://github.com/epiqsolutions/SoapySidekiq/pull/85). Two-card lifetime
+  validation remains pending. Do not infer multi-card teardown safety from
+  separate single-card processes.
+- Pending draft [#80–#86](https://github.com/epiqsolutions/SoapySidekiq/pulls) also cover
+  per-handle gain limits, named RF/attenuation APIs, channel metadata, RX loss
+  reporting, and discrete profile rates. Review and audit their integrated
+  behavior before making broader capability claims.
+- The historical 30000-block TX pool is about 1.83 GiB of payload/header storage
+  at the default 16380-sample block size, before allocator/bookkeeping overhead.
+  Smaller counts trade memory for buffering; no new default has been justified
+  by sustained hardware measurements.
+
+## Validation record
+
+| Environment | Evidence and scope |
+| --- | --- |
+| Linux x86, GCC 11 / Clang 14, SDK 4.26, SoapySDR 0.8.1 | Repeated full module build/link, isolated install, and module-load checks during the series. Portable normal/ASan-UBSan cases and CI cover focused components; totals vary by PR and must be rerun on the final tree. |
+| Linux x86, GCC 11, SDK 4.26, SoapySDR 0.4.0 | PRs #114/#115 build against the real tagged library, verify ABI `0.4-2`, module loading, install relocation, and staging. No hardware opened with this SoapySDR version. |
+| AArch64 GCC 11.4, SDK 4.26, target-built SoapySDR | Full cross-build/link/install and ELF checks passed during the series. Target execution and final release-tree validation remain separate. |
+| TSan | Instrumented binaries build; this host cannot start the runtime because of an unexpected memory mapping. A compatible-host run remains required. |
+
+The user reported the earlier hardware campaign complete on 2026-10-16 with
+SDK 4.26, SoapySDR 0.8.1, GCC 11.4, and external GPS-aligned PPS. Its original
+candidate and procedure are preserved in the
+[hardware integration plan](../tests/hardware/INTEGRATION_TEST_PLAN.md).
+Run-specific raw logs are not included in these release notes.
+
+| Historical hardware | Recorded coverage and limits |
+| --- | --- |
+| PCIe `47479` and M.2-2280 `8N55` | Paired RF/full-duplex campaign reported complete. Initialize M.2 before starting PCIe TX: the opposite order can also fail in direct SDK applications. Some high M.2 output settings distorted the SDK-generated tone. Preserve the measured operating settings in run evidence. |
+| NV100 `9YAA` | RX B1/J2 with TX A1/J1 passed full duplex at 1.92 MS/s. Tested profiles were 1, 1.92, and 10 MS/s; 2 MS/s was rejected. J2 TX produced no measured tone even in the direct SDK check and remains unverified. |
+| Other models/paths | Z4 was absent, X4 disconnected, and absolute RF power/splitter calibration was not established. Unrecorded PPS sources and model/path combinations require their own evidence. |
+
+Later production changes require the
+[post-update hardware follow-up](../tests/hardware/POST_UPDATE_VALIDATION.md).
+Before release, record the final commit, complete review/integration, rerun
+normal/sanitizer and native/ARM checks, attach hardware evidence, audit the
+final documentation, and account for useful code/tests before retiring old
+branches. Keep unsupported or skipped combinations explicit.
