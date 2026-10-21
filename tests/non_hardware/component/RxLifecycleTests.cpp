@@ -9,6 +9,10 @@
 #include <SoapySidekiq/TxCompletionState.hpp>
 #include <SoapySidekiq/TxBlockPool.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
+#include <SoapySidekiq/NumericConversion.hpp>
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <functional>
 #include <future>
 #include <limits>
@@ -48,6 +52,12 @@ void skiq_tx_block_free(skiq_tx_block_t *block) { std::free(block); }
 
 namespace
 {
+/** RF state indexed by mapped SDK handle, separate from host cache vectors. */
+struct RfConfiguration
+{
+    std::uint32_t rate{1}, bandwidth{1}, actual_bandwidth{1};
+    double actual_rate{1.5};
+};
 /** Model hardware ownership independently of the worker's running flag. */
 struct FakeSdk
 {
@@ -63,8 +73,33 @@ struct FakeSdk
     std::uint32_t configured_rate{}, configured_bandwidth{}, actual_bandwidth{};
     bool omit_rate{};
     int rate_status{}, frequency_status{};
+    bool use_rf_table{}, coupled_rf_rates{}, write_before_error{};
+    std::array<RfConfiguration, 10> rf;
+    unsigned rf_writes{}, rf_write_handle{};
+    unsigned fail_rate_read{};
+    int rf_write_status{};
 } sdk;
 std::function<void()> tx_pps_start_hook, rx_pps_start_hook;
+
+int writeRf(unsigned handle, std::uint32_t rate, std::uint32_t bandwidth)
+{
+    ++sdk.rf_writes;
+    sdk.rf_write_handle = handle;
+    if (sdk.rf_write_status != 0 && !sdk.write_before_error)
+        return sdk.rf_write_status;
+    auto &state = sdk.rf.at(handle);
+    state.rate = rate;
+    state.actual_rate = rate + 0.5;
+    state.bandwidth = bandwidth;
+    state.actual_bandwidth = bandwidth == 0 ? 1 : bandwidth;
+    if (sdk.coupled_rf_rates)
+        for (auto &entry : sdk.rf)
+        {
+            entry.rate = rate;
+            entry.actual_rate = rate + 0.5;
+        }
+    return sdk.rf_write_status;
+}
 }
 
 int skiq_read_rx_sample_rate_and_bandwidth(std::uint8_t, skiq_rx_hdl_t handle,
@@ -74,12 +109,39 @@ int skiq_read_rx_sample_rate_and_bandwidth(std::uint8_t, skiq_rx_hdl_t handle,
 {
     ++sdk.rate_reads;
     sdk.rate_handle = handle;
+    const int status = sdk.rate_reads == sdk.fail_rate_read ? -EIO : sdk.rate_status;
+    if (sdk.use_rf_table)
+    {
+        const auto &state = sdk.rf.at(handle);
+        *configured_rate = state.rate;
+        *actual_rate = state.actual_rate;
+        *configured_bandwidth = state.bandwidth;
+        *actual_bandwidth = state.actual_bandwidth;
+        return status;
+    }
     *configured_rate = sdk.configured_rate;
     if (!sdk.omit_rate)
         *actual_rate = sdk.actual_rate;
     *configured_bandwidth = sdk.configured_bandwidth;
     *actual_bandwidth = sdk.actual_bandwidth;
-    return sdk.rate_status;
+    return status;
+}
+int skiq_read_tx_sample_rate_and_bandwidth(std::uint8_t card, skiq_tx_hdl_t handle,
+                                           std::uint32_t *rate, double *actual_rate,
+                                           std::uint32_t *bandwidth, std::uint32_t *actual_bw)
+{
+    return skiq_read_rx_sample_rate_and_bandwidth(card, handle, rate, actual_rate, bandwidth,
+                                                  actual_bw);
+}
+int skiq_write_rx_sample_rate_and_bandwidth(std::uint8_t, skiq_rx_hdl_t handle, std::uint32_t rate,
+                                            std::uint32_t bandwidth)
+{
+    return writeRf(handle, rate, bandwidth);
+}
+int skiq_write_tx_sample_rate_and_bandwidth(std::uint8_t, skiq_tx_hdl_t handle, std::uint32_t rate,
+                                            std::uint32_t bandwidth)
+{
+    return writeRf(handle, rate, bandwidth);
 }
 int skiq_read_sys_timestamp_freq(std::uint8_t, std::uint64_t *frequency)
 {
@@ -166,6 +228,21 @@ public:
 class SoapySidekiq
 {
 public:
+  struct Entry
+  {
+      unsigned handle;
+  };
+  struct Parameters
+  {
+      std::array<Entry, 2> rx_param{{{3}, {7}}};
+      std::array<Entry, 2> tx_param{{{6}, {2}}};
+  } param;
+  struct RateAndBandwidth
+  {
+      std::uint32_t configured_rate;
+      double actual_rate;
+      std::uint32_t actual_bandwidth;
+  };
     struct StreamHandle
     {
         int direction{SOAPY_SDR_RX};
@@ -191,7 +268,11 @@ public:
     bool rxUseShort{true};
     double maxValue{2048};
     std::uint64_t sys_freq{1000000};
-    std::vector<std::uint32_t> rx_sample_rates{20000000};
+    std::uint8_t num_rx_channels{2}, num_tx_channels{2};
+    std::vector<std::uint32_t> rx_sample_rates{20000000, 20000000};
+    std::vector<std::uint32_t> tx_sample_rates{20000000, 20000000};
+    std::vector<std::uint32_t> rx_bandwidths{18000000, 18000000};
+    std::vector<std::uint32_t> tx_bandwidths{18000000, 18000000};
     std::unique_ptr<StreamHandle> active_rx_stream, active_tx_stream;
     FixtureBackend backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
@@ -226,6 +307,17 @@ public:
     int readStream(SoapySDR::Stream *, void *const *, std::size_t, int &, long long &, long);
     int readStreamImpl(SoapySDR::Stream *, void *const *, std::size_t, int &, long long &, long);
     void configureWhileRxInactive(const std::function<void()> &);
+    std::size_t getNumChannels(int) const;
+    void validateChannel(int, std::size_t) const;
+    skiq_rx_hdl_t getRxHandle(std::size_t) const;
+    skiq_tx_hdl_t getTxHandle(std::size_t) const;
+    void setSampleRate(int, std::size_t, double);
+    double getSampleRate(int, std::size_t) const;
+    void setBandwidth(int, std::size_t, double);
+    double getBandwidth(int, std::size_t) const;
+    void initializeRateCaches();
+    RateAndBandwidth readRateAndBandwidth(int, std::size_t) const;
+    void applyRateAndBandwidth(int, std::size_t, std::uint32_t, std::uint32_t);
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
     int activateStreamImpl(SoapySDR::Stream *, int, long long, std::size_t);
     int deactivateStream(SoapySDR::Stream *, int, long long);
@@ -240,6 +332,9 @@ public:
 #include "RxLifecycleMethods.inc"
 #include "TxStopWritesMethod.inc"
 #include "TxStartMethod.inc"
+#include "ChannelValidationMethods.inc"
+#include "ChannelMappingMethods.inc"
+#include "RateBandwidthMethods.inc"
 
 TEST_CASE("closing a failed RX worker stops hardware and permits reactivation")
 {
@@ -743,4 +838,141 @@ TEST_CASE("RX PPS activation and failure recovery preserve a concurrently starte
             REQUIRE(!device.tx_stream_active);
             REQUIRE_EQ(sdk.tx_stops, 1u);
         }
+}
+
+namespace
+{
+// Run the production TX startup body; fake SDK startup returns immediately here.
+void startRetuneFixtureTx(SoapySidekiq &device)
+{
+    device.active_tx_stream = std::make_unique<SoapySidekiq::StreamHandle>();
+    device.active_tx_stream->direction = SOAPY_SDR_TX;
+    device.active_tx_stream->tx_handle = device.getTxHandle(1);
+    device.tx_stream_active = true;
+    device.tx_writes_stopping = false;
+    std::thread worker([&] { device.tx_streaming_start(device.getTxHandle(1)); });
+    worker.join();
+}
+} // namespace
+
+TEST_CASE("RF transactions use the real RX ownership gate and restart from coupled readback")
+{
+    for (const std::size_t channel : {std::size_t{0}, std::size_t{1}})
+    {
+        SoapySidekiq device;
+        sdk.use_rf_table = sdk.coupled_rf_rates = sdk.provide_packet = true;
+        auto *const stream = device.setupRx();
+        device.active_rx_stream->channel = channel;
+        device.active_rx_stream->rx_handle = device.getRxHandle(channel);
+        startRetuneFixtureTx(device);
+        auto *const tx_owner = device.active_tx_stream.get();
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+        std::int16_t output[2]{};
+        REQUIRE_EQ(device.rx_session->read(output, 1, std::chrono::seconds(1)).time_ns,
+                   std::int64_t{666666666});
+
+        const auto reads = sdk.rate_reads;
+        const auto check_blocked = [&]
+        {
+            for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+                for (const std::size_t target : {std::size_t{0}, std::size_t{1}})
+                {
+                    REQUIRE_THROWS_AS(device.setSampleRate(direction, target, 3), std::logic_error);
+                    REQUIRE_THROWS_AS(device.setBandwidth(direction, target, 1), std::logic_error);
+                }
+            REQUIRE_EQ(sdk.rate_reads, reads);
+            REQUIRE_EQ(sdk.rf_writes, 0u);
+        };
+        check_blocked();
+        sdk.stop_status = -EIO;
+        REQUIRE_EQ(device.deactivateStream(stream, 0, 0), SOAPY_SDR_STREAM_ERROR);
+        // Worker exit is insufficient: a failed SDK stop retains the same RF gate.
+        REQUIRE(!device.rx_session->running());
+        check_blocked();
+        sdk.stop_status = 0;
+        REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+
+        device.setSampleRate(SOAPY_SDR_TX, 1, 3);
+        REQUIRE_EQ(sdk.rf_write_handle, 2u);
+        REQUIRE_EQ(device.rx_sample_rates[channel], 20000000u);
+        REQUIRE_EQ(device.getSampleRate(SOAPY_SDR_RX, channel), 3.5);
+        device.setBandwidth(SOAPY_SDR_RX, channel, 1);
+        REQUIRE_EQ(sdk.rf_write_handle, device.getRxHandle(channel));
+        REQUIRE_EQ(sdk.rf.at(device.getRxHandle(channel)).rate, 3u);
+        REQUIRE_EQ(device.rx_sample_rates[channel], 3u);
+        REQUIRE_EQ(device.rx_sample_rates[1 - channel], 20000000u);
+
+        sdk.delivered = false;
+        sdk.rf_timestamp = 7;
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+        const auto first = device.rx_session->read(output, 1, std::chrono::seconds(1));
+        const auto second = device.rx_session->read(output, 1, std::chrono::seconds(1));
+        REQUIRE(first.status == soapy_sidekiq::RxReadStatus::samples);
+        REQUIRE(second.status == soapy_sidekiq::RxReadStatus::samples);
+        REQUIRE_EQ(first.time_ns, std::int64_t{2000000000});
+        REQUIRE_EQ(second.time_ns, std::int64_t{2285714285});
+        REQUIRE_EQ(output[0], std::int16_t{3});
+        REQUIRE_EQ(output[1], std::int16_t{4});
+        REQUIRE_EQ(sdk.rate_handle, device.getRxHandle(channel));
+        REQUIRE(device.active_tx_stream.get() == tx_owner);
+        REQUIRE(device.tx_stream_active);
+        REQUIRE(!device.tx_writes_stopping);
+        REQUIRE_EQ(sdk.tx_starts, 1u);
+        REQUIRE_EQ(sdk.tx_stops, 0u);
+        REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+        device.closeStream(stream);
+        REQUIRE_EQ(sdk.tx_stops, 0u);
+        REQUIRE_EQ(device.stopTxStream(false), 0);
+        REQUIRE_EQ(sdk.tx_stops, 1u);
+    }
+}
+
+TEST_CASE("RX restart refreshes coupled hardware after failed RF writes or post-write readback")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (const std::size_t channel : {std::size_t{0}, std::size_t{1}})
+            for (const bool write_error : {false, true})
+            {
+                SoapySidekiq device;
+                sdk.use_rf_table = sdk.coupled_rf_rates = sdk.provide_packet = true;
+                auto *const stream = device.setupRx();
+                device.active_rx_stream->channel = channel;
+                device.active_rx_stream->rx_handle = device.getRxHandle(channel);
+                startRetuneFixtureTx(device);
+                auto *const tx_owner = device.active_tx_stream.get();
+                REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+                REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+                const auto rx_rates = device.rx_sample_rates;
+                const auto tx_rates = device.tx_sample_rates;
+                const auto rx_widths = device.rx_bandwidths;
+                const auto tx_widths = device.tx_bandwidths;
+                if (write_error)
+                {
+                    sdk.write_before_error = true;
+                    sdk.rf_write_status = -EIO;
+                }
+                else
+                    sdk.fail_rate_read = sdk.rate_reads + 2; // Prefetch succeeds, readback fails.
+                REQUIRE_THROWS_AS(device.setSampleRate(direction, channel, 3), std::runtime_error);
+                REQUIRE_EQ(sdk.rf_writes, 1u);
+                REQUIRE(device.rx_sample_rates == rx_rates);
+                REQUIRE(device.tx_sample_rates == tx_rates);
+                REQUIRE(device.rx_bandwidths == rx_widths);
+                REQUIRE(device.tx_bandwidths == tx_widths);
+                sdk.rf_write_status = 0;
+                sdk.fail_rate_read = 0;
+                REQUIRE_EQ(device.getSampleRate(SOAPY_SDR_RX, channel), 3.5);
+                sdk.delivered = false;
+                sdk.rf_timestamp = 7;
+                REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+                std::int16_t output[2]{};
+                const auto read = device.rx_session->read(output, 1, std::chrono::seconds(1));
+                REQUIRE(read.status == soapy_sidekiq::RxReadStatus::samples);
+                REQUIRE_EQ(read.time_ns, std::int64_t{2000000000});
+                REQUIRE(device.active_tx_stream.get() == tx_owner);
+                REQUIRE(device.tx_stream_active);
+                REQUIRE_EQ(sdk.tx_stops, 0u);
+                REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+                REQUIRE_EQ(device.stopTxStream(false), 0);
+            }
 }
