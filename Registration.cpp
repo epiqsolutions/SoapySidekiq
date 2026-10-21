@@ -129,6 +129,7 @@ SoapySDR::Device *makeSidekiq(const SoapySDR::Kwargs &args)
     return new SoapySidekiq(args);
 }
 
+/** Register discovery/construction callbacks for the linked SoapySDR ABI at module load. */
 SoapySDR::Registry registerSidekiq("sidekiq", &findSidekiq, &makeSidekiq, SOAPY_SDR_ABI_VERSION);
 
 } // namespace

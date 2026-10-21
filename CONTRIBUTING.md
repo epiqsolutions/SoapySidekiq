@@ -155,15 +155,23 @@ doxygen docs/Doxyfile
 
 CI runs the same SDK-free Doxygen check in the analysis job and saves its
 warning log. Warnings fail that check, so document new public declarations and
-reusable fields when adding them. Private implementation details remain outside
-this public-reference gate; their ownership and synchronization contracts still
-need comments where they are defined.
+reusable fields when adding them. It also checks private members, static helpers,
+and anonymous-namespace declarations with a separate internal reference:
+
+```sh
+mkdir -p build/internal-docs
+doxygen docs/Doxyfile.internal
+```
+
+Document owned/borrowed lifetimes, lock protection, units, and failure semantics
+where they are declared. The internal reference and warning log are generated
+under `build/internal-docs`; private declarations stay out of the public reference.
 
 Open `build/api-docs/html/index.html`; diagnostics are written to
 `build/api-docs/warnings.log`. The configuration treats undocumented public
-members and invalid documentation commands as errors. It excludes private
-members and static file-local helpers. Generated files stay under the ignored
-build directory; SDK/SoapySDR development headers are not required for this
+members and invalid documentation commands as errors. The internal configuration
+inherits that policy and adds private/file-local declarations. Generated files
+stay under the ignored build directory; SDK/SoapySDR development headers are not required for this
 documentation-only command. Update the declaration's contract when changing
 behavior instead of copying the same prose into its implementation.
 

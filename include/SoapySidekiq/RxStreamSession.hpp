@@ -189,13 +189,21 @@ class RxStreamSession
     RxStreamBackend &backend_;
     /** Synchronized producer/consumer handoff owned by this session. */
     RxSampleQueue queue_;
+    /** Serialize start, stop, worker join, and inactive configuration callbacks. */
     mutable std::mutex lifecycle_mutex_;
+    /** Owned receive worker; join before releasing backend_ or session state. */
     std::thread receive_thread_;
+    /** Atomic worker loop gate, cleared before deactivation joins the worker. */
     std::atomic<bool> running_{};
+    /** Atomic fatal receive/block-validation outcome for the current session. */
     std::atomic<bool> failed_{};
+    /** Atomic count of backend overrun notifications in the current session. */
     std::atomic<std::size_t> hardware_overruns_{};
+    /** Atomic count of non-contiguous RF timestamps in the current session. */
     std::atomic<std::size_t> timestamp_discontinuities_{};
+    /** Atomic saved backend error, or zero when none has been published. */
     std::atomic<int> receive_error_{};
+    /** Settings retained for stop/retry; guarded by lifecycle_mutex_. */
     RxSessionConfiguration active_configuration_{};
     /** Hardware ownership, retained after failed stops; guarded by lifecycle_mutex_. */
     bool active_{};

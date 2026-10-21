@@ -19,10 +19,13 @@
 
 namespace
 {
-// Kernel PPS names are shared by source discovery, reporting, and selection.
+/** Kernel attribute shared by PPS source discovery, reporting, and selection. */
 constexpr char KERNEL_1PPS_SOURCE_PATH[] = "/sys/kernel/epiq-axi-timing/pps/source";
+/** Setting value when the kernel cannot report a recognized PPS source. */
 constexpr char SOURCE_1PPS_UNAVAILABLE[] = "1pps_source_unavailable";
+/** Setting value selecting the external PPS input. */
 constexpr char SOURCE_1PPS_EXTERNAL[] = "1pps_source_external";
+/** Setting value selecting the internal PPS source. */
 constexpr char SOURCE_1PPS_INTERNAL[] = "1pps_source_internal";
 } // namespace
 

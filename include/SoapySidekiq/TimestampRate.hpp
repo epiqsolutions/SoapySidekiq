@@ -140,7 +140,9 @@ class TimestampRate
     }
 
   private:
+    /** Reduced samples/ticks numerator; zero denotes an unspecified rate. */
     std::uint64_t numerator_{};
+    /** Positive reduced denominator paired with numerator_. */
     std::uint64_t denominator_{1};
 };
 } // namespace soapy_sidekiq

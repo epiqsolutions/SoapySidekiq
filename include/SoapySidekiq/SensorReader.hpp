@@ -67,7 +67,9 @@ class SensorBackendError : public std::runtime_error
     int status() const noexcept;
 
   private:
+    /** Logical failed operation retained independently of the backend's lifetime. */
     std::string operation_;
+    /** Original SDK-style failure status. */
     int status_;
 };
 
@@ -107,6 +109,7 @@ class SensorReader
     std::optional<AccelerometerReading> readAccelerometer();
 
   private:
+    /** Non-owning adapter; the caller keeps it alive for every read and cleanup. */
     SensorBackend &backend_;
 };
 

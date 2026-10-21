@@ -99,8 +99,9 @@ jobs:
       - name: Check API documentation
         run: |
           doxygen --version
-          mkdir -p build/api-docs
+          mkdir -p build/api-docs build/internal-docs
           doxygen docs/Doxyfile
+          doxygen docs/Doxyfile.internal
       - name: Configure compile database
         run: |
           cmake -S tests/non_hardware -B build/analysis \
@@ -122,3 +123,4 @@ jobs:
           path: |
             build/analysis/clang-tidy*
             build/api-docs/warnings.log
+            build/internal-docs/warnings.log
