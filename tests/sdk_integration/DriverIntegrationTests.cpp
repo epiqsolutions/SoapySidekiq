@@ -206,3 +206,83 @@ TEST_CASE("concrete TX backpressure and destruction retain an accepted context f
     REQUIRE(scripted_sdk::snapshot().pending.empty());
     REQUIRE_EQ(scripted_sdk::snapshot().completions, 1u);
 }
+
+TEST_CASE("concrete constructor applies optional sources before publishing callbacks")
+{
+    scripted_sdk::reset();
+    auto args = arguments();
+    args["topology"] = "17";
+    args["clock_source"] = "External_Clock";
+    args["time_source"] = "1PPS_SOURCE_UNAVAILABLE";
+    {
+        std::unique_ptr<SoapySDR::Device> device(makeSidekiq(args));
+        const auto state = scripted_sdk::snapshot();
+        REQUIRE(state.initialized && state.callback != nullptr);
+        REQUIRE_EQ(state.topology, std::uint8_t{17});
+        REQUIRE(state.clock_source == skiq_ref_clock_external);
+        REQUIRE(state.time_source == skiq_1pps_source_unavailable);
+        REQUIRE_EQ(state.init_calls, 1u);
+        REQUIRE_EQ(state.exit_calls, 0u);
+        REQUIRE(callPosition(state, "skiq_init") <
+                callPosition(state, "skiq_is_topology_supported"));
+        REQUIRE(callPosition(state, "skiq_apply_topology") <
+                callPosition(state, "skiq_read_parameters"));
+        REQUIRE(callPosition(state, "skiq_write_ref_clock_select") <
+                callPosition(state, "skiq_write_1pps_source"));
+        REQUIRE(callPosition(state, "skiq_write_1pps_source") <
+                callPosition(state, "skiq_register_tx_complete_callback"));
+        REQUIRE(std::find(state.calls.begin(), state.calls.end(),
+                          "skiq_read_last_1pps_timestamp") == state.calls.end());
+    }
+    REQUIRE_EQ(scripted_sdk::snapshot().exit_calls, 1u);
+}
+
+TEST_CASE("concrete optional-constructor failures roll back and permit a clean retry")
+{
+    for (const auto *failure : {"unsupported topology", "skiq_apply_topology",
+                                "skiq_write_ref_clock_select", "skiq_read_last_1pps_timestamp"})
+    {
+        scripted_sdk::reset(failure);
+        const bool unsupported = std::string(failure) == "unsupported topology";
+        if (unsupported)
+        {
+            std::lock_guard<std::mutex> lock(scripted_sdk::mutex);
+            scripted_sdk::script.topology_supported = false;
+        }
+        auto args = arguments();
+        args["topology"] = "17";
+        args["clock_source"] = "external_clock";
+        args["time_source"] = "1pps_source_external";
+        if (unsupported)
+            REQUIRE_THROWS_AS(std::unique_ptr<SoapySDR::Device>(makeSidekiq(args)),
+                              std::invalid_argument);
+        else
+            REQUIRE_THROWS_AS(std::unique_ptr<SoapySDR::Device>(makeSidekiq(args)),
+                              std::runtime_error);
+        const auto failed = scripted_sdk::snapshot();
+        REQUIRE(!failed.initialized && failed.callback == nullptr);
+        REQUIRE(failed.pending.empty());
+        REQUIRE_EQ(failed.init_calls, 1u);
+        REQUIRE_EQ(failed.exit_calls, 1u);
+        REQUIRE_EQ(failed.calls.back(), std::string("skiq_exit"));
+        REQUIRE(std::find(failed.calls.begin(), failed.calls.end(),
+                          "skiq_register_tx_complete_callback") == failed.calls.end());
+        if (unsupported)
+            REQUIRE(std::find(failed.calls.begin(), failed.calls.end(), "skiq_apply_topology") ==
+                    failed.calls.end());
+        else
+            REQUIRE(callPosition(failed, failure) < callPosition(failed, "skiq_exit"));
+
+        // A failed source observation must not retain SDK/session ownership.
+        // Disable PPS observation on retry: this test has no physical PPS input.
+        scripted_sdk::reset();
+        args["time_source"] = "1pps_source_unavailable";
+        {
+            std::unique_ptr<SoapySDR::Device> device(makeSidekiq(args));
+            REQUIRE(scripted_sdk::snapshot().initialized);
+            REQUIRE(scripted_sdk::snapshot().callback != nullptr);
+        }
+        REQUIRE(!scripted_sdk::snapshot().initialized);
+        REQUIRE_EQ(scripted_sdk::snapshot().exit_calls, 1u);
+    }
+}

@@ -139,6 +139,57 @@ extern "C"
         return 0;
     }
 
+    bool skiq_is_topology_supported(uint8_t card)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        record("skiq_is_topology_supported");
+        return script.initialized && card == card_id && script.topology_supported;
+    }
+
+    int32_t skiq_apply_topology(uint8_t card, uint8_t topology)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        const int status = record("skiq_apply_topology");
+        if (!script.initialized || card != card_id)
+            return -EINVAL;
+        if (status == 0)
+            script.topology = topology;
+        return status;
+    }
+
+    int32_t skiq_write_ref_clock_select(uint8_t card, skiq_ref_clock_select_t source)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        const int status = record("skiq_write_ref_clock_select");
+        if (!script.initialized || card != card_id)
+            return -EINVAL;
+        if (status == 0)
+            script.clock_source = source;
+        return status;
+    }
+
+    int32_t skiq_write_1pps_source(uint8_t card, skiq_1pps_source_t source)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        const int status = record("skiq_write_1pps_source");
+        if (!script.initialized || card != card_id)
+            return -EINVAL;
+        if (status == 0)
+            script.time_source = source;
+        return status;
+    }
+
+    int32_t skiq_read_last_1pps_timestamp(uint8_t card, uint64_t *rf, uint64_t *system)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        const int status = record("skiq_read_last_1pps_timestamp");
+        if (!script.initialized || card != card_id)
+            return -EINVAL;
+        if (status == 0)
+            *rf = *system = 0; // No physical edge is modeled.
+        return status;
+    }
+
     int32_t skiq_read_parameters(uint8_t, skiq_param_t *parameters)
     {
         std::lock_guard<std::mutex> lock(mutex);
