@@ -320,10 +320,10 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
                       getTxHandle(chan));
     }
 
-    uint8_t tmp_resolution = 0;
+    uint8_t rx_resolution = 0;
 
     /* Every card can have a different iq resolution.  */
-    status = skiq_read_rx_iq_resolution(card, &tmp_resolution);
+    status = skiq_read_rx_iq_resolution(card, &rx_resolution);
     if (status != 0)
     {
         SoapySDR_logf(SOAPY_SDR_ERROR,
@@ -334,11 +334,10 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
                                  ", status " + std::to_string(status) + ")");
     }
 
-    this->resolution = tmp_resolution;
-    this->maxValue = soapy_sidekiq::sampleFullScale(tmp_resolution);
+    this->maxValue = soapy_sidekiq::sampleFullScale(rx_resolution);
 
     SoapySDR_logf(SOAPY_SDR_INFO, "card: %u, card resolution: %u bits, max ADC value: %u", card,
-                  this->resolution, static_cast<uint32_t>(this->maxValue));
+                  static_cast<uint32_t>(rx_resolution), static_cast<uint32_t>(this->maxValue));
 
     // The transport stores signed 16-bit components, but DAC width is product-specific.
     uint8_t tx_resolution = 0;

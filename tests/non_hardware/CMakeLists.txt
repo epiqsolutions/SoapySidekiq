@@ -383,7 +383,7 @@ add_test(NAME antenna.all COMMAND antenna_tests)
 set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
 
 extract_settings_method(constructor_counts "    status = skiq_read_num_rx_chans("
-    "    uint8_t tmp_resolution")
+    "    uint8_t rx_resolution")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ConstructorChannelCounts.inc" "${constructor_counts}")
 add_executable(constructor_channel_count_tests support/TestMain.cpp component/ConstructorChannelCountTests.cpp)
 target_include_directories(constructor_channel_count_tests PRIVATE

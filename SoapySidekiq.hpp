@@ -385,8 +385,6 @@ class SoapySidekiq : public SoapySDR::Device
     skiq_param_t param;
     /** SDK card identifier selected during construction. */
     uint8_t card{};
-    /** RX ADC resolution in bits, reported by the SDK at construction. */
-    uint32_t resolution{};
     /** RX ADC full scale used for normalized CF32 conversion. */
     double maxValue{};
     /** TX host full scale, accounting for the card's DAC bit alignment. */
