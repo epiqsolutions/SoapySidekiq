@@ -69,6 +69,24 @@ the sole channel in that stream, regardless of its logical device channel or
 SDK handle. Device-wide time APIs intentionally use the first mapped available
 RX or TX handle; those APIs have no channel argument.
 
+## Concrete-device invalid-request matrix
+
+The [native integration case](../tests/sdk_integration/DriverIntegrationTests.cpp)
+now invokes all 28 scalar-channel methods on the real `SoapySidekiq` class,
+including the sample-rate-range compatibility method with SoapySDR 0.4. It uses
+four synthetic channel-count configurations: both directions present, RX absent,
+TX absent, and both absent. For each method it checks the count boundary and
+maximum `size_t` in both valid directions, plus invalid directions -1 and 2.
+
+All 672 requests must throw the expected range/direction exception before any
+scripted SDK call; native full scale remains unchanged. The same case runs in
+GCC/Clang, ASan/UBSan, real SoapySDR 0.4, and concrete-driver TSan configurations.
+Temporarily disabling the production channel bound fails this new case at
+`getStreamFormats`; restoring the source restores the passing suite. These are
+672 checks within one registered native case, not 672 additional portable cases.
+The existing focused fixtures still cover valid mapping and operation-specific
+numeric/backend errors.
+
 ## Other request boundaries
 
 The channel inventory is one part of validation. The implemented request

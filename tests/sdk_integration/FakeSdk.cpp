@@ -220,14 +220,14 @@ extern "C"
     int32_t skiq_read_num_rx_chans(uint8_t, uint8_t *count)
     {
         std::lock_guard<std::mutex> lock(mutex);
-        *count = 2;
+        *count = script.rx_channels;
         return record("skiq_read_num_rx_chans");
     }
 
     int32_t skiq_read_num_tx_chans(uint8_t, uint8_t *count)
     {
         std::lock_guard<std::mutex> lock(mutex);
-        *count = 2;
+        *count = script.tx_channels;
         return record("skiq_read_num_tx_chans");
     }
 
