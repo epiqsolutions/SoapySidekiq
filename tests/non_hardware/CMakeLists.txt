@@ -554,8 +554,10 @@ math(EXPR tx_if_start "${tx_branch} + 9")
 string(SUBSTRING "${activate_method}" ${tx_if_start} -1 tx_activate_body)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxActivationMethods.inc"
     "${tx_activate_prefix}    ${tx_activate_body}")
+extract_settings_method(rx_configuration_guard "void SoapySidekiq::configureWhileRxInactive(" "\n}\n")
+string(APPEND rx_configuration_guard "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RxLifecycleMethods.inc"
-    "${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
+    "${rx_configuration_guard}\n${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
 add_executable(rx_lifecycle_tests
     support/TestMain.cpp component/RxLifecycleTests.cpp ../../RxSampleQueue.cpp ../../RxStreamSession.cpp)
 target_include_directories(rx_lifecycle_tests PRIVATE

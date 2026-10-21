@@ -100,7 +100,10 @@ oracle checks 1,000 blocks with eight partial reads each. The RX lifecycle
 fixture compiles the production close/deactivate methods and RX activation
 branch with the real RxStreamSession, an injected receive failure, and fake
 SDK start/stop calls. It covers close/reuse, stop failure with retry, and
-already-stopped hardware. Stream setup, actual SDK I/O, and destructor cleanup
+already-stopped hardware. Configuration cases reject rate/bandwidth writes in
+either direction while RX retains ownership, including worker and stop failures.
+A concurrent session test holds configuration open and verifies activation waits
+before reading its snapshot and starting hardware. Stream setup, actual SDK I/O, and destructor cleanup
 are outside that fixture's coverage.
 
 The session component cases additionally cover concurrent activation during
