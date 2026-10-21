@@ -229,3 +229,15 @@ check every host cache remains unchanged on failure, getters observe fresh
 hardware state, and an opposite-direction bandwidth retry preserves the actual
 rate rather than restoring a stale cached one. These are host-policy checks;
 they do not prove a card's coupling model or hardware rollback after SDK errors.
+
+The RX lifecycle fixture also connects the production RF setters/getters to the
+real RX session configuration lock, worker, queue, and activation methods.
+With two non-contiguous RX/TX handle maps, cases reject rate/bandwidth writes
+while RX owns hardware, including after a failed stop. After a successful stop,
+a scripted coupled TX rate change and RX bandwidth update preserve the fresh
+configured rate. Restarted RX reads use the actual fractional rate and raw
+counter phase, even when a write or its readback failed without updating caches.
+TX startup uses the production worker body; its token, admission, and stop
+responsibility remain intact across RX retuning/restart. TX submissions and
+physical RF continuity are outside this fixture. Synthetic low fractional rates
+make timestamp assertions exact; they do not advertise hardware-supported rates.

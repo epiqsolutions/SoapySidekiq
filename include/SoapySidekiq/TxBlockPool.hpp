@@ -54,6 +54,7 @@ template <typename Block> class TxBlockPool
     }
 
   private:
+    /** Immutable pool references; accepted contexts independently retain their blocks. */
     std::vector<std::shared_ptr<Block>> blocks_;
 };
 } // namespace soapy_sidekiq

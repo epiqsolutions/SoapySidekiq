@@ -160,12 +160,17 @@ class RxSampleQueue
     /** An owned CS16 block plus the next unread complex-sample offset. */
     struct Block
     {
+        /** Owned interleaved IQ values; two int16_t components per complex sample. */
         std::vector<std::int16_t> samples;
+        /** Complex samples already consumed from the beginning of samples. */
         std::size_t offset{};
+        /** Whole nanoseconds at the first sample, before applying offset. */
         std::int64_t time_ns{};
+        /** Exact samples/s used to advance the timestamp for partial reads. */
         TimestampRate sample_rate{};
-        // Fractional nanosecond phase lost by the integer time_ns conversion.
+        /** Fractional nanosecond numerator omitted from the integer time_ns conversion. */
         std::uint64_t time_remainder{};
+        /** Positive denominator for time_remainder's fractional nanosecond phase. */
         std::uint64_t time_denominator{1};
     };
 
@@ -182,13 +187,19 @@ class RxSampleQueue
      */
     std::int64_t blockTime(const Block &block) const;
 
+    /** Immutable limit on retained whole or partially consumed blocks. */
     const std::size_t capacity_blocks_;
+    /** Protect all mutable queue, lifecycle, and drop-count state. */
     mutable std::mutex mutex_;
+    /** Wake readers when samples arrive or running/failed state changes. */
     std::condition_variable data_available_;
+    /** Timestamped owned blocks in delivery order; guarded by mutex_. */
     std::deque<Block> blocks_;
-    // All lifecycle and queue fields below are protected by mutex_.
+    /** Accept producer blocks while true; guarded by mutex_. */
     bool running_{};
+    /** Fatal producer error reported to readers; guarded by mutex_. */
     bool failed_{};
+    /** Oldest blocks discarded in the current session; guarded by mutex_. */
     std::size_t dropped_blocks_{};
 };
 

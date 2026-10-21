@@ -39,7 +39,9 @@ template <typename Cleanup> class ScopeExit
     }
 
   private:
+    /** Nonthrowing resource release action, owned without dynamic allocation. */
     Cleanup cleanup_;
+    /** Invoke cleanup on scope exit until responsibility is explicitly released. */
     bool armed_{true};
 };
 
