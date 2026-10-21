@@ -106,6 +106,14 @@ The registered cases cover:
   access, no pending sends, and reuse of valid tokens after rejected controls.
   SDK block-size queries and transmit attempts are explicitly recorded.
 
+- Two failed-stop/retry cases retain RX configuration ownership across failed
+  deactivation and close retries, reject premature restart/RF writes, and then
+  restart RX with fresh coupled-clock timestamps. TX host submissions preserve
+  their payloads across that RX sequence. A failed TX stop retains accepted
+  contexts and the token while closing write admission; callbacks and a later
+  successful retry release the owners without duplicate successful stops.
+  This checks host control/payload behavior, not physical RF continuity.
+
 The scripted object target alone enables two observation points in
 `TxStreaming.cpp`: after writer admission on entering the PPS-wait path, and
 after draining callers on entering the PPS-worker join path. Mutex-protected
