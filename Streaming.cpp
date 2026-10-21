@@ -353,23 +353,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         stream_handle->channel = channel;
         stream_handle->rx_handle = skiq_rx_hdl_end;
         stream_handle->tx_handle = tx_handle;
-        auto completion = std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS);
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; ++i)
-        {
-            p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
-            if (p_tx_block[i] == nullptr)
-            {
-                // Free only the successfully allocated prefix on partial failure.
-                for (int allocated = 0; allocated < i; ++allocated)
-                {
-                    skiq_tx_block_free(p_tx_block[allocated]);
-                    p_tx_block[allocated] = nullptr;
-                }
-                throw std::bad_alloc();
-            }
-        }
-        tx_completion = std::move(completion);
-        currTXBuffIndex = 0;
+        initializeTxBuffers();
 
         active_tx_stream = stream_handle.release();
         return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream);
@@ -378,6 +362,16 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
     {
         throw std::runtime_error("invalid direction");
     }
+}
+
+void SoapySidekiq::initializeTxBuffers()
+{
+    auto completion = std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS);
+    auto blocks = std::make_unique<TxBlocks>(DEFAULT_NUM_BUFFERS, current_tx_block_size,
+                                             skiq_tx_block_allocate, skiq_tx_block_free);
+    tx_completion = std::move(completion);
+    tx_blocks = std::move(blocks);
+    currTXBuffIndex = 0;
 }
 
 void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
@@ -424,11 +418,8 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
             active_tx_stream = nullptr;
         }
 
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-        {
-            skiq_tx_block_free(p_tx_block[i]);
-            p_tx_block[i] = nullptr;
-        }
+        // An accepted SDK submission retains its own block through completion.
+        tx_blocks.reset();
     }
 
     delete stream_handle;
@@ -992,10 +983,11 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                 });
             auto context = std::make_unique<passedStruct>();
             context->completion = tx_completion;
+            context->block = tx_blocks->block(block_index);
             context->txIndex = block_index;
 
             // Pointer to the location in the output buffer to copy to.
-            char *outbuff_ptr = reinterpret_cast<char *>(p_tx_block[currTXBuffIndex]->data);
+            char *outbuff_ptr = reinterpret_cast<char *>(context->block->data);
 
             // determine if we received short or float
             if (txUseShort)
@@ -1012,8 +1004,8 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                                                  static_cast<float>(this->txMaxValue));
             }
 
-            status = skiq_transmit(this->card, stream_handle->tx_handle,
-                                   this->p_tx_block[block_index], context.get());
+            status = skiq_transmit(this->card, stream_handle->tx_handle, context->block.get(),
+                                   context.get());
             if (status == 0)
             {
                 // The SDK completion callback now owns context. It may already

@@ -16,6 +16,7 @@
 #include <new>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySidekiq/TxCompletionState.hpp>
+#include <SoapySidekiq/TxBlockPool.hpp>
 #include <cmath>
 #include <cstdint>
 #include <condition_variable>
@@ -51,7 +52,31 @@ static void completionLog()
 #define SoapySDR_log(...) completionLog()
 
 namespace SoapySDR { struct Stream {}; }
-struct skiq_tx_block_t { std::int16_t data[504]{}; };
+struct skiq_tx_block_t
+{
+    inline static std::atomic<std::size_t> live{};
+    std::int16_t data[504]{};
+    skiq_tx_block_t()
+    {
+        ++live;
+    }
+    ~skiq_tx_block_t()
+    {
+        --live;
+    }
+};
+std::size_t block_allocations{}, fail_block_allocation = std::numeric_limits<std::size_t>::max();
+skiq_tx_block_t *skiq_tx_block_allocate(std::uint32_t samples)
+{
+    REQUIRE_EQ(samples, 252u);
+    if (block_allocations++ == fail_block_allocation)
+        return nullptr;
+    return new skiq_tx_block_t;
+}
+void skiq_tx_block_free(skiq_tx_block_t *block) noexcept
+{
+    delete block;
+}
 class SoapySidekiq;
 struct TxCompletion;
 struct passedStruct
@@ -59,6 +84,7 @@ struct passedStruct
     inline static std::atomic<std::size_t> live{};
     inline static bool fail_allocation{};
     std::shared_ptr<TxCompletion> completion;
+    std::shared_ptr<skiq_tx_block_t> block;
     std::uint32_t txIndex{};
     passedStruct()
     {
@@ -150,6 +176,10 @@ int skiq_read_tx_num_underruns(std::uint8_t, skiq_tx_hdl_t handle, std::uint32_t
 }
 struct UnusedRxSession
 {
+    bool running() const
+    {
+        return false;
+    }
     int deactivate(bool)
     {
         return 0;
@@ -231,8 +261,9 @@ public:
     std::uint8_t num_rx_channels{1}, num_tx_channels{1};
     std::size_t getNumChannels(int) const;
     void validateChannel(int, std::size_t) const;
-    skiq_tx_block_t blocks[DEFAULT_NUM_BUFFERS];
-    skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{&blocks[0], &blocks[1], &blocks[2]};
+    using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
+    std::unique_ptr<TxBlocks> tx_blocks;
+    void initializeTxBuffers();
     std::shared_ptr<TxCompletion> tx_completion{
         std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS)};
     std::mutex tx_mutex;
@@ -250,6 +281,7 @@ public:
 
     SoapySidekiq()
     {
+        initializeTxBuffers();
         tx_completion->fixture_owner = this;
     }
 
@@ -275,12 +307,15 @@ public:
         completeTx(tx_completion, index);
     }
     static void tx_complete_callback(int32_t, skiq_tx_block_t *, void *) noexcept;
+    void closeStream(SoapySDR::Stream *);
     void stopTxWrites();
     int deactivateStream(SoapySDR::Stream *, int, long long);
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
     int activateStreamImpl(SoapySDR::Stream *, int, long long, std::size_t);
 };
 
+#include "TxBufferInitialization.inc"
+#include "TxCloseMethod.inc"
 #include "TxCompletionMethod.inc"
 #include "TxCompletionCallback.inc"
 
@@ -303,7 +338,7 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
                 std::lock_guard<std::mutex> lock(device.tx_completion->mutex);
                 device.tx_completion->slots[prior_index] = 1;
             }
-            device.tx_complete(0, device.p_tx_block[prior_index], prior_index);
+            device.tx_complete(0, device.tx_blocks->block(prior_index).get(), prior_index);
         }
         return status;
     }
@@ -526,15 +561,16 @@ TEST_CASE("TX never overwrites a busy SDK block before completion")
     SoapySidekiq device;
     device.txUseShort = true;
     device.tx_completion->slots[0] = 1;
-    std::fill(std::begin(device.blocks[0].data), std::end(device.blocks[0].data), 123);
+    std::fill(std::begin(device.tx_blocks->block(0)->data),
+              std::end(device.tx_blocks->block(0)->data), 123);
     std::vector<std::int16_t> input(2 * device.current_tx_block_size, 456);
     bool original_payload_preserved = false;
     wait_hook = [&]
     {
-        original_payload_preserved =
-            std::all_of(std::begin(device.blocks[0].data), std::end(device.blocks[0].data),
-                        [](auto sample) { return sample == 123; });
-        device.tx_complete(0, device.p_tx_block[0], 0);
+        original_payload_preserved = std::all_of(std::begin(device.tx_blocks->block(0)->data),
+                                                 std::end(device.tx_blocks->block(0)->data),
+                                                 [](auto sample) { return sample == 123; });
+        device.tx_complete(0, device.tx_blocks->block(0).get(), 0);
     };
     const void *buffers[]{input.data()};
     int flags = 0;
@@ -633,7 +669,7 @@ TEST_CASE("accepted TX contexts survive submission until out-of-order completion
     for (auto it = device.pending.rbegin(); it != device.pending.rend(); ++it)
     {
         auto *context = *it;
-        device.tx_complete(0, device.p_tx_block[context->txIndex], context->txIndex);
+        device.tx_complete(0, device.tx_blocks->block(context->txIndex).get(), context->txIndex);
         delete context;
     }
     device.pending.clear();
@@ -714,7 +750,8 @@ TEST_CASE("busy TX blocks respect zero and finite timeouts without payload write
 {
     SoapySidekiq device;
     device.tx_completion->slots[0] = 1;
-    std::fill(std::begin(device.blocks[0].data), std::end(device.blocks[0].data), 123);
+    std::fill(std::begin(device.tx_blocks->block(0)->data),
+              std::end(device.tx_blocks->block(0)->data), 123);
     std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
     const void *buffers[]{input.data()};
     int flags = 0;
@@ -726,7 +763,8 @@ TEST_CASE("busy TX blocks respect zero and finite timeouts without payload write
         REQUIRE_EQ(device.attempts, std::size_t{0});
         REQUIRE_EQ(device.tx_completion->slots[0], 1);
         REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
-        REQUIRE(std::all_of(std::begin(device.blocks[0].data), std::end(device.blocks[0].data),
+        REQUIRE(std::all_of(std::begin(device.tx_blocks->block(0)->data),
+                            std::end(device.tx_blocks->block(0)->data),
                             [](auto sample) { return sample == 123; }));
     }
 }
@@ -826,7 +864,7 @@ TEST_CASE("TX buffer completion wakes the maximum timeout without overflow")
 {
     SoapySidekiq device;
     device.tx_completion->slots[0] = 1;
-    wait_hook = [&] { device.tx_complete(0, device.p_tx_block[0], 0); };
+    wait_hook = [&] { device.tx_complete(0, device.tx_blocks->block(0).get(), 0); };
     std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
     const void *buffers[]{input.data()};
     int flags = 0;
@@ -950,7 +988,7 @@ TEST_CASE("TX callback releases context after throwing diagnostics and publishes
     };
     soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
     static_assert(noexcept(SoapySidekiq::tx_complete_callback(0, nullptr, nullptr)));
-    SoapySidekiq::tx_complete_callback(0, &device.blocks[0], context);
+    SoapySidekiq::tx_complete_callback(0, device.tx_blocks->block(0).get(), context);
     REQUIRE(published);
     REQUIRE(unlocked);
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
@@ -1524,7 +1562,10 @@ TEST_CASE(
     auto *context = device->pending.back();
     device->pending.clear(); // The simulated SDK retains this accepted context.
     const std::weak_ptr<TxCompletion> retained = device->tx_completion;
+    const std::weak_ptr<skiq_tx_block_t> retained_block = context->block;
     device.reset();
+    REQUIRE(!retained_block.expired());
+    REQUIRE_EQ(context->block->data[0], 17);
     REQUIRE(!retained.expired());
     auto state = retained.lock();
     REQUIRE(state != nullptr);
@@ -1534,6 +1575,7 @@ TEST_CASE(
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
     state.reset();
     REQUIRE(retained.expired());
+    REQUIRE(retained_block.expired());
 }
 
 TEST_CASE("old stream completions cannot release a new stream reservation")
@@ -1552,4 +1594,80 @@ TEST_CASE("old stream completions cannot release a new stream reservation")
     REQUIRE_EQ(device.tx_completion->slots[0], 1);
     REQUIRE_EQ(device.tx_completion->completed, std::uint64_t{0});
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("TX block allocation failure unwinds its prefix without replacing published owners")
+{
+    for (std::size_t prefix = 0; prefix < DEFAULT_NUM_BUFFERS; ++prefix)
+    {
+        SoapySidekiq device;
+        const auto *pool = device.tx_blocks.get();
+        const auto completion = device.tx_completion;
+        const auto live = skiq_tx_block_t::live.load();
+        device.currTXBuffIndex = 2;
+        fail_block_allocation = block_allocations + prefix;
+        soapy_sidekiq::ScopeExit restore(
+            []() noexcept { fail_block_allocation = std::numeric_limits<std::size_t>::max(); });
+        REQUIRE_THROWS_AS(device.initializeTxBuffers(), std::bad_alloc);
+        REQUIRE_EQ(skiq_tx_block_t::live.load(), live);
+        REQUIRE(device.tx_blocks.get() == pool);
+        REQUIRE(device.tx_completion == completion);
+        REQUIRE_EQ(device.currTXBuffIndex, 2u);
+    }
+}
+
+TEST_CASE("TX block owners release unused storage when the device is destroyed")
+{
+    const auto baseline = skiq_tx_block_t::live.load();
+    {
+        SoapySidekiq device;
+        REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline + DEFAULT_NUM_BUFFERS);
+    }
+    REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline);
+}
+
+TEST_CASE("closing TX retains accepted blocks until completion and isolates a replacement pool")
+{
+    const auto baseline = skiq_tx_block_t::live.load();
+    SoapySidekiq device;
+    device.active_tx_stream = new SoapySidekiq::StreamHandle(device.handle);
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(device.active_tx_stream);
+    device.txUseShort = true;
+    device.defer_completion = true;
+    std::vector<std::int16_t> input(2 * device.current_tx_block_size, 29);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 100000),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.pending.size(), std::size_t{1});
+    std::unique_ptr<passedStruct> accepted(device.pending.back());
+    device.pending.clear();
+    const std::weak_ptr<skiq_tx_block_t> retained = accepted->block;
+    stop_status = 0;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    device.closeStream(stream);
+    REQUIRE(device.tx_blocks == nullptr);
+    REQUIRE(device.active_tx_stream == nullptr);
+    REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline + 1);
+    REQUIRE_EQ(accepted->block->data[0], 29);
+    device.initializeTxBuffers();
+    device.tx_completion->fixture_owner = &device;
+    device.tx_completion->slots[0] = 1;
+    auto *block = accepted->block.get();
+    SoapySidekiq::tx_complete_callback(0, block, accepted.release());
+    REQUIRE(retained.expired());
+    REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline + DEFAULT_NUM_BUFFERS);
+    REQUIRE_EQ(device.tx_completion->slots[0], 1);
+    REQUIRE_EQ(device.tx_completion->completed, std::uint64_t{0});
+}
+
+TEST_CASE("invalid TX pool dimensions fail before allocator access")
+{
+    const auto before = block_allocations;
+    using Pool = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
+    REQUIRE_THROWS_AS((Pool(0, 252, skiq_tx_block_allocate, skiq_tx_block_free)),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS((Pool(3, 0, skiq_tx_block_allocate, skiq_tx_block_free)),
+                      std::invalid_argument);
+    REQUIRE_EQ(block_allocations, before);
 }

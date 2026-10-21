@@ -289,6 +289,12 @@ function(extract_stream_method output start_marker end_marker)
 endfunction()
 extract_stream_method(stream_lookup "SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle("
     "void SoapySidekiq::tx_complete_callback(")
+extract_stream_method(tx_buffer_init "void SoapySidekiq::initializeTxBuffers("
+    "void SoapySidekiq::closeStream(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxBufferInitialization.inc" "${tx_buffer_init}")
+extract_stream_method(tx_close "void SoapySidekiq::closeStream("
+    "size_t SoapySidekiq::getStreamMTU(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxCloseMethod.inc" "${tx_close}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamHandleLookup.inc" "${stream_lookup}")
 extract_stream_method(stream_mtu "size_t SoapySidekiq::getStreamMTU("
     "int SoapySidekiq::activateStream(")

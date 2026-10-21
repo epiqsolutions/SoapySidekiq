@@ -129,5 +129,14 @@ Late-completion cases destroy the fixture device before invoking the production
 callback and replace the stream state before completing an older reservation.
 The production completion storage and locking are used with an instrumented
 condition variable to preserve the existing wait-boundary tests. These cases
-verify bookkeeping lifetime and stream isolation, not SDK block lifetime or
-callback delivery/quiescence after SDK shutdown.
+verify bookkeeping lifetime and stream isolation. The block-ownership cases
+below extend them; callback delivery/quiescence after SDK shutdown is unverified.
+
+TX blocks use a preallocated pool of shared owners with an injected SDK
+allocator/deleter. Accepted contexts retain their own block through completion.
+Allocation-failure cases run the production pool-initialization transaction at
+each failed prefix and verify rollback preserves the published pool, bookkeeping,
+and write index. Production close tests release unused storage while a pending
+block retains its payload across close/replacement and completes afterward.
+The device-destruction completion case also checks block lifetime. This does not
+prove that SDK shutdown delivers every outstanding callback.

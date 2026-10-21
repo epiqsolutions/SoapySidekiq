@@ -23,6 +23,7 @@
 #include <SoapySDR/Version.h>
 #include <SoapySidekiq/RxStreamSession.hpp>
 #include <SoapySidekiq/TxCompletionState.hpp>
+#include <SoapySidekiq/TxBlockPool.hpp>
 
 inline constexpr int DEFAULT_SAMPLE_RATE = 20000000;
 inline constexpr int DEFAULT_BANDWIDTH = 18000000;
@@ -348,15 +349,17 @@ class SoapySidekiq : public SoapySDR::Device
     bool rfTimeSource{};
     uint64_t sys_freq{};
 
-    // TX buffer
-    skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
+    using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
+    std::unique_ptr<TxBlocks> tx_blocks;
+    /** Prepare all block owners and bookkeeping before publishing a TX stream. */
+    void initializeTxBuffers();
     uint32_t currTXBuffIndex{};
     uint32_t p_tx_block_index{};
 
     // TX callback static function
     // The registration requires a static function instead of a method so
     // this must be created to be able to register it.
-    // This function calls the tx_complete method.
+    // Each accepted context retains its bookkeeping and SDK block independently.
     static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                      void *p_user) noexcept;
 
@@ -365,6 +368,7 @@ class SoapySidekiq : public SoapySDR::Device
     struct passedStruct
     {
         std::shared_ptr<TxCompletion> completion;
+        std::shared_ptr<skiq_tx_block_t> block;
         uint32_t txIndex;
     };
 

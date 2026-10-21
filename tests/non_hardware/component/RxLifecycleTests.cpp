@@ -6,6 +6,7 @@
 #include "TestHarness.hpp"
 #include <SoapySidekiq/RxStreamSession.hpp>
 #include <SoapySidekiq/TxCompletionState.hpp>
+#include <SoapySidekiq/TxBlockPool.hpp>
 #include <memory>
 #include <vector>
 #include <atomic>
@@ -155,7 +156,7 @@ public:
     FixtureBackend backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
     std::thread _tx_streaming_thread;
-    skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
+    std::unique_ptr<soapy_sidekiq::TxBlockPool<skiq_tx_block_t>> tx_blocks;
 
     SoapySidekiq()
     {
