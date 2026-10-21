@@ -16,7 +16,7 @@ defaults:
 jobs:
   tests:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.os || 'ubuntu-22.04' }}
     timeout-minutes: 15
     env:
       PRESET: ${{ matrix.preset }}
@@ -32,6 +32,11 @@ jobs:
             compiler: g++-11
             packages: g++-11
             preset: non-hardware-asan
+          - name: Clang 18 TSan
+            compiler: clang++-18
+            packages: clang-18 libclang-rt-18-dev g++-11 util-linux
+            preset: non-hardware-tsan
+            os: ubuntu-24.04
           - name: Clang 14
             compiler: clang++-14
             packages: clang-14
@@ -59,14 +64,27 @@ jobs:
         env:
           CXX: ${{ matrix.compiler }}
         run: |
-          cmake --preset "$PRESET" -DCMAKE_CXX_COMPILER="$CXX" \
-            -DPython3_EXECUTABLE=/usr/bin/python3
+          configure_args=(--preset "$PRESET" -DCMAKE_CXX_COMPILER="$CXX"
+            -DPython3_EXECUTABLE=/usr/bin/python3)
+          if [[ "$PRESET" == non-hardware-tsan ]]; then
+            # Match the locally validated libstdc++ headers instead of selecting
+            # whichever newer GCC happens to be preinstalled on the runner.
+            configure_args+=(-DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11)
+          fi
+          cmake "${configure_args[@]}"
       - name: Build
         run: cmake --build --preset "$PRESET" --parallel 2
       - name: Run counted suite
         run: |
           ctest --preset "$PRESET" --show-only
-          tests/non_hardware/run_suite.sh "build/$PRESET"
+          if [[ "$PRESET" == non-hardware-tsan ]]; then
+            # Keep TSan's shadow layout reproducible without changing host sysctls.
+            # Personality is inherited only by this process and its children.
+            setarch "$(uname -m)" -R env TSAN_OPTIONS=halt_on_error=1 \
+              tests/non_hardware/run_suite.sh "build/$PRESET"
+          else
+            tests/non_hardware/run_suite.sh "build/$PRESET"
+          fi
       - name: Save test output
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

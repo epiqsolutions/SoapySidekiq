@@ -101,7 +101,7 @@ run is claimed here.
 | Linux x86, GCC 11 / Clang 14, SDK 4.26, SoapySDR 0.8.1 | Software closeout checks the full module build/link, isolated install, and loading. All 482 portable cases pass with GCC, Clang, and ASan/UBSan. Three separate concrete-driver cases pass with GCC, Clang, and ASan/UBSan. Hardware behavior and the final release tree remain separate. |
 | Linux x86, GCC 11, SDK 4.26, SoapySDR 0.4.0 | The real tagged library, ABI `0.4-2`, builds/loads the module and runs all three scripted concrete-driver cases. Earlier #114/#115/checkpoint evidence covers relocation and staging. No hardware opened with this SoapySDR version. |
 | AArch64 GCC 11.4, SDK 4.26, target-built SoapySDR | Full cross-build/link/install and ELF checks passed during the series. Target execution and final release-tree validation remain separate. |
-| TSan | Instrumented binaries build; this host cannot start the runtime because of an unexpected memory mapping. A compatible-host run remains required. |
+| TSan | All 484 portable cases pass locally with Clang 18.1.8, per-process ASLR disabled, and no reports/suppressions. The [TSan record](validation/2026-10-21-tsan.md) pins the source and setup. This does not instrument the proprietary SDK or establish hardware callback guarantees. |
 
 The user reported the earlier hardware campaign complete on 2026-10-16 with
 SDK 4.26, SoapySDR 0.8.1, GCC 11.4, and external GPS-aligned PPS. Its original

@@ -212,10 +212,10 @@ separate presets too; a TSan build alone does not establish that its runtime
 works on the host. SDK-selection/link-usage and staged-uninstall regressions
 use small real-CMake fixtures, without requiring the proprietary SDK or root.
 
-The workflow runs GCC 11, GCC 11 ASan/UBSan, Clang 14, changed-line formatting,
-and portable static analysis on PRs and master pushes. It saves counted case
+The workflow runs GCC 11, GCC 11 ASan/UBSan, Clang 18 TSan, Clang 14,
+changed-line formatting, and portable static analysis on PRs and master pushes. It saves counted case
 results and analysis output as artifacts. NumPy and clang-format are installed
-so the Python tooling regressions run as well. TSan, the full SDK build, and
+so the Python tooling regressions run as well. The full SDK build and
 [hardware validation](tests/hardware/README.md) remain separate checks; rerun
 the relevant hardware cases when production behavior changes.
 
@@ -225,3 +225,41 @@ The [legacy prototype evaluation](docs/LEGACY_PROTOTYPES.md) compares the old
 channel mapper and asynchronous TX pool/writer with the production contracts.
 Consult its ownership requirements before adapting those prototypes, especially
 for callback-visible state, partial writes, and stream shutdown.
+
+## ThreadSanitizer host setup
+
+The TSan CI job runs the portable suite with Clang 18 on an Ubuntu 24.04 VM.
+It installs/selects GCC 11's C++ development headers explicitly to match the
+validated baseline, independent of newer GCC packages on the hosted image.
+Address randomization is disabled for the runner process and its children. It uses
+`setarch`, not a host-wide sysctl change. `halt_on_error=1` fails the affected
+executable on its first race report; the counted runner preserves failures
+and saves `suite.log`/CTest output as usual. A startup failure fails the job
+rather than skipping instrumented executables.
+
+To use the same setup on a compatible Ubuntu x86-64 host with Clang 18 and
+GCC 11 development packages installed:
+
+```sh
+cmake --preset non-hardware-tsan -DCMAKE_CXX_COMPILER=clang++-18 \
+  -DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11 \
+  -DPython3_EXECUTABLE=/usr/bin/python3
+cmake --build --preset non-hardware-tsan --parallel 2
+setarch "$(uname -m)" -R env TSAN_OPTIONS=halt_on_error=1 \
+  tests/non_hardware/run_suite.sh build/non-hardware-tsan
+```
+
+Use Clang 18's runtime for this job: older installed runtimes can miss timed
+wait/lock interceptors and report false mutex errors. LLVM 18 includes the
+[`pthread_mutex_clocklock` interceptor](https://github.com/llvm/llvm-project/blob/llvmorg-18.1.8/compiler-rt/lib/tsan/rtl/tsan_interceptors_posix.cpp).
+The GCC project also records the earlier
+[`pthread_cond_clockwait` false-positive issue](https://gcc.gnu.org/pipermail/gcc-patches/2021-May/570244.html).
+Do not suppress those functions or alter driver synchronization to bypass an
+incomplete runtime. The regular compiler baseline remains GCC 11 and Clang 14;
+Clang 18 is an additional sanitizer configuration.
+
+Some containers prohibit the personality change, and some runtime/host mappings
+are incompatible with TSan. Record that environment failure and use a compatible
+host; do not count compilation or a skipped binary as a passing run. This job
+covers the portable tests, not the proprietary SDK, hardware callbacks, or the
+entire concrete driver.
