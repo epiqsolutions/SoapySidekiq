@@ -114,39 +114,14 @@ std::string SoapySidekiq::getNativeStreamFormat(const int    direction,
     return "CS16";
 }
 
-SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(
-            const int direction, const size_t channel) const
+SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(const int direction,
+                                                      const size_t channel) const
 {
     validateChannel(direction, channel);
-    SoapySDR::ArgInfoList streamArgs;
-
-    SoapySDR::ArgInfo bufflenArg;
-    bufflenArg.key = "bufflen";
-
     SoapySDR_logf(SOAPY_SDR_TRACE, "getStreamArgsInfo");
-
-    if (direction == SOAPY_SDR_RX)
-    {
-        bufflenArg.name        = "Buffer Sample Count";
-        bufflenArg.description = "Number of IQ samples per buffer.";
-        bufflenArg.units       = "(int16_t * 2) samples";
-        bufflenArg.type        = SoapySDR::ArgInfo::INT;
-        bufflenArg.value       = std::to_string(rx_payload_size_in_words);
-
-        streamArgs.push_back(bufflenArg);
-    }
-    else
-    {
-        bufflenArg.name        = "Buffer Sample Count";
-        bufflenArg.description = "Number of IQ samples per buffer.";
-        bufflenArg.units       = "(int16_t * 2) samples";
-        bufflenArg.value       = std::to_string(current_tx_block_size);
-        bufflenArg.type        = SoapySDR::ArgInfo::INT;
-
-        streamArgs.push_back(bufflenArg);
-    }
-
-    return streamArgs;
+    // setupStream has no per-stream options. Buffer sizes are reported by
+    // getStreamMTU; TX payload size is selected at device construction.
+    return {};
 }
 
 void SoapySidekiq::stopTxWrites()
@@ -269,14 +244,21 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_read_rx_block_size failed: "
                                            "card: %u status: %d\n",
                                            card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_rx_block_size failed (card " +
+                                     std::to_string(card) + ", status " + std::to_string(status) +
+                                     ")");
         }
-        SoapySDR_logf(SOAPY_SDR_TRACE, "In rx 3");
-        rx_block_size_in_bytes = status;
-        rx_block_size_in_words = status / 4;
-
-        rx_payload_size_in_bytes = status - SKIQ_RX_HEADER_SIZE_IN_BYTES;
-        rx_payload_size_in_words = rx_payload_size_in_bytes / 4;
+        const auto block_bytes = static_cast<uint32_t>(status);
+        constexpr uint32_t word_bytes = sizeof(uint32_t);
+        if (block_bytes <= SKIQ_RX_HEADER_SIZE_IN_BYTES || block_bytes % word_bytes != 0)
+            throw std::runtime_error(
+                "skiq_read_rx_block_size returned an invalid unpacked block (card " +
+                std::to_string(card) + ", bytes " + std::to_string(block_bytes) + ")");
+        // Validate before subtracting the header or publishing MTU-related sizes.
+        rx_block_size_in_bytes = block_bytes;
+        rx_block_size_in_words = block_bytes / word_bytes;
+        rx_payload_size_in_bytes = block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES;
+        rx_payload_size_in_words = rx_payload_size_in_bytes / word_bytes;
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
                       rx_payload_size_in_words);
@@ -963,6 +945,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             observed_completions = tx_completion->completed;
         }
 
+        try
         {
             // Until the SDK accepts this block, unwind its reservation on any
             // allocation, conversion, or submission failure.
@@ -1006,6 +989,14 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                 reservation.release();
             }
         }
+        catch (const std::exception &error)
+        {
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                          "TX packet preparation/submission failed (card %u, handle %u): %s", card,
+                          stream_handle->tx_handle, error.what());
+            return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
+                                   : static_cast<int>(curr_block * current_tx_block_size);
+        }
         if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
         {
             // A completion during skiq_transmit must satisfy this predicate
@@ -1031,9 +1022,12 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         }
         else if (status != 0)
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_transmit failed, (card %u) status %d",
-                          card, status);
-            throw std::runtime_error("");
+            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_transmit failed (card %u, handle %u), status %d",
+                          card, stream_handle->tx_handle, status);
+            // Accepted packets cannot be rolled back. Report their prefix so
+            // the caller retries only the unsent suffix after a hard SDK error.
+            return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
+                                   : static_cast<int>(curr_block * current_tx_block_size);
         }
         else
         {
