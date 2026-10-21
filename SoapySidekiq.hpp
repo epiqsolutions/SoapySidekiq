@@ -22,6 +22,7 @@
 #include <SoapySDR/Types.hpp>
 #include <SoapySDR/Version.h>
 #include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/TxCompletionState.hpp>
 
 inline constexpr int DEFAULT_SAMPLE_RATE = 20000000;
 inline constexpr int DEFAULT_BANDWIDTH = 18000000;
@@ -318,19 +319,18 @@ class SoapySidekiq : public SoapySDR::Device
     //  tx
     std::mutex tx_mutex;
     std::condition_variable tx_cv;
-    std::mutex tx_buf_mutex;
-    std::condition_variable tx_buf_cv;
-    // Written with tx_mutex and tx_buf_mutex held; read with either held.
+    using TxCompletion = soapy_sidekiq::TxCompletionState<>;
+    std::shared_ptr<TxCompletion> tx_completion{
+        std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS)};
+    // Written with tx_mutex and tx_completion->mutex held; read with either held.
     bool tx_writes_stopping{true};
-    std::size_t active_tx_writers{}; // Guarded by tx_buf_mutex.
-    std::size_t active_tx_status_readers{}; // Guarded by tx_buf_mutex.
+    std::size_t active_tx_writers{};        // Guarded by tx_completion->mutex.
+    std::size_t active_tx_status_readers{}; // Guarded by tx_completion->mutex.
     /** Close write/status admission and drain admitted calls before stopping hardware. */
     void stopTxWrites();
     bool tx_start_finished{};
     int tx_start_status{};
     bool tx_stream_active{};
-    // Fixed-size status storage is allocated before callbacks are registered.
-    std::unique_ptr<int32_t[]> p_tx_status;
     bool first_transmit{};
     StreamHandle *active_tx_stream{};
 
@@ -339,7 +339,6 @@ class SoapySidekiq : public SoapySDR::Device
     std::vector<uint32_t> tx_bandwidths;
     std::timed_mutex tx_status_mutex;
     uint32_t tx_underruns{};   // Guarded by tx_status_mutex; reset after successful SDK start.
-    uint64_t complete_count{}; // Guarded by tx_buf_mutex.
     uint32_t current_tx_block_size{};
 
     //  setting
@@ -365,7 +364,7 @@ class SoapySidekiq : public SoapySDR::Device
     /** Per-send context: owned by writeStream until accepted, then by completion. */
     struct passedStruct
     {
-        SoapySidekiq *classAddr;
+        std::shared_ptr<TxCompletion> completion;
         uint32_t txIndex;
     };
 
@@ -373,6 +372,6 @@ class SoapySidekiq : public SoapySDR::Device
     std::thread _tx_streaming_thread;
     void tx_streaming_start(skiq_tx_hdl_t tx_handle);
 
-    // tx callback method
-    void tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex);
+    /** Publish completion using only the submitting stream's retained state. */
+    static void completeTx(const std::shared_ptr<TxCompletion> &completion, uint32_t txIndex);
 };

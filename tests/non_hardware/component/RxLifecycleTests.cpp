@@ -5,6 +5,7 @@
 
 #include "TestHarness.hpp"
 #include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/TxCompletionState.hpp>
 #include <memory>
 #include <vector>
 #include <atomic>
@@ -139,8 +140,9 @@ public:
     std::uint8_t card{};
     bool tx_start_finished{}, tx_stream_active{}, rfTimeSource{true};
     std::mutex tx_mutex;
-    std::mutex tx_buf_mutex;
-    std::condition_variable tx_cv, tx_buf_cv;
+    std::shared_ptr<soapy_sidekiq::TxCompletionState<>> tx_completion{
+        std::make_shared<soapy_sidekiq::TxCompletionState<>>(3)};
+    std::condition_variable tx_cv;
     bool tx_writes_stopping{true};
     std::size_t active_tx_writers{}, active_tx_status_readers{};
     void stopTxWrites();

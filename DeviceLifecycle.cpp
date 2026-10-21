@@ -80,35 +80,22 @@ void logging_handler(int32_t priority, const char *message) noexcept
     }
 }
 
-/*****************************************************************************/
-/** This is the callback function for once the data has completed being sent.
-    There is no guarantee that the complete callback will be in the order that
-    the data was sent, this function just increments the completion count and
-    signals the main thread that there is space available to send more packets.
-
-    @param status status of the transmit packet completed
-    @param p_block reference to the completed transmit block
-    @param p_user reference to the user data
-    @return void
-*/
-void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex)
+void SoapySidekiq::completeTx(const std::shared_ptr<TxCompletion> &completion, uint32_t txIndex)
 {
-    if (txIndex >= DEFAULT_NUM_BUFFERS || !p_tx_status)
+    if (completion == nullptr || txIndex >= completion->slots.size())
     {
         SoapySDR_logf(SOAPY_SDR_ERROR, "TX completion received invalid buffer index %u", txIndex);
         return;
     }
-    // update the in use status of the packet just completed
     bool unexpected_status;
     {
-        std::lock_guard<std::mutex> lock(tx_buf_mutex);
-        unexpected_status = p_tx_status[txIndex] != 1;
-        p_tx_status[txIndex] = 0;
-        ++complete_count;
+        std::lock_guard<std::mutex> lock(completion->mutex);
+        unexpected_status = completion->slots[txIndex] != 1;
+        completion->slots[txIndex] = 0;
+        ++completion->completed;
     }
-    tx_buf_cv.notify_all();
-    // Publish completion before diagnostics, and never call a log sink with
-    // the status mutex held: user logging code may throw or re-enter.
+    completion->changed.notify_all();
+    // Publish before calling a potentially throwing/reentrant diagnostic sink.
     if (unexpected_status)
         SoapySDR_logf(SOAPY_SDR_ERROR, "TX completion received a buffer that was not reserved");
 }
@@ -210,7 +197,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     rx_payload_size_in_bytes = 0;
     rfTimeSource = true;
     timetype = "rf_timestamp";
-    complete_count = 0;
 
     card = options.card;
     current_tx_block_size = options.tx_block_size;
@@ -235,7 +221,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     soapy_sidekiq::ScopeExit rollback(
         [this]() noexcept
         {
-            p_tx_status.reset();
             skiq_exit();
         });
     // The backend owns no hardware resource; the session owns its worker.
@@ -404,10 +389,6 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         setTimeSource(*options.time_source);
     }
 
-    // Value-initialize every entry before making storage visible to callbacks.
-    // The member owner also releases it if later constructor work throws.
-    p_tx_status = std::make_unique<int32_t[]>(DEFAULT_NUM_BUFFERS);
-
     initializeTxCallbacks();
     rollback.release();
 }
@@ -428,8 +409,6 @@ SoapySidekiq::~SoapySidekiq(void)
     active_rx_stream = nullptr;
 
     skiq_register_tx_complete_callback(card, nullptr);
-
-    p_tx_status.reset();
 
     skiq_exit();
 }
