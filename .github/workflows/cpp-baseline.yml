@@ -85,17 +85,22 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Install LLVM 14
+      - name: Install analysis and documentation tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang-14 clang-format-14 clang-tidy-14
+            clang-14 clang-format-14 clang-tidy-14 doxygen
       - name: Check changed C++ lines
         env:
           BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: python3 tools/check_format.py --base "${BASE_REVISION:-HEAD^}"
       - name: Verify formatting gate
         run: python3 -m unittest discover -s tests/non_hardware/tooling -p test_format.py -v
+      - name: Check API documentation
+        run: |
+          doxygen --version
+          mkdir -p build/api-docs
+          doxygen docs/Doxyfile
       - name: Configure compile database
         run: |
           cmake -S tests/non_hardware -B build/analysis \
@@ -114,4 +119,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: static-analysis
-          path: build/analysis/clang-tidy*
+          path: |
+            build/analysis/clang-tidy*
+            build/api-docs/warnings.log

@@ -153,6 +153,12 @@ mkdir -p build/api-docs
 doxygen docs/Doxyfile
 ```
 
+CI runs the same SDK-free Doxygen check in the analysis job and saves its
+warning log. Warnings fail that check, so document new public declarations and
+reusable fields when adding them. Private implementation details remain outside
+this public-reference gate; their ownership and synchronization contracts still
+need comments where they are defined.
+
 Open `build/api-docs/html/index.html`; diagnostics are written to
 `build/api-docs/warnings.log`. The configuration treats undocumented public
 members and invalid documentation commands as errors. It excludes private
