@@ -62,7 +62,7 @@ declarations. Native cases are a separate optional CTest executable.
 
 ## Scope
 
-Seven registered cases cover:
+The registered cases cover:
 
 - Real discovery/factory construction, mapped handles, rate/bandwidth
   configuration, invalid setup and inactive write rejection, CS16/CF32 RX and
@@ -86,6 +86,12 @@ Seven registered cases cover:
   from another thread while the actual device is destroyed. Delivery may finish
   before, during, or after teardown; each cycle checks both accepted callbacks,
   one TX stop, one SDK exit, and no pending scripted sends.
+
+- A 28-method scalar-channel matrix makes 672 rejected requests across invalid
+  directions, count-boundary/maximum indices, and both/RX-only/TX-only/absent
+  channel configurations. Each operation must fail before any scripted SDK call
+  and leave the native-format output unchanged. This is one registered case;
+  inherited defaults and excluded draft API additions are outside its inventory.
 
 Scripts use model/handle metadata and controlled sample values for host-path
 testing; they do not advertise a physical card's capabilities. SDK transport

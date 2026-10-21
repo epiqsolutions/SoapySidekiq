@@ -10,9 +10,12 @@
 #include <SoapySDR/Formats.h>
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <future>
 #include <iterator>
+#include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 // Compile the actual registry adapter in this TU so discovery/factory calls do
@@ -316,5 +319,77 @@ TEST_CASE("concrete device teardown permits callbacks on another thread")
         REQUIRE_EQ(stopped.completions, 2u);
         REQUIRE_EQ(stopped.tx_stops, 1u);
         REQUIRE_EQ(stopped.exit_calls, 1u);
+    }
+}
+
+TEST_CASE("all concrete scalar-channel APIs reject invalid requests before SDK access")
+{
+    for (const auto &counts : {std::pair<unsigned, unsigned>{2, 2}, {0, 2}, {2, 0}, {0, 0}})
+    {
+        scripted_sdk::reset();
+        {
+            std::lock_guard<std::mutex> lock(scripted_sdk::mutex);
+            scripted_sdk::script.rx_channels = static_cast<std::uint8_t>(counts.first);
+            scripted_sdk::script.tx_channels = static_cast<std::uint8_t>(counts.second);
+        }
+        SoapySidekiq device(arguments());
+        double full_scale = -123;
+        struct Operation
+        {
+            const char *name;
+            std::function<void(int, std::size_t)> call;
+        };
+        const std::vector<Operation> operations{
+            {"getStreamFormats", [&](int d, std::size_t c) { device.getStreamFormats(d, c); }},
+            {"getNativeStreamFormat",
+             [&](int d, std::size_t c) { device.getNativeStreamFormat(d, c, full_scale); }},
+            {"getStreamArgsInfo", [&](int d, std::size_t c) { device.getStreamArgsInfo(d, c); }},
+            {"listAntennas", [&](int d, std::size_t c) { device.listAntennas(d, c); }},
+            {"getAntenna", [&](int d, std::size_t c) { device.getAntenna(d, c); }},
+            {"setAntenna", [&](int d, std::size_t c) { device.setAntenna(d, c, "ignored"); }},
+            {"hasDCOffsetMode", [&](int d, std::size_t c) { device.hasDCOffsetMode(d, c); }},
+            {"setDCOffsetMode", [&](int d, std::size_t c) { device.setDCOffsetMode(d, c, false); }},
+            {"getDCOffsetMode", [&](int d, std::size_t c) { device.getDCOffsetMode(d, c); }},
+            {"listGains", [&](int d, std::size_t c) { device.listGains(d, c); }},
+            {"hasGainMode", [&](int d, std::size_t c) { device.hasGainMode(d, c); }},
+            {"setGainMode", [&](int d, std::size_t c) { device.setGainMode(d, c, false); }},
+            {"getGainMode", [&](int d, std::size_t c) { device.getGainMode(d, c); }},
+            {"setGain", [&](int d, std::size_t c) { device.setGain(d, c, 0); }},
+            {"setGain(named)", [&](int d, std::size_t c) { device.setGain(d, c, "ignored", 0); }},
+            {"getGain", [&](int d, std::size_t c) { device.getGain(d, c); }},
+            {"getGain(named)", [&](int d, std::size_t c) { device.getGain(d, c, "ignored"); }},
+            {"getGainRange", [&](int d, std::size_t c) { device.getGainRange(d, c); }},
+            {"getGainRange(named)",
+             [&](int d, std::size_t c) { device.getGainRange(d, c, "ignored"); }},
+            {"setFrequency", [&](int d, std::size_t c) { device.setFrequency(d, c, 1e9); }},
+            {"getFrequency", [&](int d, std::size_t c) { device.getFrequency(d, c); }},
+            {"getFrequencyRange", [&](int d, std::size_t c) { device.getFrequencyRange(d, c); }},
+            {"setSampleRate", [&](int d, std::size_t c) { device.setSampleRate(d, c, 1e6); }},
+            {"getSampleRate", [&](int d, std::size_t c) { device.getSampleRate(d, c); }},
+            {"getSampleRateRange", [&](int d, std::size_t c) { device.getSampleRateRange(d, c); }},
+            {"listSampleRates", [&](int d, std::size_t c) { device.listSampleRates(d, c); }},
+            {"setBandwidth", [&](int d, std::size_t c) { device.setBandwidth(d, c, 2e5); }},
+            {"getBandwidth", [&](int d, std::size_t c) { device.getBandwidth(d, c); }},
+        };
+        REQUIRE_EQ(operations.size(), std::size_t{28});
+        const auto calls_before = scripted_sdk::snapshot().calls;
+        for (const auto &operation : operations)
+        {
+            try
+            {
+                for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+                    for (const auto channel : {device.getNumChannels(direction),
+                                               std::numeric_limits<std::size_t>::max()})
+                        REQUIRE_THROWS_AS(operation.call(direction, channel), std::out_of_range);
+                for (const int direction : {-1, 2})
+                    REQUIRE_THROWS_AS(operation.call(direction, 0), std::invalid_argument);
+                REQUIRE(scripted_sdk::snapshot().calls == calls_before);
+                REQUIRE_EQ(full_scale, -123.0);
+            }
+            catch (const std::exception &error)
+            {
+                throw test_harness::Failure(std::string(operation.name) + ": " + error.what());
+            }
+        }
     }
 }

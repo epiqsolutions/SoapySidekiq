@@ -32,6 +32,7 @@ struct Script
     bool initialized{}, rx_active{}, tx_active{}, rx_delivered{};
     unsigned init_calls{}, exit_calls{}, rx_stops{}, tx_stops{}, completions{};
     std::uint8_t selected_card{};
+    std::uint8_t rx_channels{2}, tx_channels{2};
     bool topology_supported{true};
     std::uint8_t topology{};
     skiq_ref_clock_select_t clock_source{skiq_ref_clock_invalid};
