@@ -96,7 +96,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction, const std::stri
                                             const SoapySDR::Kwargs &args)
 {
     int status = 0;
-    (void)args; // No per-stream options are implemented.
     SoapySDR_logf(SOAPY_SDR_TRACE, "setupStream");
 
     const auto stream_direction = streamDirection(direction);
@@ -107,6 +106,9 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction, const std::stri
         stream_direction == soapy_sidekiq::StreamDirection::rx ? num_rx_channels : num_tx_channels;
     const auto request = soapy_sidekiq::validateStreamRequest(
         stream_direction, format, channels, available_channels, already_configured);
+    if (!args.empty())
+        throw std::invalid_argument("unsupported stream argument '" + args.begin()->first +
+                                    "'; no per-stream options are implemented");
     const std::size_t channel = request.channel;
 
     if (direction == SOAPY_SDR_RX)
