@@ -33,6 +33,20 @@ device's implemented channel-taking APIs to validation helpers and regression
 fixtures. Update that inventory when adding an overload or changing channel
 selection; inherited defaults and pending contributions have separate limits.
 
+## Device implementation boundary
+
+Applications use the SoapySDR device and opaque stream API. The root
+`SoapySidekiq.hpp` declares the module's concrete implementation; it is not an
+installed application header. Keep stream tokens, callback contexts, workers,
+and completion helpers private. Portable reusable contracts belong under
+`include/SoapySidekiq` and are tested independently of device construction.
+
+Forward-declare owned implementation types where their definitions are only
+needed by out-of-line methods. Include those definitions directly in the source
+files that use them. The device constructor and destructor stay out of line so
+its `unique_ptr` owners can destroy forward-declared RX types with complete
+definitions. The SDK types stored by value still require the SDK header.
+
 ## Reproducible tool versions
 
 The initial Linux CI baseline is Ubuntu 22.04, GCC **11**, Clang **14**,
@@ -98,6 +112,25 @@ For SDK-dependent files, configure a real module build with
 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, then run, for example,
 `clang-tidy-14 -p build/module Settings.cpp`. Never treat analysis of fake test
 fixtures as analysis of the entire hardware-owning device.
+
+## SDK errors and stream results
+
+Keep error translation at the API or backend boundary that owns its contract:
+
+| Boundary | Failure policy |
+| --- | --- |
+| RF, settings, clock/time, metadata | Throw a descriptive exception for invalid requests or SDK failures. |
+| Stream setup/close and unsigned MTU queries | Throw for invalid arguments or lifecycle failures; never encode a negative status in an unsigned result. |
+| Status-returning stream calls | Return signed SoapySDR codes for routine SDK errors, timeouts, and back-pressure; preserve an accepted TX sample prefix. |
+| Sensor reads | Translate typed backend errors to the documented legacy string fallback and diagnostics. |
+| SDK callbacks/workers | Publish completion/error state before diagnostics and contain exceptions at the C/thread boundary. |
+
+A single unconditional SDK-status-to-exception helper would break these distinct
+contracts. Share validation and diagnostic containment where their semantics
+match. Include operation, card, channel/handle, requested value, and SDK status
+when available. Use `reportDiagnostic` only around synchronous diagnostics in a
+status-returning path; backend operations and their errors must stay outside it.
+A failing user log sink must not replace the operation's result or accepted prefix.
 
 ## Local artifacts and JSON source files
 
