@@ -57,6 +57,8 @@ dkms.conf
 /build/
 /compile_commands.json
 /CMakeUserPresets.json
+/tests/non_hardware/tooling/__pycache__/
+/tests/sdk_integration/__pycache__/
 /out.txt
 /logs/*
 !/logs/README.md
