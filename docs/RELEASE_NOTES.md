@@ -1,10 +1,18 @@
 # Development update release notes
 
-Unreleased draft, 2026-10-21. These notes describe the update series, including
-changes awaiting integration or review. Pin the final release commit and refresh
-the validation matrix before publishing a release. The TX ownership stack,
-stream decomposition, and draft card-specific contributions are separate PRs;
-this document does not imply that they are all on master.
+Unreleased draft, 2026-10-21. Integration status checked against master
+`7370025cb7acf130588086b576904360069a70d5`: the TX ownership stack
+([#110](https://github.com/epiqsolutions/SoapySidekiq/pull/110)), diagnostic
+containment ([#107](https://github.com/epiqsolutions/SoapySidekiq/pull/107)), stream
+decomposition ([#104](https://github.com/epiqsolutions/SoapySidekiq/pull/104)), and
+private device boundary ([#111](https://github.com/epiqsolutions/SoapySidekiq/pull/111))
+are on master, together with the compatibility fixes and component formatting
+in [#114](https://github.com/epiqsolutions/SoapySidekiq/pull/114),
+[#115](https://github.com/epiqsolutions/SoapySidekiq/pull/115), and
+[#116](https://github.com/epiqsolutions/SoapySidekiq/pull/116).
+Draft card/API contributions #80–#86 remain pending. Pin the final release commit
+and refresh the validation matrix before publishing a release. No new hardware
+run is claimed here.
 
 ## Behavior changes and fixes
 
@@ -21,7 +29,7 @@ this document does not imply that they are all on master.
   PPS, busy-buffer, and queue-full waits. Errors after accepted packets return
   that accepted prefix so callers can advance once and retry the suffix.
 - TX deactivation closes admission, cancels waiting callers, and drains admitted
-  calls. The pending ownership stack retains completion bookkeeping and SDK
+  calls. The integrated ownership stack retains completion bookkeeping and SDK
   blocks independently of the device and joins the PPS worker before teardown.
   Its configurable `tx_buffer_count` accepts 1–30000; the compatibility default
   remains 30000 pending hardware throughput/latency measurements.
@@ -30,7 +38,7 @@ this document does not imply that they are all on master.
   changes that affect RX rate/timing require successful RX deactivation first.
   See the [main README](../README.md) for individual API contracts and the
   [channel audit](https://github.com/epiqsolutions/SoapySidekiq/pull/113) for the audited entry points.
-- Stream errors and timeouts use SoapySDR status results. Pending diagnostic
+- Stream errors and timeouts use SoapySDR status results. Integrated diagnostic
   containment keeps a failing log sink from replacing a stream result or
   accepted TX prefix. Control APIs retain throwing error boundaries; sensors
   retain their documented legacy fallback values; C callbacks contain exceptions.
@@ -42,7 +50,7 @@ this document does not imply that they are all on master.
 ## Compatibility and remaining limits
 
 - Minimum dependencies remain CMake 3.21, C++17, SoapySDR 0.4.0, and Sidekiq SDK
-  4.26.0. The 0.4 gain-range and relocatable module-install fixes are PRs
+  4.26.0. Master includes the 0.4 gain-range and relocatable module-install fixes in
   [#114](https://github.com/epiqsolutions/SoapySidekiq/pull/114) and
   [#115](https://github.com/epiqsolutions/SoapySidekiq/pull/115). Older range APIs
   report bounds without step metadata. This is not a claim that every
@@ -63,7 +71,7 @@ this document does not imply that they are all on master.
   [#85](https://github.com/epiqsolutions/SoapySidekiq/pull/85). Two-card lifetime
   validation remains pending. Do not infer multi-card teardown safety from
   separate single-card processes.
-- Draft [#80–#86](https://github.com/epiqsolutions/SoapySidekiq/pulls) also cover
+- Pending draft [#80–#86](https://github.com/epiqsolutions/SoapySidekiq/pulls) also cover
   per-handle gain limits, named RF/attenuation APIs, channel metadata, RX loss
   reporting, and discrete profile rates. Review and audit their integrated
   behavior before making broader capability claims.
