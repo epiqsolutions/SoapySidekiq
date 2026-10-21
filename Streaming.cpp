@@ -115,16 +115,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
 
     if (direction == SOAPY_SDR_RX)
     {
-        if (active_rx_stream != nullptr)
-        {
-            throw std::runtime_error("only one RX stream per device is currently supported");
-        }
-
-        //  check the channel configuration
-        if (channels.size() > 1)
-        {
-            throw std::runtime_error("multi-channel RX streams are not currently supported");
-        }
         skiq_rx_hdl_t rx_handle = getRxHandle(channel);
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX channel %zu uses handle %u", channel, rx_handle);
@@ -154,21 +144,8 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
                       rx_payload_size_in_words);
 
-        if (format == "CS16")
-        {
-            rxUseShort = true;
-            SoapySDR_log(SOAPY_SDR_INFO, "Using format CS16");
-        }
-        else if (format == "CF32")
-        {
-            rxUseShort = false;
-            SoapySDR_log(SOAPY_SDR_INFO, "Using format CF32");
-        }
-        else
-        {
-            throw std::runtime_error("setupStream invalid format '" + format +
-                "' -- Only CS16 or CF32 is supported by SoapySidekiq module.");
-        }
+        rxUseShort = request.format == soapy_sidekiq::StreamFormat::cs16;
+        SoapySDR_logf(SOAPY_SDR_INFO, "Using format %s", format.c_str());
 
         // this has to be called after setting sample rate
         status = skiq_read_sys_timestamp_freq(this->card, &this->sys_freq);
@@ -223,38 +200,14 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         active_rx_stream = std::move(stream_handle);
         return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get());
     }
-    else if (direction == SOAPY_SDR_TX)
+    else
     {
-        if (active_tx_stream != nullptr)
-        {
-            throw std::runtime_error("only one TX stream per device is currently supported");
-        }
-
-        //  check the channel configuration
-        if (channels.size() > 1)
-        {
-            throw std::runtime_error("multi-channel TX streams are not currently supported");
-        }
         skiq_tx_hdl_t tx_handle = getTxHandle(channel);
 
         SoapySDR_logf(SOAPY_SDR_INFO, "TX channel %zu uses handle %u", channel, tx_handle);
 
-        if (format == "CS16")
-        {
-            txUseShort = true;
-            SoapySDR_log(SOAPY_SDR_INFO, "Using format CS16");
-        }
-        else if (format == "CF32")
-        {
-            txUseShort = false;
-            SoapySDR_log(SOAPY_SDR_INFO, "Using format CF32");
-        }
-        else
-        {
-            throw std::runtime_error(
-                "setupStream invalid format '" + format +
-                "' -- Only CS16 is supported by SoapySidekiq TX module.");
-        }
+        txUseShort = request.format == soapy_sidekiq::StreamFormat::cs16;
+        SoapySDR_logf(SOAPY_SDR_INFO, "Using format %s", format.c_str());
 
         status = skiq_read_sys_timestamp_freq(this->card, &this->sys_freq);
         if (status != 0)
@@ -278,10 +231,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
 
         active_tx_stream = std::move(stream_handle);
         return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream.get());
-    }
-    else
-    {
-        throw std::runtime_error("invalid direction");
     }
 }
 
