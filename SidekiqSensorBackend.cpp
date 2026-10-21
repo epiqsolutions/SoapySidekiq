@@ -10,10 +10,7 @@
 namespace soapy_sidekiq
 {
 
-SidekiqSensorBackend::SidekiqSensorBackend(const std::uint8_t card)
-    : card_(card)
-{
-}
+SidekiqSensorBackend::SidekiqSensorBackend(const std::uint8_t card) : card_(card) {}
 
 int SidekiqSensorBackend::readTemperature(std::int8_t &temperature)
 {
@@ -31,8 +28,7 @@ int SidekiqSensorBackend::setAccelerometerEnabled(const bool enabled)
     return skiq_write_accel_state(card_, enabled ? 1 : 0);
 }
 
-int SidekiqSensorBackend::readAccelerometer(
-    std::int16_t &x, std::int16_t &y, std::int16_t &z)
+int SidekiqSensorBackend::readAccelerometer(std::int16_t &x, std::int16_t &y, std::int16_t &z)
 {
     return skiq_read_accel(card_, &x, &y, &z);
 }

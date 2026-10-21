@@ -4,9 +4,13 @@
  */
 
 #include "TestHarness.hpp"
+#include <SoapySidekiq/Diagnostic.hpp>
 #include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/TxCompletionState.hpp>
+#include <SoapySidekiq/TxBlockPool.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <atomic>
@@ -147,21 +151,23 @@ public:
     std::uint8_t card{};
     bool tx_start_finished{}, tx_stream_active{}, rfTimeSource{true};
     std::mutex tx_mutex;
-    std::mutex tx_buf_mutex;
-    std::condition_variable tx_cv, tx_buf_cv;
+    std::shared_ptr<soapy_sidekiq::TxCompletionState<>> tx_completion{
+        std::make_shared<soapy_sidekiq::TxCompletionState<>>(3)};
+    std::condition_variable tx_cv;
     bool tx_writes_stopping{true};
     std::size_t active_tx_writers{}, active_tx_status_readers{};
     void stopTxWrites();
+    int stopTxStream(bool);
     std::uint32_t rx_payload_size_in_words{2}, current_tx_block_size{252};
     bool rxUseShort{true};
     double maxValue{2048};
     std::uint64_t sys_freq{1000000};
     std::vector<std::uint32_t> rx_sample_rates{20000000};
-    StreamHandle *active_rx_stream{}, *active_tx_stream{};
+    std::unique_ptr<StreamHandle> active_rx_stream, active_tx_stream;
     FixtureBackend backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
     std::thread _tx_streaming_thread;
-    skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
+    std::unique_ptr<soapy_sidekiq::TxBlockPool<skiq_tx_block_t>> tx_blocks;
 
     SoapySidekiq()
     {
@@ -171,13 +177,13 @@ public:
     ~SoapySidekiq()
     {
         rx_session.reset();
-        delete active_rx_stream;
+        active_rx_stream.reset();
     }
     SoapySDR::Stream *setupRx()
     {
         REQUIRE(active_rx_stream == nullptr);
-        active_rx_stream = new StreamHandle;
-        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream);
+        active_rx_stream = std::make_unique<StreamHandle>();
+        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get());
     }
     void awaitWorkerFailure()
     {
@@ -491,14 +497,14 @@ TEST_CASE("failed RX deactivation returns a stream error and preserves hardware 
         auto *stream = device.setupRx();
         REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
         device.awaitWorkerFailure();
-        auto *const owner = device.active_rx_stream;
+        auto *const owner = device.active_rx_stream.get();
         sdk.stop_status = -EIO;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), SOAPY_SDR_STREAM_ERROR);
-        REQUIRE(device.active_rx_stream == owner);
+        REQUIRE(device.active_rx_stream.get() == owner);
         REQUIRE(sdk.streaming);
         REQUIRE_EQ(sdk.stop_on_pps, flags == SOAPY_SDR_HAS_TIME);
         REQUIRE_THROWS_AS(device.closeStream(stream), std::runtime_error);
-        REQUIRE(device.active_rx_stream == owner);
+        REQUIRE(device.active_rx_stream.get() == owner);
         REQUIRE(sdk.streaming);
         sdk.stop_status = 0;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), 0);
@@ -506,6 +512,24 @@ TEST_CASE("failed RX deactivation returns a stream error and preserves hardware 
         device.closeStream(stream);
         REQUIRE(device.active_rx_stream == nullptr);
     }
+}
+
+TEST_CASE("RX activation preserves error status and successful retry when diagnostics throw")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    rx_log_hook = [] { throw std::runtime_error("injected diagnostic failure"); };
+    soapy_sidekiq::ScopeExit restore([]() noexcept { rx_log_hook = {}; });
+    sdk.actual_rate = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(sdk.starts, 0u);
+    sdk.actual_rate = 20000000;
+    sdk.provide_packet = true;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    REQUIRE_EQ(sdk.starts, 1u);
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    rx_log_hook = {};
+    device.closeStream(stream);
 }
 
 TEST_CASE("RX partial timestamp overflow returns stream error even when diagnostics throw")

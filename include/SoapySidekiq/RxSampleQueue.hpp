@@ -56,7 +56,7 @@ struct RxReadResult
  */
 class RxSampleQueue
 {
-public:
+  public:
     /**
      * Construct an inactive queue.
      * @param capacity_blocks Maximum number of retained hardware blocks.
@@ -144,10 +144,8 @@ public:
      * @throws std::invalid_argument for a nonempty null output or negative timeout.
      * @throws std::overflow_error when an adjusted timestamp exceeds int64_t.
      */
-    RxReadResult read(
-        std::int16_t *output,
-        std::size_t requested_samples,
-        std::chrono::microseconds timeout);
+    RxReadResult read(std::int16_t *output, std::size_t requested_samples,
+                      std::chrono::microseconds timeout);
 
     /** @return Whether the queue is accepting producer blocks. */
     bool running() const;
@@ -158,7 +156,7 @@ public:
     /** @return Number of oldest blocks discarded in the current session. */
     std::size_t droppedBlocks() const;
 
-private:
+  private:
     /** An owned CS16 block plus the next unread complex-sample offset. */
     struct Block
     {

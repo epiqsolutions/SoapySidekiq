@@ -55,6 +55,7 @@ TEST_CASE("device options require a card and provide a safe TX default")
 
     REQUIRE_EQ(options.card, std::uint8_t{3});
     REQUIRE_EQ(options.tx_block_size, soapy_sidekiq::defaultTxBlockSize);
+    REQUIRE_EQ(options.tx_buffer_count, soapy_sidekiq::defaultTxBufferCount);
     REQUIRE(!options.topology.has_value());
     REQUIRE(!options.clock_source.has_value());
     REQUIRE(!options.time_source.has_value());
@@ -62,16 +63,17 @@ TEST_CASE("device options require a card and provide a safe TX default")
 
 TEST_CASE("device options parse every supported constructor argument")
 {
-    const auto options = parseDeviceOptions({
-        {"card", "255"},
-        {"topology", "7"},
-        {"tx_block_size", "4092"},
-        {"clock_source", "external_clock"},
-        {"time_source", "1pps_source_external"}});
+    const auto options = parseDeviceOptions({{"card", "255"},
+                                             {"topology", "7"},
+                                             {"tx_block_size", "4092"},
+                                             {"tx_buffer_count", "1024"},
+                                             {"clock_source", "external_clock"},
+                                             {"time_source", "1pps_source_external"}});
 
     REQUIRE_EQ(options.card, std::uint8_t{255});
     REQUIRE_EQ(options.topology.value(), std::uint8_t{7});
     REQUIRE_EQ(options.tx_block_size, std::uint32_t{4092});
+    REQUIRE_EQ(options.tx_buffer_count, std::uint32_t{1024});
     REQUIRE_EQ(options.clock_source.value(), std::string{"external_clock"});
     REQUIRE_EQ(options.time_source.value(), std::string{"1pps_source_external"});
 }
@@ -149,4 +151,22 @@ TEST_CASE("failed SDK acquisition does not release another device's state")
     REQUIRE(sdk.initialized);
     REQUIRE_EQ(sdk.exits, 0u);
     sdk.shutdown();
+}
+
+TEST_CASE("TX buffer count accepts its bounded range independently of block size")
+{
+    for (const auto *value : {"1", "2", "1024", "30000"})
+    {
+        const auto options = parseDeviceOptions({{"card", "0"}, {"tx_buffer_count", value}});
+        REQUIRE_EQ(std::to_string(options.tx_buffer_count), std::string{value});
+        REQUIRE_EQ(options.tx_block_size, soapy_sidekiq::defaultTxBlockSize);
+    }
+}
+
+TEST_CASE("invalid TX buffer counts fail before any hardware initialization")
+{
+    for (const auto *value : {"", "0", "30001", "-1", "+1", " 1", "1 ", "1.0", "1x", "4294967296",
+                              "999999999999999999999"})
+        REQUIRE_THROWS_AS(parseDeviceOptions({{"card", "0"}, {"tx_buffer_count", value}}),
+                          std::invalid_argument);
 }

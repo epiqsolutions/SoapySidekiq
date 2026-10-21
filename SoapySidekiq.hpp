@@ -22,7 +22,17 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 #include <SoapySDR/Version.h>
-#include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/DeviceOptions.hpp>
+#include <SoapySidekiq/TxCompletionState.hpp>
+#include <SoapySidekiq/TxBlockPool.hpp>
+
+// The owners are destroyed out of line; users of this declaration do not need
+// the RX worker, queue, or sample-conversion definitions.
+namespace soapy_sidekiq
+{
+class RxStreamBackend;
+class RxStreamSession;
+} // namespace soapy_sidekiq
 
 /** Legacy number of preallocated host TX blocks per configured stream. */
 inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
@@ -291,7 +301,8 @@ class SoapySidekiq : public SoapySDR::Device
     double getReferenceClockRate(void) const;
 #endif
 
-    /** Device-owned token linking a logical stream channel to its SDK handle. */
+  private:
+    /** Device-owned token; callers receive only an opaque SoapySDR::Stream pointer. */
     struct StreamHandle
     {
         /** Soapy RX/TX direction used to select stream lifecycle and I/O. */
@@ -304,7 +315,6 @@ class SoapySidekiq : public SoapySDR::Device
         skiq_tx_hdl_t tx_handle;
     };
 
-  private:
     /** Serialize coupled RX/TX rate changes with the RX session's hardware ownership. */
     void configureWhileRxInactive(const std::function<void()> &configure);
 
@@ -368,7 +378,8 @@ class SoapySidekiq : public SoapySDR::Device
     std::string timetype{};
     std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
-    StreamHandle *active_rx_stream{};
+    /** Own the RX token; the opaque Soapy handle borrows its stable address. */
+    std::unique_ptr<StreamHandle> active_rx_stream;
 
     uint8_t num_rx_channels{};
     std::vector<uint32_t> rx_sample_rates;
@@ -378,28 +389,31 @@ class SoapySidekiq : public SoapySDR::Device
     //  tx
     std::mutex tx_mutex;
     std::condition_variable tx_cv;
-    std::mutex tx_buf_mutex;
-    std::condition_variable tx_buf_cv;
-    // Written with tx_mutex and tx_buf_mutex held; read with either held.
+    std::uint32_t tx_buffer_count{soapy_sidekiq::defaultTxBufferCount};
+    using TxCompletion = soapy_sidekiq::TxCompletionState<>;
+    std::shared_ptr<TxCompletion> tx_completion;
+    // Written with tx_mutex and tx_completion->mutex held; read with either held.
     bool tx_writes_stopping{true};
-    std::size_t active_tx_writers{}; // Guarded by tx_buf_mutex.
-    std::size_t active_tx_status_readers{}; // Guarded by tx_buf_mutex.
+    std::size_t active_tx_writers{};        // Guarded by tx_completion->mutex.
+    std::size_t active_tx_status_readers{}; // Guarded by tx_completion->mutex.
     /** Close write/status admission and drain admitted calls before stopping hardware. */
     void stopTxWrites();
+    /** Drain API calls, join PPS startup, and stop hardware; failed stops remain retryable. */
+    int stopTxStream(bool on_pps);
+    /** Best-effort destruction cleanup; accepted callbacks retain their own storage. */
+    void shutdownTx() noexcept;
     bool tx_start_finished{};
     int tx_start_status{};
     bool tx_stream_active{};
-    // Fixed-size status storage is allocated before callbacks are registered.
-    std::unique_ptr<int32_t[]> p_tx_status;
     bool first_transmit{};
-    StreamHandle *active_tx_stream{};
+    /** Own the TX token until close or device shutdown. */
+    std::unique_ptr<StreamHandle> active_tx_stream;
 
     uint8_t num_tx_channels{};
     std::vector<uint32_t> tx_sample_rates;
     std::vector<uint32_t> tx_bandwidths;
     std::timed_mutex tx_status_mutex;
     uint32_t tx_underruns{};   // Guarded by tx_status_mutex; reset after successful SDK start.
-    uint64_t complete_count{}; // Guarded by tx_buf_mutex.
     uint32_t current_tx_block_size{};
 
     //  setting
@@ -408,24 +422,24 @@ class SoapySidekiq : public SoapySDR::Device
     bool rfTimeSource{};
     uint64_t sys_freq{};
 
-    // TX buffer
-    skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
+    using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
+    std::unique_ptr<TxBlocks> tx_blocks;
+    /** Prepare all block owners and bookkeeping before publishing a TX stream. */
+    void initializeTxBuffers();
     uint32_t currTXBuffIndex{};
 
     // TX callback static function
     // The registration requires a static function instead of a method so
     // this must be created to be able to register it.
-    // This function calls the tx_complete method.
+    // Each accepted context retains its bookkeeping and SDK block independently.
     static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                      void *p_user) noexcept;
 
-  public:
     /** Per-send context: owned by writeStream until accepted, then by completion. */
     struct passedStruct
     {
-        /** Completion routing target for this accepted submission. */
-        SoapySidekiq *classAddr;
-        /** Reserved pool slot released by completion publication. */
+        std::shared_ptr<TxCompletion> completion;
+        std::shared_ptr<skiq_tx_block_t> block;
         uint32_t txIndex;
     };
 
@@ -434,6 +448,6 @@ class SoapySidekiq : public SoapySDR::Device
     /** Publish asynchronous startup completion before exception-contained diagnostics. */
     void tx_streaming_start(skiq_tx_hdl_t tx_handle) noexcept;
 
-    // tx callback method
-    void tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex);
+    /** Publish completion using only the submitting stream's retained state. */
+    static void completeTx(const std::shared_ptr<TxCompletion> &completion, uint32_t txIndex);
 };

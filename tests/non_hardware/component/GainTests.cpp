@@ -13,6 +13,12 @@
 #include <string>
 #include <vector>
 
+// Compile against both API shapes: the legacy stand-in deliberately has
+// neither the three-argument constructor nor a step() accessor.
+#ifndef SOAPYSIDEKIQ_TEST_LEGACY_RANGE
+#define SOAPY_SDR_API_HAS_RANGE_TYPE_STEP
+#endif
+
 #define SOAPY_SDR_TX 0
 #define SOAPY_SDR_RX 1
 #define SoapySDR_logf(...) ((void)0)
@@ -44,11 +50,16 @@ namespace SoapySDR
 {
 struct Range
 {
-    double first, last, increment;
+    double first, last;
+#ifdef SOAPY_SDR_API_HAS_RANGE_TYPE_STEP
+    double increment;
     Range(double minimum, double maximum, double step)
         : first(minimum), last(maximum), increment(step)
     {
     }
+#else
+    Range(double minimum, double maximum) : first(minimum), last(maximum) {}
+#endif
     double minimum() const
     {
         return first;
@@ -57,10 +68,12 @@ struct Range
     {
         return last;
     }
+#ifdef SOAPY_SDR_API_HAS_RANGE_TYPE_STEP
     double step() const
     {
         return increment;
     }
+#endif
 };
 } // namespace SoapySDR
 namespace
@@ -228,7 +241,9 @@ TEST_CASE("all existing RX profiles retain their index offsets, rounding and adv
         const auto range = device.getGainRange(SOAPY_SDR_RX, 1);
         REQUIRE_EQ(range.minimum(), 0.0);
         REQUIRE_EQ(range.maximum(), static_cast<double>(profile.maximum));
+#ifdef SOAPY_SDR_API_HAS_RANGE_TYPE_STEP
         REQUIRE_EQ(range.step(), 1.0 / profile.steps);
+#endif
     }
 }
 TEST_CASE("RX clamps large positive and negative requests before any integer narrowing")
@@ -340,7 +355,9 @@ TEST_CASE("TX quarter-dB conversion and readback use SDK limits for every card p
         }
         const auto range = device.getGainRange(SOAPY_SDR_TX, 1);
         REQUIRE_EQ(range.maximum(), profile.tx_maximum / 4.0);
+#ifdef SOAPY_SDR_API_HAS_RANGE_TYPE_STEP
         REQUIRE_EQ(range.step(), 0.25);
+#endif
     }
 }
 TEST_CASE("nonzero TX minimum attenuation limits both conversion and advertised gain")
