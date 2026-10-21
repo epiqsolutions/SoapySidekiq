@@ -309,6 +309,7 @@ public:
     static void tx_complete_callback(int32_t, skiq_tx_block_t *, void *) noexcept;
     void closeStream(SoapySDR::Stream *);
     void stopTxWrites();
+    int stopTxStream(bool);
     int deactivateStream(SoapySDR::Stream *, int, long long);
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
     int activateStreamImpl(SoapySDR::Stream *, int, long long, std::size_t);
@@ -1670,4 +1671,33 @@ TEST_CASE("invalid TX pool dimensions fail before allocator access")
     REQUIRE_THROWS_AS((Pool(3, 0, skiq_tx_block_allocate, skiq_tx_block_free)),
                       std::invalid_argument);
     REQUIRE_EQ(block_allocations, before);
+}
+
+TEST_CASE("throwing diagnostics after immediate TX start retain ownership for deactivation")
+{
+    SoapySidekiq device;
+    device.tx_stream_active = false;
+    device.tx_writes_stopping = true;
+    activation_calls.clear();
+    activation_fail_at = 0;
+    bool failed_log = false;
+    log_hook = [&]
+    {
+        if (!failed_log && !activation_calls.empty() && activation_calls.back() == "start")
+        {
+            failed_log = true;
+            throw std::runtime_error("injected post-start diagnostic failure");
+        }
+    };
+    soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(failed_log);
+    REQUIRE(device.tx_stream_active);
+    REQUIRE(device.tx_writes_stopping);
+    const auto before = stop_calls;
+    stop_status = 0;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    REQUIRE_EQ(stop_calls, before + 1);
+    REQUIRE(!device.tx_stream_active);
 }

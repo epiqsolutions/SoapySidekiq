@@ -244,6 +244,13 @@ blocked after failure. `closeStream()` raises an exception if RX hardware
 cannot be stopped and retains the stream for recovery; active TX must be
 deactivated successfully before it can be closed.
 
+Device destruction closes TX write/status admission, drains admitted calls, and
+joins TX PPS startup before stopping TX, releasing stream storage, and removing
+callbacks. A pending SDK PPS start can still keep shutdown waiting for its edge;
+this cleanup does not cancel that SDK call. Accepted contexts retain their
+individual blocks and completion state; callbacks that never arrive remain an
+unresolved SDK shutdown lifetime issue.
+
 ## Sensors
 
 `listSensors()` exposes `temperature` and `accelerometer`. `getSensorInfo()`

@@ -147,6 +147,7 @@ public:
     bool tx_writes_stopping{true};
     std::size_t active_tx_writers{}, active_tx_status_readers{};
     void stopTxWrites();
+    int stopTxStream(bool);
     std::uint32_t rx_payload_size_in_words{2}, current_tx_block_size{252};
     bool rxUseShort{true};
     double maxValue{2048};

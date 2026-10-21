@@ -162,6 +162,43 @@ void SoapySidekiq::stopTxWrites()
         lock, [this] { return active_tx_writers == 0 && active_tx_status_readers == 0; });
 }
 
+int SoapySidekiq::stopTxStream(bool on_pps)
+{
+    stopTxWrites();
+    // The SDK PPS start can still block waiting for its edge. Join before stop
+    // or before device destruction can invalidate the worker's device pointer.
+    if (_tx_streaming_thread.joinable())
+        _tx_streaming_thread.join();
+    if (!tx_stream_active || active_tx_stream == nullptr)
+        return 0;
+    const auto tx_handle = active_tx_stream->tx_handle;
+    const int status = on_pps ? skiq_stop_tx_streaming_on_1pps(card, tx_handle, 0)
+                              : skiq_stop_tx_streaming(card, tx_handle);
+    if (status != 0 && status != -ENODEV)
+        return status;
+    tx_stream_active = false;
+    return 0;
+}
+
+void SoapySidekiq::shutdownTx() noexcept
+{
+    try
+    {
+        const int status = stopTxStream(false);
+        if (status != 0)
+            SoapySDR_logf(SOAPY_SDR_ERROR, "TX shutdown stop failed (card %u), status %d", card,
+                          status);
+    }
+    catch (...)
+    {
+        // Destruction must continue even if a diagnostic sink throws.
+    }
+    delete active_tx_stream;
+    active_tx_stream = nullptr;
+    // Pending contexts retain accepted blocks and completion storage themselves.
+    tx_blocks.reset();
+}
+
 void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
 {
     SoapySDR_log(SOAPY_SDR_TRACE, "entering tx_streaming_start");
@@ -413,10 +450,11 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
             throw std::runtime_error("deactivate the TX stream before closing it");
         }
 
-        if (active_tx_stream == stream_handle)
-        {
-            active_tx_stream = nullptr;
-        }
+        const int status = stopTxStream(false);
+        if (status != 0)
+            throw std::runtime_error("Cannot close TX stream after failed deactivation: " +
+                                     std::to_string(status));
+        active_tx_stream = nullptr;
 
         // An accepted SDK submission retains its own block through completion.
         tx_blocks.reset();
@@ -652,6 +690,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
                               card, status);
                 return SOAPY_SDR_STREAM_ERROR;
             }
+            tx_stream_active = true;
             {
                 std::lock_guard<std::timed_mutex> lock(tx_status_mutex);
                 tx_underruns = 0;
@@ -716,61 +755,14 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
             return SOAPY_SDR_STREAM_ERROR;
         }
 
-        const skiq_tx_hdl_t tx_handle = stream_handle->tx_handle;
-        // Wake blocked writers and wait for their reservations/contexts to
-        // unwind before stopping hardware or allowing stream storage to close.
-        stopTxWrites();
-        // A timed start may still be finishing when the caller stops the
-        // stream. Join it before stopping and before destroying the device.
-        if (_tx_streaming_thread.joinable())
+        status = stopTxStream((flags & SOAPY_SDR_HAS_TIME) != 0);
+        if (status != 0)
         {
-            _tx_streaming_thread.join();
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                          "stopping TX streaming failed (card %u, handle %u), status %d", card,
+                          stream_handle->tx_handle, status);
+            return SOAPY_SDR_STREAM_ERROR;
         }
-        if (flags == SOAPY_SDR_HAS_TIME)
-        {
-            /* stop tx streaming */
-            status = skiq_stop_tx_streaming_on_1pps(card, tx_handle, 0);
-            if (status != 0)
-            {
-                if (status == -ENODEV)
-                {
-                    SoapySDR_logf(SOAPY_SDR_WARNING,
-                        "skiq_stop_tx_streaming_on_1pps: handle not streaming (card %u, handle %d), ignoring",
-                        card, tx_handle);
-                }
-                else
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                        "skiq_stop_tx_streaming_on_1pps failed (card %u), status %d",
-                        card, status);
-                    return SOAPY_SDR_STREAM_ERROR;
-                }
-            }
-
-        }
-        else
-        {
-            /* stop tx streaming */
-            status = skiq_stop_tx_streaming(card, tx_handle);
-            if (status != 0)
-            {
-                if (status == -ENODEV)
-                {
-                    SoapySDR_logf(SOAPY_SDR_WARNING,
-                        "skiq_stop_tx_streaming: handle not streaming (card %u, handle %d), ignoring",
-                        card, tx_handle);
-                }
-                else
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                        "skiq_stop_tx_streaming failed (card %u), status %d",
-                        card, status);
-                    return SOAPY_SDR_STREAM_ERROR;
-                }
-            }
-        }
-
-        tx_stream_active = false;
     }
 
     return 0;

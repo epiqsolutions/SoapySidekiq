@@ -316,8 +316,26 @@ extract_stream_method(rx_close "void SoapySidekiq::closeStream("
 extract_stream_method(rx_deactivate "int SoapySidekiq::deactivateStream("
     "int SoapySidekiq::readStream(")
 extract_stream_method(tx_stop_writes "void SoapySidekiq::stopTxWrites("
+    "void SoapySidekiq::shutdownTx(")
+extract_stream_method(tx_shutdown "void SoapySidekiq::shutdownTx("
     "void SoapySidekiq::tx_streaming_start(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxShutdownMethod.inc" "${tx_shutdown}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxStopWritesMethod.inc" "${tx_stop_writes}")
+string(FIND "${settings_source}" "SoapySidekiq::~SoapySidekiq(" destructor_start)
+string(FIND "${settings_source}" "std::string SoapySidekiq::getDriverKey(" destructor_end)
+if(destructor_start LESS 0 OR destructor_end LESS destructor_start)
+    message(FATAL_ERROR "Could not locate production device destructor")
+endif()
+math(EXPR destructor_length "${destructor_end} - ${destructor_start}")
+string(SUBSTRING "${settings_source}" ${destructor_start} ${destructor_length} device_destructor)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/DeviceDestructor.inc" "${device_destructor}")
+add_executable(tx_shutdown_tests support/TestMain.cpp component/TxShutdownTests.cpp)
+target_include_directories(tx_shutdown_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(tx_shutdown_tests PRIVATE non_hardware_test_options Threads::Threads)
+add_test(NAME tx-shutdown.all COMMAND tx_shutdown_tests)
+set_tests_properties(tx-shutdown.all PROPERTIES LABELS "component;non-hardware" TIMEOUT 10)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxDeactivateMethod.inc" "${rx_deactivate}")
 extract_stream_method(activate_method "int SoapySidekiq::activateStream("
     "int SoapySidekiq::deactivateStream(")

@@ -329,6 +329,10 @@ class SoapySidekiq : public SoapySDR::Device
     std::size_t active_tx_status_readers{}; // Guarded by tx_completion->mutex.
     /** Close write/status admission and drain admitted calls before stopping hardware. */
     void stopTxWrites();
+    /** Drain API calls, join PPS startup, and stop hardware; failed stops remain retryable. */
+    int stopTxStream(bool on_pps);
+    /** Best-effort destruction cleanup; accepted callbacks retain their own storage. */
+    void shutdownTx() noexcept;
     bool tx_start_finished{};
     int tx_start_status{};
     bool tx_stream_active{};

@@ -392,7 +392,8 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 // Destructor
 SoapySidekiq::~SoapySidekiq(void)
 {
-    SoapySDR_logf(SOAPY_SDR_TRACE, "In destructor", card);
+    // No throwing diagnostics may precede shutdown in a noexcept destructor.
+    shutdownTx();
 
     // Stop and join RX before invalidating callbacks or exiting the SDK.
     if (rx_session != nullptr)

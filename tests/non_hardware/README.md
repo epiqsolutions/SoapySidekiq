@@ -140,3 +140,12 @@ and write index. Production close tests release unused storage while a pending
 block retains its payload across close/replacement and completes afterward.
 The device-destruction completion case also checks block lifetime. This does not
 prove that SDK shutdown delivers every outstanding callback.
+
+TX shutdown cases execute the production destructor, pool initialization, and
+shared stop/drain helpers with tracked SDK calls and owned stream tokens. They
+cover cleanup order, repeated shutdown, failed-stop retry, already-stopped
+hardware, throwing diagnostics, idle destruction, blocks retained past SDK exit,
+and joining a pending PPS worker before stop. A production activation case
+checks that a post-start diagnostic failure preserves TX hardware ownership.
+The pending worker is released by the fixture; no bounded SDK PPS cancellation
+or guarantee of callback delivery is established.
