@@ -1,6 +1,6 @@
 # Legacy prototype decisions
 
-This evaluation uses the production baseline `92660c9` and the retained
+The channel-mapping and TX evaluations use production baseline `92660c9` and the retained
 `test/non-hardware-suite` snapshot
 `53a59443ec8c5131df3f8c9e8dbb15234f0522c3`. It records which ideas remain useful
 before further channel-mapping and TX ownership changes. It does not establish
@@ -103,3 +103,40 @@ The production change must provide and test:
 The separate shared-SDK lifetime proposal in PR #85 covers library/card owners;
 it does not establish these stream-buffer and callback guarantees. Its review
 and hardware evidence remain separate from this prototype evaluation.
+
+## RF configuration backend
+
+This follow-up compares production `6f7665b` with the retained RF prototype at
+`5ec9c7c` (`RfConfiguration`, `RfBackend`, `SidekiqRfBackend`, and their fake-backend
+tests). The prototype isolates SDK operations behind virtual methods and owns
+channel maps, per-direction RF snapshots, and gain-profile conversion.
+
+Its mapped-handle, conversion, and backend-failure scenarios are useful and are
+represented by the production-method frequency/gain/rate/bandwidth fixtures.
+Those fixtures compile the actual RF methods against scripted SDK functions;
+a second production RF interface is not required to inject these failures.
+The real RX session ownership boundary is tested separately with real session
+objects, rather than assuming the RF fixture's scripted gate covers concurrency.
+
+Do not adopt the prototype's behavior unchanged:
+
+- Its bandwidth setter preserves a cached rate. A coupled-clock change in
+  another direction can make that snapshot stale; production reads the current
+  configured rate under the RX lifecycle gate before the write.
+- Its sample-rate getter returns the configured integer rate, and its SDK
+  frequency adapter returns the requested integer frequency. Production getters
+  retain the actual backend values, including fractional readbacks.
+- Its independent state vectors and channel map would introduce another copy
+  of state already owned by the device. It has no gate serializing these RF
+  transactions with production RX activation and failed-stop ownership.
+
+Decision: retain the existing production RF boundary and reuse the prototype's
+regression ideas. The coupled-failure cases additionally model a write changing
+hardware before reporting failure, and failed/invalid/missing post-write
+readbacks. They verify all host cache entries remain unchanged while fresh
+getters and opposite-direction retries observe backend state. Host cache safety
+does not imply hardware rollback or establish a card's physical coupling model.
+
+Reconsider a distinct RF backend if another hardware implementation or a stable
+end-to-end injection requirement provides a concrete use. Shared SDK/card
+integration and hardware cross-direction validation remain separate work.
