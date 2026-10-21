@@ -23,9 +23,6 @@
 #include <SoapySDR/Version.h>
 #include <SoapySidekiq/RxStreamSession.hpp>
 
-inline constexpr int DEFAULT_SAMPLE_RATE = 20000000;
-inline constexpr int DEFAULT_BANDWIDTH = 18000000;
-inline constexpr int DEFAULT_FREQUENCY = 1000000000;
 inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
 
 /**
