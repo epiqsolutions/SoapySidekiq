@@ -487,12 +487,18 @@ extract_settings_method(gain_profiles "SoapySidekiq::GainProfile SoapySidekiq::g
 extract_settings_method(gain_methods "void SoapySidekiq::setGain("
     "void SoapySidekiq::setFrequency(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/GainMethods.inc" "${gain_profiles}\n${gain_methods}")
-add_executable(gain_tests support/TestMain.cpp component/GainTests.cpp)
-target_include_directories(gain_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(gain_tests PRIVATE non_hardware_test_options)
+# Reuse all gain cases with the two-argument Range API from SoapySDR 0.4 as
+# well as the modern API with optional step metadata.
+foreach(gain_target IN ITEMS gain_tests gain_legacy_tests)
+    add_executable(${gain_target} support/TestMain.cpp component/GainTests.cpp)
+    target_include_directories(${gain_target} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(${gain_target} PRIVATE non_hardware_test_options)
+endforeach()
+target_compile_definitions(gain_legacy_tests PRIVATE SOAPYSIDEKIQ_TEST_LEGACY_RANGE=1)
 add_test(NAME gain.all COMMAND gain_tests)
-set_tests_properties(gain.all PROPERTIES LABELS "component;non-hardware")
+add_test(NAME gain-legacy.all COMMAND gain_legacy_tests)
+set_tests_properties(gain.all gain-legacy.all PROPERTIES LABELS "component;non-hardware")
 extract_settings_method(rate_set "void SoapySidekiq::setSampleRate("
     "double SoapySidekiq::getSampleRate(")
 extract_settings_method(rate_get "double SoapySidekiq::getSampleRate("
@@ -585,7 +591,7 @@ add_custom_target(non_hardware_tests
             constructor_channel_count_tests topology_configuration_tests channel_metadata_tests
             identification_tests sensor_metadata_tests
             sample_rate_capability_tests frequency_tests
-            rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests
+            rate_bandwidth_tests gain_mode_tests gain_tests gain_legacy_tests antenna_tests dc_offset_tests
             time_readback_tests time_setting_tests pps_source_tests clock_tests settings_tests
             tx_callback_initialization_tests stream_configuration_tests
             stream_conversion_tests rx_sample_queue_tests rx_sample_queue_portable_tests

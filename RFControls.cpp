@@ -403,9 +403,19 @@ SoapySDR::Range SoapySidekiq::getGainRange(const int direction, const size_t cha
     if (direction == SOAPY_SDR_RX)
     {
         const auto profile = gainProfile();
+#ifdef SOAPY_SDR_API_HAS_RANGE_TYPE_STEP
         return SoapySDR::Range(0, profile.rx_maximum, 1.0 / profile.rx_steps_per_db);
+#else
+        // SoapySDR 0.4 reports bounds without a step field; gain quantization
+        // still follows the same card profile in setGain/getGain.
+        return SoapySDR::Range(0, profile.rx_maximum);
+#endif
     }
+#ifdef SOAPY_SDR_API_HAS_RANGE_TYPE_STEP
     return SoapySDR::Range(0, txGainMaximum(channel), 0.25);
+#else
+    return SoapySDR::Range(0, txGainMaximum(channel));
+#endif
 }
 
 /*******************************************************************
