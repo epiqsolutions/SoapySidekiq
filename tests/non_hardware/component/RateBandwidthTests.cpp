@@ -35,7 +35,7 @@ struct FakeSdk
     std::vector<int> read_directions;
     int direction{}, write_status{};
     unsigned fail_read{}, invalid_read{}, omit_bandwidth_at{};
-    bool coupled{}, omit_actual{};
+    bool coupled{}, omit_actual{}, write_before_error{};
     std::uint8_t card{};
     std::uint32_t written_rate{}, written_bw{};
 } sdk;
@@ -48,7 +48,7 @@ int writeConfiguration(int direction, std::uint8_t card, unsigned handle, std::u
     sdk.handle = handle;
     sdk.written_rate = rate;
     sdk.written_bw = bandwidth;
-    if (sdk.write_status != 0)
+    if (sdk.write_status != 0 && !sdk.write_before_error)
         return sdk.write_status;
     auto &current = sdk.state.at(handle);
     current.rate = rate;
@@ -61,7 +61,7 @@ int writeConfiguration(int direction, std::uint8_t card, unsigned handle, std::u
             state.rate = rate;
             state.actual_rate = rate + 0.25;
         }
-    return 0;
+    return sdk.write_status;
 }
 int readConfiguration(int direction, std::uint8_t card, unsigned handle, std::uint32_t *rate,
                       double *actual_rate, std::uint32_t *bandwidth, std::uint32_t *actual_bw)
@@ -497,5 +497,120 @@ TEST_CASE("RX and TX rate or bandwidth setters reject active RX before SDK acces
             REQUIRE_EQ(sdk.writes, 0u);
             REQUIRE_EQ(device.cachedRate(direction, 1), rate);
             REQUIRE_EQ(device.cachedBandwidth(direction, 1), width);
+        }
+}
+
+namespace
+{
+enum class WriteFailure
+{
+    partial_write,
+    readback_error,
+    invalid_rate,
+    missing_bandwidth
+};
+
+void failAfterHardwareChange(const WriteFailure failure)
+{
+    sdk.coupled = true;
+    switch (failure)
+    {
+    case WriteFailure::partial_write:
+        sdk.write_status = -EIO;
+        sdk.write_before_error = true;
+        break;
+    case WriteFailure::readback_error:
+        sdk.fail_read = sdk.reads + 2;
+        break;
+    case WriteFailure::invalid_rate:
+        sdk.invalid_read = sdk.reads + 2;
+        break;
+    case WriteFailure::missing_bandwidth:
+        sdk.omit_bandwidth_at = sdk.reads + 2;
+        break;
+    }
+}
+
+using CacheSnapshot = std::array<std::vector<std::uint32_t>, 4>;
+CacheSnapshot cacheSnapshot(const SoapySidekiq &device)
+{
+    return {device.rx_sample_rates, device.rx_bandwidths, device.tx_sample_rates,
+            device.tx_bandwidths};
+}
+} // namespace
+
+TEST_CASE("failed coupled RF transactions preserve every channel cache despite hardware changes")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (const bool bandwidth : {false, true})
+            for (const auto failure : {WriteFailure::partial_write, WriteFailure::readback_error,
+                                       WriteFailure::invalid_rate, WriteFailure::missing_bandwidth})
+            {
+                SoapySidekiq device;
+                for (const unsigned handle : {3u, 7u, 6u, 2u})
+                    sdk.state[handle].actual_bandwidth = 17000000 + handle;
+                device.initializeRateCaches();
+                const auto before = cacheSnapshot(device);
+                const auto selected = direction == SOAPY_SDR_RX ? 7u : 2u;
+                failAfterHardwareChange(failure);
+                if (bandwidth)
+                    REQUIRE_THROWS_AS(device.setBandwidth(direction, 1, 700000),
+                                      std::runtime_error);
+                else
+                    REQUIRE_THROWS_AS(device.setSampleRate(direction, 1, 3500000),
+                                      std::runtime_error);
+                REQUIRE_EQ(sdk.writes, 1u);
+                REQUIRE(cacheSnapshot(device) == before);
+                REQUIRE_EQ(sdk.state[selected].rate, bandwidth ? 20000000u : 3500000u);
+                REQUIRE_EQ(sdk.state[selected].actual_bandwidth, bandwidth ? 699999u : 3499999u);
+
+                // Cache rollback is not hardware rollback. Fresh getters must
+                // observe every mapped channel's actual backend state instead.
+                sdk.fail_read = sdk.invalid_read = sdk.omit_bandwidth_at = 0;
+                for (const int observed_direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+                    for (std::size_t channel = 0; channel < 2; ++channel)
+                    {
+                        const auto handle = observed_direction == SOAPY_SDR_RX
+                                                ? device.getRxHandle(channel)
+                                                : device.getTxHandle(channel);
+                        REQUIRE_EQ(device.getSampleRate(observed_direction, channel),
+                                   sdk.state[handle].actual_rate);
+                        REQUIRE_EQ(device.getBandwidth(observed_direction, channel),
+                                   static_cast<double>(sdk.state[handle].actual_bandwidth));
+                    }
+                REQUIRE(cacheSnapshot(device) == before);
+            }
+}
+
+TEST_CASE("opposite-direction bandwidth recovery uses the rate left by a failed coupled change")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (const auto failure : {WriteFailure::partial_write, WriteFailure::readback_error,
+                                   WriteFailure::invalid_rate, WriteFailure::missing_bandwidth})
+        {
+            SoapySidekiq device;
+            device.initializeRateCaches();
+            auto expected = cacheSnapshot(device);
+            failAfterHardwareChange(failure);
+            REQUIRE_THROWS_AS(device.setSampleRate(direction, 1, 3500000), std::runtime_error);
+            REQUIRE(cacheSnapshot(device) == expected);
+            const auto other = direction == SOAPY_SDR_RX ? SOAPY_SDR_TX : SOAPY_SDR_RX;
+            const auto recovery_handle = other == SOAPY_SDR_RX ? 3u : 6u;
+            REQUIRE_EQ(sdk.state[recovery_handle].rate, 3500000u);
+            REQUIRE_EQ(device.cachedRate(other, 0), 20000000u);
+            sdk.write_status = 0;
+            sdk.write_before_error = false;
+            sdk.fail_read = sdk.invalid_read = sdk.omit_bandwidth_at = 0;
+            device.setBandwidth(other, 0, 600000);
+            REQUIRE_EQ(sdk.writes, 2u);
+            REQUIRE_EQ(sdk.handle, recovery_handle);
+            REQUIRE_EQ(sdk.direction, other);
+            REQUIRE_EQ(sdk.written_rate, 3500000u);
+            REQUIRE_EQ(sdk.written_bw, 600000u);
+            const auto cache = other == SOAPY_SDR_RX ? 0u : 2u;
+            expected[cache][0] = 3500000;
+            expected[cache + 1][0] = 599999;
+            REQUIRE(cacheSnapshot(device) == expected);
+            REQUIRE_EQ(device.getSampleRate(direction, 1), 3500000.25);
         }
 }

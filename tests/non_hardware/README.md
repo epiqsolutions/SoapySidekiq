@@ -185,3 +185,11 @@ timestamp just below int64 nanosecond overflow. It consumes one sample, then
 checks that the next partial timestamp produces a stream error with cleared
 metadata and untouched output, even when diagnostics throw. CS16 and CF32 both
 recover after deactivation and reactivation with a representable epoch.
+
+RF transaction cases also model hardware changing before an SDK write reports
+failure, and post-write readback returning an error, invalid rate, or missing
+bandwidth. With scripted coupled RX/TX clocks and non-contiguous handles, they
+check every host cache remains unchanged on failure, getters observe fresh
+hardware state, and an opposite-direction bandwidth retry preserves the actual
+rate rather than restoring a stale cached one. These are host-policy checks;
+they do not prove a card's coupling model or hardware rollback after SDK errors.
