@@ -415,7 +415,7 @@ class SoapySidekiq : public SoapySDR::Device
     /** RX payload size in 32-bit words, also the CS16 complex-sample MTU. */
     uint32_t rx_payload_size_in_words{};
 
-    /** Serialize TX payload writers and protect PPS startup publication. */
+    /** Protect PPS result publication/waits and coordinate TX admission cancellation. */
     std::mutex tx_mutex;
     /** Wake writers after PPS startup publication or admission cancellation. */
     std::condition_variable tx_cv;
@@ -443,7 +443,11 @@ class SoapySidekiq : public SoapySDR::Device
     int tx_start_status{};
     /** Retain stop responsibility after activation, including failed-stop retries. */
     bool tx_stream_active{};
-    /** Writer/status startup-observation gate; guarded by tx_mutex. */
+    /**
+     * PPS first-write gate: activation initializes it before opening admission.
+     * writeStream checks it before locking tx_mutex, then clears it under that lock.
+     * Callers serialize writes and activation; status polling reads it under tx_mutex.
+     */
     bool first_transmit{};
     /** Own the TX token until close or device shutdown. */
     std::unique_ptr<StreamHandle> active_tx_stream;
@@ -476,7 +480,11 @@ class SoapySidekiq : public SoapySDR::Device
     std::unique_ptr<TxBlocks> tx_blocks;
     /** Prepare all block owners and bookkeeping before publishing a TX stream. */
     void initializeTxBuffers();
-    /** Next circular pool slot considered by the writer; guarded by tx_mutex. */
+    /**
+     * Next circular pool slot; initialized before admission and advanced by writeStream.
+     * Callers serialize writes; tx_mutex does not protect this index or payload access.
+     * Individual slot reservations are protected by tx_completion->mutex.
+     */
     uint32_t currTXBuffIndex{};
 
     /** Consume an accepted context without device access or unwinding through the SDK. */
