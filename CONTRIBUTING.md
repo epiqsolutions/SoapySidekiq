@@ -94,6 +94,17 @@ For SDK-dependent files, configure a real module build with
 `clang-tidy-14 -p build/module Settings.cpp`. Never treat analysis of fake test
 fixtures as analysis of the entire hardware-owning device.
 
+## Local artifacts and JSON source files
+
+Keep build outputs under `build/` and captured logs/JSON results under `logs/`.
+Those directories are ignored, while `logs/README.md` remains tracked. The root
+`compile_commands.json` and `CMakeUserPresets.json` are machine-specific and
+ignored; the shared `CMakePresets.json` is source-controlled.
+
+JSON source fixtures and configuration files are visible to Git. Do not add a
+blanket extension ignore for them; put generated results in the artifact
+directories instead.
+
 ## API documentation
 
 Generate the production API and reusable-component reference from the repository
