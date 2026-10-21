@@ -246,7 +246,7 @@ set_tests_properties(tx-callback-initialization.all PROPERTIES LABELS "component
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Streaming.cpp)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Streaming.cpp" streaming_source)
 string(FIND "${streaming_source}" "void SoapySidekiq::tx_complete_callback(" tx_callback_start)
-string(FIND "${streaming_source}" "long long SoapySidekiq::convert_timestamp_to_nanos(" tx_callback_end)
+string(FIND "${streaming_source}" "std::vector<std::string> SoapySidekiq::getStreamFormats(" tx_callback_end)
 if(tx_callback_start LESS 0 OR tx_callback_end LESS tx_callback_start)
     message(FATAL_ERROR "Could not locate the production TX completion callback")
 endif()

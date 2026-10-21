@@ -20,7 +20,7 @@
 #include <SoapySidekiq/SampleConversion.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySidekiq/StreamConfiguration.hpp>
-#include <SoapySidekiq/TimestampConversion.hpp>
+#include <SoapySidekiq/TimestampRate.hpp>
 #include <sidekiq_types.h>
 
 namespace
@@ -75,14 +75,6 @@ void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
         // A failing log sink must not escape or be retried from this callback.
     }
 }
-
-long long SoapySidekiq::convert_timestamp_to_nanos(
-        const uint64_t timestamp, const uint64_t timestamp_freq) const
-{
-    // Central helper provides exact arithmetic plus zero/overflow validation.
-    return soapy_sidekiq::ticksToNanoseconds(timestamp, timestamp_freq);
-}
-
 
 std::vector<std::string> SoapySidekiq::getStreamFormats(
     const int direction, const size_t channel) const
@@ -596,8 +588,6 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             }
             SoapySDR_logf(SOAPY_SDR_INFO, "TX is set to I then Q order");
         }
-
-        p_tx_block_index = 0;
 
         //  tx block size
         status =
