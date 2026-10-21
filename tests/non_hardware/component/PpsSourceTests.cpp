@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdint>
+#include <functional>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -103,6 +104,17 @@ int testSleep(unsigned duration)
 class SoapySidekiq
 {
   public:
+    bool configuration_blocked{};
+    unsigned configuration_attempts{};
+    // Inject admission here; real retained-ownership serialization is covered
+    // by RxLifecycleTests and RxStreamSessionTests.
+    void configureWhileRxInactive(const std::function<void()> &configure)
+    {
+        ++configuration_attempts;
+        if (configuration_blocked)
+            throw std::logic_error("RX owns hardware");
+        configure();
+    }
     std::uint8_t card{5};
     std::vector<std::string> listTimeSources() const;
     std::string getTimeSource() const;
@@ -279,4 +291,23 @@ TEST_CASE("unavailable PPS selection never waits for a pulse")
     device.setTimeSource(SOURCE_1PPS_UNAVAILABLE);
     REQUIRE_EQ(sdk.waits, 0u);
     REQUIRE_EQ(sdk.timestamp_reads, 0u);
+}
+
+TEST_CASE("RX ownership rejects PPS changes before SDK kernel or edge observation")
+{
+    KernelFile file;
+    file.contents("unchanged");
+    SoapySidekiq device;
+    device.configuration_blocked = true;
+    // Force the fallback path if admission accidentally invokes the transaction.
+    sdk.write_status = -95;
+    for (const auto &source : device.listTimeSources())
+        REQUIRE_THROWS_AS(device.setTimeSource(source), std::logic_error);
+    REQUIRE_EQ(sdk.reads + sdk.writes + sdk.timestamp_reads + sdk.waits, 0u);
+    REQUIRE_EQ(file.contents(), std::string{"unchanged"});
+    device.configuration_blocked = false;
+    device.setTimeSource("1pps_source_external");
+    REQUIRE_EQ(sdk.writes, 1u);
+    REQUIRE_EQ(file.contents(), std::string{"external"});
+    REQUIRE_EQ(sdk.timestamp_reads, 2u);
 }
