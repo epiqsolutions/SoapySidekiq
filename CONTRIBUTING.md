@@ -28,6 +28,11 @@ as the local naming and ownership reference:
 These are conventions for focused new work. Existing code has formatting and
 warning debt; adopting the baseline does not authorize a whole-tree rewrite.
 
+The [channel validation audit](docs/ChannelValidationAudit.md) maps the concrete
+device's implemented channel-taking APIs to validation helpers and regression
+fixtures. Update that inventory when adding an overload or changing channel
+selection; inherited defaults and pending contributions have separate limits.
+
 ## Reproducible tool versions
 
 The initial Linux CI baseline is Ubuntu 22.04, GCC **11**, Clang **14**,
