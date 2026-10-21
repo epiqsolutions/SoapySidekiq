@@ -52,6 +52,19 @@ TEST_CASE("concrete driver discovers constructs transfers both formats and shuts
         REQUIRE_EQ(device->getSampleRate(SOAPY_SDR_RX, 0), 2000000.0);
         REQUIRE_EQ(device->getSampleRate(SOAPY_SDR_TX, 0), 2000000.0);
 
+        for (const auto &source : device->listClockSources())
+        {
+            auto args = arguments();
+            args["clock_source"] = source;
+            REQUIRE_EQ(soapy_sidekiq::parseDeviceOptions(args).clock_source.value(), source);
+        }
+        for (const auto &source : device->listTimeSources())
+        {
+            auto args = arguments();
+            args["time_source"] = source;
+            REQUIRE_EQ(soapy_sidekiq::parseDeviceOptions(args).time_source.value(), source);
+        }
+
         const auto calls_before_invalid = scripted_sdk::snapshot().calls.size();
         REQUIRE_THROWS_AS(device->setupStream(SOAPY_SDR_RX, "invalid", {0}), std::invalid_argument);
         REQUIRE_EQ(scripted_sdk::snapshot().calls.size(), calls_before_invalid);
@@ -147,6 +160,23 @@ TEST_CASE("concrete constructor rejects input and releases SDK acquisition on la
         REQUIRE_EQ(state.init_calls, 1u);
         REQUIRE_EQ(state.exit_calls, std::string(operation) == "skiq_init" ? 0u : 1u);
     }
+}
+
+TEST_CASE("invalid constructor sources never initialize the SDK")
+{
+    for (const auto *key : {"clock_source", "time_source"})
+        for (const auto *value :
+             {"unknown", "internal", " external_clock", "1pps_source_external "})
+        {
+            scripted_sdk::reset();
+            auto args = arguments();
+            args[key] = value;
+            REQUIRE_THROWS_AS(makeSidekiq(args), std::invalid_argument);
+            const auto state = scripted_sdk::snapshot();
+            REQUIRE(state.calls.empty());
+            REQUIRE_EQ(state.init_calls, 0u);
+            REQUIRE_EQ(state.exit_calls, 0u);
+        }
 }
 
 TEST_CASE("concrete TX backpressure and destruction retain an accepted context for delivery")

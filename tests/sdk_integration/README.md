@@ -39,7 +39,7 @@ declarations. Native cases are a separate optional CTest executable.
 
 ## Scope
 
-Three registered cases cover:
+Four registered cases cover:
 
 - Real discovery/factory construction, mapped handles, rate/bandwidth
   configuration, invalid setup and inactive write rejection, CS16/CF32 RX and
@@ -47,6 +47,8 @@ Three registered cases cover:
   shutdown. The two formats run through the same immediate-start path.
 - Invalid input before SDK initialization and twelve scripted constructor
   failure points, checking that successful SDK acquisition is released once.
+- Invalid clock/time constructor names reject before any SDK call; parser
+  choices are also checked against the actual source metadata.
 - A queue-full accepted prefix, active-close rejection, actual device
   destruction with a retained send, and subsequent callback delivery using
   the retained block/context. Cleanup guards deliver held contexts if an
