@@ -112,6 +112,33 @@ TEST_CASE("device options reject empty clock and time source names")
         std::invalid_argument);
 }
 
+TEST_CASE("constructor source names reject unsupported choices before hardware acquisition")
+{
+    for (const auto *key : {"clock_source", "time_source"})
+        for (const auto *value :
+             {"unknown", "internal", " external_clock", "1pps_source_external "})
+            REQUIRE_THROWS_AS(parseDeviceOptions({{"card", "0"}, {key, value}}),
+                              std::invalid_argument);
+    REQUIRE_THROWS_AS(parseDeviceOptions({{"card", "0"}, {"clock_source", "1pps_source_external"}}),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(parseDeviceOptions({{"card", "0"}, {"time_source", "external_clock"}}),
+                      std::invalid_argument);
+}
+
+TEST_CASE("constructor source names preserve supported case-insensitive choices")
+{
+    for (const auto *source :
+         {"internal_clock", "external_clock", "INTERNAL_CLOCK", "External_Clock"})
+        REQUIRE_EQ(
+            parseDeviceOptions({{"card", "0"}, {"clock_source", source}}).clock_source.value(),
+            std::string(source));
+    for (const auto *source :
+         {"1pps_source_unavailable", "1pps_source_external", "1pps_source_internal",
+          "1PPS_SOURCE_EXTERNAL", "1pps_Source_Internal"})
+        REQUIRE_EQ(parseDeviceOptions({{"card", "0"}, {"time_source", source}}).time_source.value(),
+                   std::string(source));
+}
+
 TEST_CASE("TX payload sizes obey SDK packet boundaries")
 {
     for (const auto *value : {"252", "4092", "16380", "65532"})

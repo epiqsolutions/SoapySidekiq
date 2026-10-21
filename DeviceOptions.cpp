@@ -5,8 +5,11 @@
 
 #include <SoapySidekiq/DeviceOptions.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -48,6 +51,24 @@ std::optional<std::string> optionalString(const std::map<std::string, std::strin
         throw std::invalid_argument(key + " cannot be empty");
     }
     return value->second;
+}
+
+/** Check source spelling before SDK acquisition; retain the caller's accepted case. */
+std::optional<std::string> optionalSource(const std::map<std::string, std::string> &arguments,
+                                          const std::string &key,
+                                          std::initializer_list<const char *> choices)
+{
+    auto value = optionalString(arguments, key);
+    if (!value)
+        return value;
+    auto normalized = *value;
+    std::transform(
+        normalized.begin(), normalized.end(), normalized.begin(),
+        [](const char character)
+        { return static_cast<char>(std::tolower(static_cast<unsigned char>(character))); });
+    if (std::find(choices.begin(), choices.end(), normalized) == choices.end())
+        throw std::invalid_argument("Unknown " + key + ": " + *value);
+    return value;
 }
 
 } // namespace
@@ -97,8 +118,11 @@ DeviceOptions parseDeviceOptions(const std::map<std::string, std::string> &argum
             throw std::invalid_argument("tx_buffer_count must be greater than zero");
     }
 
-    options.clock_source = optionalString(arguments, "clock_source");
-    options.time_source = optionalString(arguments, "time_source");
+    options.clock_source =
+        optionalSource(arguments, "clock_source", {"internal_clock", "external_clock"});
+    options.time_source =
+        optionalSource(arguments, "time_source",
+                       {"1pps_source_unavailable", "1pps_source_external", "1pps_source_internal"});
     return options;
 }
 

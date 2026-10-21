@@ -39,9 +39,9 @@ struct DeviceOptions
     std::uint32_t tx_block_size{defaultTxBlockSize};
     /** Number of preallocated host TX blocks, independent of payload size. */
     std::uint32_t tx_buffer_count{defaultTxBufferCount};
-    /** Optional Soapy clock-source name. */
+    /** Optional supported Soapy clock-source name; matching ignores case. */
     std::optional<std::string> clock_source;
-    /** Optional Soapy time-source name. */
+    /** Optional supported Soapy PPS-source name; matching ignores case. */
     std::optional<std::string> time_source;
 };
 

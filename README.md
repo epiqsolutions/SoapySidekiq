@@ -148,6 +148,11 @@ silently retaining a different configuration. Supported cards pass the ID to
 the SDK and report application failures with card/topology/status context.
 Omit the argument to retain the card's default topology behavior.
 
+Optional `clock_source` and `time_source` names are checked before SDK
+initialization, using the case-insensitive choices documented below. Unknown,
+empty, or whitespace-padded names fail without opening the card. Supported
+names still require the card/SDK to accept the requested configuration.
+
 ## Streaming limitations
 
 The current streaming implementation supports:
