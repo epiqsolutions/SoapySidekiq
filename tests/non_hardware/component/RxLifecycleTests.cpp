@@ -35,7 +35,6 @@
 #define SOAPY_SDR_NOT_SUPPORTED -1
 #define SOAPY_SDR_TIMEOUT -3
 #define SOAPY_SDR_OVERFLOW -4
-#define DEFAULT_NUM_BUFFERS 1
 std::function<void()> rx_log_hook;
 template <typename... Args> void rxLog(const char *, Args &&...)
 {
