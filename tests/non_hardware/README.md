@@ -97,6 +97,14 @@ TX as upper-14-bit samples in a 16-bit word: their host scale is 32767, not
 packets. They do not execute the constructor's SDK product/width queries or
 measure RF output on hardware.
 
+The gain fixture runs against both modern and SoapySDR 0.4-style range types.
+The legacy type has only minimum/maximum bounds and no step constructor or
+accessor. Both variants exercise the same production gain methods, channel
+validation, conversions, SDK failures, and named controls. Modern range metadata
+still reports RX profile increments and the TX quarter-dB increment; older
+SoapySDR APIs can report only the bounds. This fixture checks API shape, not a
+complete build/link against either real SoapySDR library.
+
 Timestamp cases run both through the compiler-selected implementation and in
 `timestamp_portable_tests`, which forces the portable integer fallback even
 on hosts with `__int128`. Both cover truncation boundaries and signed output
@@ -196,3 +204,11 @@ modes are exercised. This fixture starts the production TX worker directly;
 TX activation-created-worker coverage remains in the TX fixture. Simulated
 edges/serialization do not establish real card timing or absent-edge SDK
 cancellation, and the edge waits are released before test state is destroyed.
+
+RF transaction cases also model hardware changing before an SDK write reports
+failure, and post-write readback returning an error, invalid rate, or missing
+bandwidth. With scripted coupled RX/TX clocks and non-contiguous handles, they
+check every host cache remains unchanged on failure, getters observe fresh
+hardware state, and an opposite-direction bandwidth retry preserves the actual
+rate rather than restoring a stale cached one. These are host-policy checks;
+they do not prove a card's coupling model or hardware rollback after SDK errors.

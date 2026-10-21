@@ -212,6 +212,68 @@ add_custom_target(uninstall COMMAND "${{CMAKE_COMMAND}}"
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(installed.exists())
 
+    def test_soapy_module_install_respects_prefix_relocation_and_destdir(self):
+        # Reproduce the old helper's absolute dependency-root default and the
+        # newer relative/ABI-qualified default. The production adapter must
+        # preserve both --prefix relocation and staging without touching the
+        # dependency installation. No SDK or compiler is needed for this rule.
+        for version, legacy in (("0.4.0", True), ("0.4.1", True),
+                                ("0.4.2", False), ("0.8.1", False)):
+            with self.subTest(version=version):
+                source = self.root / version
+                source.mkdir()
+                module_directory = "modules0.8-3" if version == "0.8.1" else "modules"
+                dependency = source / "dependency"
+                dependency.mkdir()
+                (dependency / "unrelated").write_text("keep")
+                (source / "payload").write_text("module fixture")
+                (source / "CMakeLists.txt").write_text(f'''
+cmake_minimum_required(VERSION 3.21)
+project(ModuleInstallProbe NONE)
+set(SoapySDR_VERSION "{version}")
+set(SOAPY_SDR_ROOT "{dependency}")
+set(LEGACY_HELPER {"TRUE" if legacy else "FALSE"})
+function(SOAPY_SDR_MODULE_UTIL)
+    cmake_parse_arguments(MODULE "" "PREFIX" "" ${{ARGN}})
+    if(LEGACY_HELPER)
+        if(NOT MODULE_PREFIX)
+            set(MODULE_PREFIX "${{SOAPY_SDR_ROOT}}")
+        endif()
+        set(destination "${{MODULE_PREFIX}}/lib/SoapySDR/modules")
+    else()
+        set(destination "lib/SoapySDR/{module_directory}")
+        if(MODULE_PREFIX)
+            set(destination "${{MODULE_PREFIX}}/${{destination}}")
+        endif()
+    endif()
+    install(FILES payload DESTINATION "${{destination}}")
+endfunction()
+include("{REPO}/cmake/SoapyModule.cmake")
+soapy_sidekiq_add_module()
+''')
+                build = source / "build"
+                configured_prefix = source / "configured prefix"
+                result = self.command("cmake", "-S", str(source), "-B", str(build),
+                                      f"-DCMAKE_INSTALL_PREFIX={configured_prefix}")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                relocated = source / "relocated prefix"
+                result = self.command("cmake", "--install", str(build),
+                                      "--prefix", str(relocated))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                suffix = Path("lib/SoapySDR") / module_directory / "payload"
+                self.assertEqual((relocated / suffix).read_text(), "module fixture")
+                self.assertFalse(configured_prefix.exists())
+                self.assertEqual(list(dependency.iterdir()), [dependency / "unrelated"])
+                env = self.env.copy()
+                stage = source / "staged"
+                env["DESTDIR"] = str(stage)
+                result = self.command("cmake", "--install", str(build),
+                                      "--prefix", "/opt/sidekiq fixture", env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual((stage / "opt/sidekiq fixture" / suffix).read_text(),
+                                 "module fixture")
+                self.assertEqual((dependency / "unrelated").read_text(), "keep")
+
     def test_uninstall_requires_manifest(self):
         self.install_project(self.root / "prefix")
         result = self.command("cmake", "--build", str(self.build), "--target", "uninstall")

@@ -53,11 +53,8 @@ struct StreamRequest
  * @throws std::invalid_argument for unsupported formats or multiple channels.
  * @throws std::out_of_range when the selected channel is unavailable.
  */
-StreamRequest validateStreamRequest(
-    StreamDirection direction,
-    const std::string &format,
-    const std::vector<std::size_t> &channels,
-    std::size_t available_channels,
-    bool stream_already_configured);
+StreamRequest validateStreamRequest(StreamDirection direction, const std::string &format,
+                                    const std::vector<std::size_t> &channels,
+                                    std::size_t available_channels, bool stream_already_configured);
 
 } // namespace soapy_sidekiq

@@ -22,10 +22,17 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 #include <SoapySDR/Version.h>
-#include <SoapySidekiq/RxStreamSession.hpp>
 #include <SoapySidekiq/DeviceOptions.hpp>
 #include <SoapySidekiq/TxCompletionState.hpp>
 #include <SoapySidekiq/TxBlockPool.hpp>
+
+// The owners are destroyed out of line; users of this declaration do not need
+// the RX worker, queue, or sample-conversion definitions.
+namespace soapy_sidekiq
+{
+class RxStreamBackend;
+class RxStreamSession;
+} // namespace soapy_sidekiq
 
 /** Legacy number of preallocated host TX blocks per configured stream. */
 inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
@@ -294,7 +301,8 @@ class SoapySidekiq : public SoapySDR::Device
     double getReferenceClockRate(void) const;
 #endif
 
-    /** Device-owned token linking a logical stream channel to its SDK handle. */
+  private:
+    /** Device-owned token; callers receive only an opaque SoapySDR::Stream pointer. */
     struct StreamHandle
     {
         /** Soapy RX/TX direction used to select stream lifecycle and I/O. */
@@ -307,7 +315,6 @@ class SoapySidekiq : public SoapySDR::Device
         skiq_tx_hdl_t tx_handle;
     };
 
-  private:
     /** Serialize coupled RX/TX rate changes with the RX session's hardware ownership. */
     void configureWhileRxInactive(const std::function<void()> &configure);
 
@@ -377,9 +384,6 @@ class SoapySidekiq : public SoapySDR::Device
     uint8_t num_rx_channels{};
     std::vector<uint32_t> rx_sample_rates;
     std::vector<uint32_t> rx_bandwidths;
-    uint32_t rx_block_size_in_words{};
-    uint32_t rx_block_size_in_bytes{};
-    uint32_t rx_payload_size_in_bytes{};
     uint32_t rx_payload_size_in_words{};
 
     //  tx
@@ -431,12 +435,14 @@ class SoapySidekiq : public SoapySDR::Device
     static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                      void *p_user) noexcept;
 
-  public:
     /** Per-send context: owned by writeStream until accepted, then by completion. */
     struct passedStruct
     {
+        /** Retain this stream's reservations and notification state through late completion. */
         std::shared_ptr<TxCompletion> completion;
+        /** Retain the accepted SDK payload until completion releases the context. */
         std::shared_ptr<skiq_tx_block_t> block;
+        /** Reserved slot in completion; never an index into a newer stream's pool. */
         uint32_t txIndex;
     };
 

@@ -16,7 +16,7 @@ namespace soapy_sidekiq
 /** Hardware boundary for temperature and accelerometer operations. */
 class SensorBackend
 {
-public:
+  public:
     virtual ~SensorBackend() = default;
 
     /**
@@ -47,14 +47,13 @@ public:
      * @param z Receives the signed Z-axis value.
      * @return SDK-style status code; zero indicates success.
      */
-    virtual int readAccelerometer(
-        std::int16_t &x, std::int16_t &y, std::int16_t &z) = 0;
+    virtual int readAccelerometer(std::int16_t &x, std::int16_t &y, std::int16_t &z) = 0;
 };
 
 /** Error that preserves both the failed operation and backend status code. */
 class SensorBackendError : public std::runtime_error
 {
-public:
+  public:
     /**
      * Construct a descriptive error for one backend call.
      * @param operation Logical operation that failed.
@@ -67,7 +66,7 @@ public:
     /** Return the original backend status code. */
     int status() const noexcept;
 
-private:
+  private:
     std::string operation_;
     int status_;
 };
@@ -86,7 +85,7 @@ struct AccelerometerReading
 /** Applies sensor lifecycle policy independently from the Sidekiq C API. */
 class SensorReader
 {
-public:
+  public:
     /**
      * Reference a backend that must outlive this reader.
      * @param backend Sensor backend used for subsequent reads.
@@ -107,7 +106,7 @@ public:
      */
     std::optional<AccelerometerReading> readAccelerometer();
 
-private:
+  private:
     SensorBackend &backend_;
 };
 

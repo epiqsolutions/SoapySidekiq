@@ -28,6 +28,25 @@ as the local naming and ownership reference:
 These are conventions for focused new work. Existing code has formatting and
 warning debt; adopting the baseline does not authorize a whole-tree rewrite.
 
+The [channel validation audit](docs/ChannelValidationAudit.md) maps the concrete
+device's implemented channel-taking APIs to validation helpers and regression
+fixtures. Update that inventory when adding an overload or changing channel
+selection; inherited defaults and pending contributions have separate limits.
+
+## Device implementation boundary
+
+Applications use the SoapySDR device and opaque stream API. The root
+`SoapySidekiq.hpp` declares the module's concrete implementation; it is not an
+installed application header. Keep stream tokens, callback contexts, workers,
+and completion helpers private. Portable reusable contracts belong under
+`include/SoapySidekiq` and are tested independently of device construction.
+
+Forward-declare owned implementation types where their definitions are only
+needed by out-of-line methods. Include those definitions directly in the source
+files that use them. The device constructor and destructor stay out of line so
+its `unique_ptr` owners can destroy forward-declared RX types with complete
+definitions. The SDK types stored by value still require the SDK header.
+
 ## Reproducible tool versions
 
 The initial Linux CI baseline is Ubuntu 22.04, GCC **11**, Clang **14**,
@@ -133,6 +152,12 @@ root with Doxygen 1.9.1 or later:
 mkdir -p build/api-docs
 doxygen docs/Doxyfile
 ```
+
+CI runs the same SDK-free Doxygen check in the analysis job and saves its
+warning log. Warnings fail that check, so document new public declarations and
+reusable fields when adding them. Private implementation details remain outside
+this public-reference gate; their ownership and synchronization contracts still
+need comments where they are defined.
 
 Open `build/api-docs/html/index.html`; diagnostics are written to
 `build/api-docs/warnings.log`. The configuration treats undocumented public
