@@ -10,6 +10,7 @@
 #include <SoapySDR/Formats.h>
 #include <algorithm>
 #include <cmath>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <vector>
@@ -284,5 +285,36 @@ TEST_CASE("concrete optional-constructor failures roll back and permit a clean r
         }
         REQUIRE(!scripted_sdk::snapshot().initialized);
         REQUIRE_EQ(scripted_sdk::snapshot().exit_calls, 1u);
+    }
+}
+
+TEST_CASE("concrete device teardown permits callbacks on another thread")
+{
+    for (unsigned cycle = 0; cycle < 16; ++cycle)
+    {
+        scripted_sdk::reset();
+        soapy_sidekiq::ScopeExit deliver([]() noexcept { scripted_sdk::completeAll(); });
+        std::unique_ptr<SoapySDR::Device> device(makeSidekiq(arguments()));
+        auto *tx = device->setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, {0});
+        REQUIRE_EQ(device->activateStream(tx), 0);
+        const auto mtu = device->getStreamMTU(tx);
+        std::vector<std::int16_t> input(4 * mtu, 37);
+        const void *buffers[]{input.data()};
+        int flags = 0;
+        REQUIRE_EQ(device->writeStream(tx, buffers, 2 * mtu, flags, 0, 0),
+                   static_cast<int>(2 * mtu));
+        REQUIRE_EQ(scripted_sdk::snapshot().pending.size(), std::size_t{2});
+
+        // The future joins on assertion/exception unwinding as well. Delivery
+        // may finish before, during, or after the real device's teardown.
+        auto completions = std::async(std::launch::async, [] { scripted_sdk::completeAll(); });
+        device.reset();
+        completions.get();
+        const auto stopped = scripted_sdk::snapshot();
+        REQUIRE(!stopped.initialized && stopped.callback == nullptr);
+        REQUIRE(stopped.pending.empty());
+        REQUIRE_EQ(stopped.completions, 2u);
+        REQUIRE_EQ(stopped.tx_stops, 1u);
+        REQUIRE_EQ(stopped.exit_calls, 1u);
     }
 }

@@ -33,13 +33,36 @@ list. No test target is installed, and the ordinary module has no fake symbols.
 Use another build directory for Clang or sanitizers. For ASan/UBSan add
 `-DSOAPYSIDEKIQ_SDK_INTEGRATION_ASAN=ON` at configure time. The sanitizer test
 uses a non-PIE executable, matching the portable suite's Linux ASan setup.
+For ThreadSanitizer use a separate Clang 18 build with
+`-DSOAPYSIDEKIQ_SDK_INTEGRATION_TSAN=ON`. ASan/UBSan and TSan cannot be enabled
+together. On Ubuntu x86-64 with Clang 18 and GCC 11 development headers:
+
+```sh
+cmake -S . -B build/scripted-sdk-tsan \
+  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=clang++-18 \
+  -DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11 \
+  -DPython3_EXECUTABLE=/usr/bin/python3 \
+  -DSOAPYSIDEKIQ_BUILD_SDK_INTEGRATION_TESTS=ON \
+  -DSOAPYSIDEKIQ_SDK_INTEGRATION_TSAN=ON
+cmake --build build/scripted-sdk-tsan --target scripted_driver_tests --parallel 2
+setarch "$(uname -m)" -R env TSAN_OPTIONS=halt_on_error=1 \
+  ctest --test-dir build/scripted-sdk-tsan -R '^scripted-driver.all$' --verbose
+```
+
+The sanitizer options apply to the test objects and executable, including
+scripted SDK functions and generated fail-fast stubs. They do not instrument
+the normal module or the linked SoapySDR library. Missing timed-lock/wait
+interceptors in older runtimes can produce false reports; use a matched newer
+compiler/runtime rather than suppressing synchronization functions. This setup
+changes ASLR only for the test process and its children.
+
 The existing [portable suite](../non_hardware/README.md) and CI still work
 without SDK headers; their tooling cases test stub generation with synthetic
 declarations. Native cases are a separate optional CTest executable.
 
 ## Scope
 
-Six registered cases cover:
+Seven registered cases cover:
 
 - Real discovery/factory construction, mapped handles, rate/bandwidth
   configuration, invalid setup and inactive write rejection, CS16/CF32 RX and
@@ -58,6 +81,11 @@ Six registered cases cover:
   destruction with a retained send, and subsequent callback delivery using
   the retained block/context. Cleanup guards deliver held contexts if an
   assertion fails as well.
+
+- Sixteen construction/TX/teardown cycles deliver real completion callbacks
+  from another thread while the actual device is destroyed. Delivery may finish
+  before, during, or after teardown; each cycle checks both accepted callbacks,
+  one TX stop, one SDK exit, and no pending scripted sends.
 
 Scripts use model/handle metadata and controlled sample values for host-path
 testing; they do not advertise a physical card's capabilities. SDK transport
