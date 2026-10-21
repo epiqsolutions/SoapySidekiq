@@ -145,6 +145,11 @@ directories instead.
 
 ## API documentation
 
+The [2026-10-21 integration checkpoint](docs/validation/2026-10-21-integration.md)
+pins the combined-tree build, analysis, documentation, and install checks and
+their limits. Repeat affected checks after later changes; it is not hardware
+qualification or a final release sign-off.
+
 Generate the production API and reusable-component reference from the repository
 root with Doxygen 1.9.1 or later:
 
