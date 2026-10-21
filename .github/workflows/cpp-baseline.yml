@@ -34,7 +34,7 @@ jobs:
             preset: non-hardware-asan
           - name: Clang 18 TSan
             compiler: clang++-18
-            packages: clang-18 libclang-rt-18-dev util-linux
+            packages: clang-18 libclang-rt-18-dev g++-11 util-linux
             preset: non-hardware-tsan
             os: ubuntu-24.04
           - name: Clang 14
@@ -64,8 +64,14 @@ jobs:
         env:
           CXX: ${{ matrix.compiler }}
         run: |
-          cmake --preset "$PRESET" -DCMAKE_CXX_COMPILER="$CXX" \
-            -DPython3_EXECUTABLE=/usr/bin/python3
+          configure_args=(--preset "$PRESET" -DCMAKE_CXX_COMPILER="$CXX"
+            -DPython3_EXECUTABLE=/usr/bin/python3)
+          if [[ "$PRESET" == non-hardware-tsan ]]; then
+            # Match the locally validated libstdc++ headers instead of selecting
+            # whichever newer GCC happens to be preinstalled on the runner.
+            configure_args+=(-DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11)
+          fi
+          cmake "${configure_args[@]}"
       - name: Build
         run: cmake --build --preset "$PRESET" --parallel 2
       - name: Run counted suite

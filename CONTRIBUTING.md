@@ -229,16 +229,20 @@ for callback-visible state, partial writes, and stream shutdown.
 ## ThreadSanitizer host setup
 
 The TSan CI job runs the portable suite with Clang 18 on an Ubuntu 24.04 VM.
+It installs/selects GCC 11's C++ development headers explicitly to match the
+validated baseline, independent of newer GCC packages on the hosted image.
 Address randomization is disabled for the runner process and its children. It uses
 `setarch`, not a host-wide sysctl change. `halt_on_error=1` fails the affected
 executable on its first race report; the counted runner preserves failures
 and saves `suite.log`/CTest output as usual. A startup failure fails the job
 rather than skipping instrumented executables.
 
-To use the same setup on a compatible native Linux host:
+To use the same setup on a compatible Ubuntu x86-64 host with Clang 18 and
+GCC 11 development packages installed:
 
 ```sh
 cmake --preset non-hardware-tsan -DCMAKE_CXX_COMPILER=clang++-18 \
+  -DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11 \
   -DPython3_EXECUTABLE=/usr/bin/python3
 cmake --build --preset non-hardware-tsan --parallel 2
 setarch "$(uname -m)" -R env TSAN_OPTIONS=halt_on_error=1 \
