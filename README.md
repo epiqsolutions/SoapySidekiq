@@ -81,8 +81,10 @@ tests/non_hardware/run_suite.sh build/non-hardware
 Presets export `compile_commands.json` in their build directories. Keep local
 overrides in ignored `CMakeUserPresets.json`. The schema uses
 [CMake 3.21 presets](https://cmake.org/cmake/help/v3.21/manual/cmake-presets.7.html).
-Instrumentation applies only to portable tests. ASan/UBSan, TSan, and coverage
-use separate presets/directories; do not enable them together.
+These instrumentation presets apply to portable tests. ASan/UBSan, TSan, and
+coverage use separate presets/directories; do not enable them together. The
+optional [concrete-driver integration target](tests/sdk_integration/README.md)
+has its own ASan/UBSan option and requires SDK headers, with no hardware access.
 
 Without presets, `SOAPYSIDEKIQ_BUILD_MODULE` defaults to `ON`, and
 `SOAPYSIDEKIQ_BUILD_TESTS` defaults to `OFF`. Set the former to `OFF` and the

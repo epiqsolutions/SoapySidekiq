@@ -25,8 +25,10 @@ as the local naming and ownership reference:
   APIs, ownership, concurrency, and hardware constraints. Explain reasons rather
   than restating each statement.
 
-These are conventions for focused new work. Existing code has formatting and
-warning debt; adopting the baseline does not authorize a whole-tree rewrite.
+These are conventions for focused new work. The integrated production sources
+have completed the formatting pass, and clean GCC/Clang builds have a warning-free
+baseline. Preserve that baseline when editing files; keep mechanical changes
+separate from behavior changes.
 
 The [channel validation audit](docs/ChannelValidationAudit.md) maps the concrete
 device's implemented channel-taking APIs to validation helpers and regression
@@ -90,8 +92,8 @@ files. Invalid configuration, missing tools, or an invalid base fail the check.
 The module and portable tests share `cmake/ProjectWarnings.cmake`: GCC/Clang
 receive `-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow`.
 Sidekiq/SoapySDR include directories are marked `SYSTEM` on the module target.
-Warnings remain diagnostic: there is no global `-Werror`. Fix inherited warning
-debt in focused follow-ups rather than hiding it with broad suppressions.
+Warnings remain diagnostic: there is no global `-Werror`. Investigate new
+warnings rather than hiding them with broad suppressions.
 
 [`.clang-tidy`](.clang-tidy) enables a small set of correctness checks, with
 project-header filtering and system-header diagnostics disabled. It does not
@@ -107,7 +109,7 @@ run-clang-tidy-14 -p build/analysis -j 2 -quiet \
 ```
 
 The explicit correctness checks fail CI when found; compiler warnings are still
-reported without promoting the whole inherited warning baseline to errors.
+reported without promoting all compiler warnings to errors.
 For SDK-dependent files, configure a real module build with
 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, then run, for example,
 `clang-tidy-14 -p build/module Settings.cpp`. Never treat analysis of fake test
@@ -151,10 +153,11 @@ It compiles against installed SDK headers while linking scripted/fail-fast SDK
 definitions, so its cases require no cards. Keep its cross-component scenarios
 small; detailed behavior matrices belong in the focused portable fixtures.
 
-The [2026-10-21 integration checkpoint](docs/validation/2026-10-21-integration.md)
-pins the combined-tree build, analysis, documentation, and install checks and
-their limits. Repeat affected checks after later changes; it is not hardware
-qualification or a final release sign-off.
+The [software closeout record](docs/validation/2026-10-21-software-closeout.md)
+pins the combined-tree builds, tests, analysis, and documentation checks. The
+earlier [integration checkpoint](docs/validation/2026-10-21-integration.md) also
+records install-layout exercises. Repeat affected checks after later changes;
+neither record is hardware qualification or a final release sign-off.
 
 Generate the production API and reusable-component reference from the repository
 root with Doxygen 1.9.1 or later:
