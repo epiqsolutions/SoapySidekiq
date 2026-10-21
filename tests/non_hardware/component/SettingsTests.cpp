@@ -7,6 +7,7 @@
 #include <array>
 #include <cctype>
 #include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -101,6 +102,17 @@ class SoapySidekiq
         std::array<Entry, 2> rx_param{{{3}, {7}}};
         std::array<Entry, 2> tx_param{{{6}, {2}}};
     } param;
+    bool configuration_blocked{};
+    unsigned configuration_attempts{};
+    // Inject admission here; real retained-ownership serialization is covered
+    // by RxLifecycleTests and RxStreamSessionTests.
+    void configureWhileRxInactive(const std::function<void()> &configure)
+    {
+        ++configuration_attempts;
+        if (configuration_blocked)
+            throw std::logic_error("RX owns hardware");
+        configure();
+    }
     std::uint8_t card{5}, num_rx_channels{2}, num_tx_channels{2};
     bool iq_swap{}, counter{}, rfTimeSource{true};
     std::uint64_t sys_freq{40000000};
@@ -293,4 +305,21 @@ TEST_CASE("unknown and read only setting writes are rejected")
             REQUIRE(message.find("status -5") != std::string::npos);
         }
     }
+}
+
+TEST_CASE("RX ownership rejects timestamp selection without changing either cached representation")
+{
+    SoapySidekiq device;
+    device.configuration_blocked = true;
+    for (const auto &value : {"sys_timestamp", "rf_timestamp"})
+        REQUIRE_THROWS_AS(device.writeSetting("timetype", value), std::logic_error);
+    REQUIRE_EQ(device.readSetting("timetype"), std::string{"rf_timestamp"});
+    REQUIRE(device.rfTimeSource);
+    REQUIRE(sdk.reads.empty());
+    REQUIRE(sdk.writes.empty());
+    REQUIRE_EQ(sdk.iq_calls, 0u);
+    device.configuration_blocked = false;
+    device.writeSetting("timetype", "sys_timestamp");
+    REQUIRE_EQ(device.readSetting("timetype"), std::string{"sys_timestamp"});
+    REQUIRE(!device.rfTimeSource);
 }
