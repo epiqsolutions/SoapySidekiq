@@ -435,8 +435,11 @@ class SoapySidekiq : public SoapySDR::Device
     /** Per-send context: owned by writeStream until accepted, then by completion. */
     struct passedStruct
     {
+        /** Retain this stream's reservations and notification state through late completion. */
         std::shared_ptr<TxCompletion> completion;
+        /** Retain the accepted SDK payload until completion releases the context. */
         std::shared_ptr<skiq_tx_block_t> block;
+        /** Reserved slot in completion; never an index into a newer stream's pool. */
         uint32_t txIndex;
     };
 
