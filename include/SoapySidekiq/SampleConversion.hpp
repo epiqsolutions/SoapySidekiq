@@ -27,9 +27,7 @@ namespace soapy_sidekiq
  * @throws std::invalid_argument when full_scale is non-finite, non-positive,
  * or larger than the signed 16-bit range.
  */
-inline std::int16_t convertNormalizedFloatToSample(
-    const float value,
-    const float full_scale)
+inline std::int16_t convertNormalizedFloatToSample(const float value, const float full_scale)
 {
     if (!std::isfinite(full_scale) || full_scale <= 0.0F ||
         full_scale > static_cast<float>(std::numeric_limits<std::int16_t>::max()))
@@ -56,11 +54,8 @@ inline std::int16_t convertNormalizedFloatToSample(
  * @param full_scale Positive integer-domain full-scale magnitude.
  * @throws std::invalid_argument for invalid scale or nonempty null buffers.
  */
-inline void convertCf32ToCs16(
-    const float *input,
-    std::int16_t *output,
-    const std::size_t complex_samples,
-    const float full_scale)
+inline void convertCf32ToCs16(const float *input, std::int16_t *output,
+                              const std::size_t complex_samples, const float full_scale)
 {
     if (complex_samples != 0 && (input == nullptr || output == nullptr))
     {

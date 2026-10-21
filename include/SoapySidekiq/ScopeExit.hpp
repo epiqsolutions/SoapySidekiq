@@ -12,10 +12,9 @@ namespace soapy_sidekiq
 {
 
 /** Own a nonthrowing cleanup callback until ownership is explicitly released. */
-template <typename Cleanup>
-class ScopeExit
+template <typename Cleanup> class ScopeExit
 {
-public:
+  public:
     /** Arm cleanup without allocating memory after resource acquisition. */
     explicit ScopeExit(Cleanup cleanup) noexcept : cleanup_(std::move(cleanup))
     {
@@ -29,13 +28,17 @@ public:
     /** Release resources on normal or exceptional scope exit while armed. */
     ~ScopeExit() noexcept
     {
-        if (armed_) cleanup_();
+        if (armed_)
+            cleanup_();
     }
 
     /** Transfer responsibility for cleanup to the successfully built device. */
-    void release() noexcept { armed_ = false; }
+    void release() noexcept
+    {
+        armed_ = false;
+    }
 
-private:
+  private:
     Cleanup cleanup_;
     bool armed_{true};
 };

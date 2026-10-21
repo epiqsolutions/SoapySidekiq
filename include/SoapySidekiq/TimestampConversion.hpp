@@ -25,9 +25,7 @@ namespace soapy_sidekiq
  * @throws std::invalid_argument when frequency is zero.
  * @throws std::overflow_error when the nanosecond result exceeds int64_t.
  */
-inline std::int64_t ticksToNanoseconds(
-    const std::uint64_t ticks,
-    const std::uint64_t frequency)
+inline std::int64_t ticksToNanoseconds(const std::uint64_t ticks, const std::uint64_t frequency)
 {
     if (frequency == 0)
     {
@@ -37,10 +35,8 @@ inline std::int64_t ticksToNanoseconds(
 #if defined(__SIZEOF_INT128__) && !defined(SOAPYSIDEKIQ_FORCE_PORTABLE_TIMESTAMP)
     // Widen before multiplication so the exact numerator cannot wrap uint64_t.
     __extension__ using uint128 = unsigned __int128;
-    const auto nanoseconds =
-        (static_cast<uint128>(ticks) * 1000000000ULL) / frequency;
-    if (nanoseconds >
-        static_cast<uint128>(std::numeric_limits<std::int64_t>::max()))
+    const auto nanoseconds = (static_cast<uint128>(ticks) * 1000000000ULL) / frequency;
+    if (nanoseconds > static_cast<uint128>(std::numeric_limits<std::int64_t>::max()))
     {
         throw std::overflow_error("timestamp does not fit in nanoseconds");
     }
@@ -50,9 +46,8 @@ inline std::int64_t ticksToNanoseconds(
     constexpr std::uint64_t nanoseconds_per_second = 1000000000ULL;
     const std::uint64_t whole_seconds = ticks / frequency;
     const std::uint64_t remaining_ticks = ticks % frequency;
-    if (whole_seconds >
-        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) /
-            nanoseconds_per_second)
+    if (whole_seconds > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) /
+                            nanoseconds_per_second)
     {
         throw std::overflow_error("timestamp does not fit in nanoseconds");
     }
@@ -91,8 +86,7 @@ inline std::int64_t ticksToNanoseconds(
     }
     const auto whole_nanoseconds = whole_seconds * nanoseconds_per_second;
     if (fractional >
-        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) -
-            whole_nanoseconds)
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) - whole_nanoseconds)
     {
         throw std::overflow_error("timestamp does not fit in nanoseconds");
     }
