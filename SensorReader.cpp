@@ -14,8 +14,7 @@ namespace soapy_sidekiq
 
 SensorBackendError::SensorBackendError(std::string operation, const int status)
     : std::runtime_error(operation + " failed with status " + std::to_string(status)),
-      operation_(std::move(operation)),
-      status_(status)
+      operation_(std::move(operation)), status_(status)
 {
 }
 
@@ -29,10 +28,7 @@ int SensorBackendError::status() const noexcept
     return status_;
 }
 
-SensorReader::SensorReader(SensorBackend &backend)
-    : backend_(backend)
-{
-}
+SensorReader::SensorReader(SensorBackend &backend) : backend_(backend) {}
 
 std::int8_t SensorReader::readTemperature()
 {
@@ -66,8 +62,7 @@ std::optional<AccelerometerReading> SensorReader::readAccelerometer()
 
     AccelerometerReading reading;
     // Always attempt disable after a successful enable, even when reading fails.
-    const int read_status = backend_.readAccelerometer(
-        reading.x, reading.y, reading.z);
+    const int read_status = backend_.readAccelerometer(reading.x, reading.y, reading.z);
     const int disable_status = backend_.setAccelerometerEnabled(false);
     if (read_status != 0)
     {
@@ -86,9 +81,7 @@ std::string formatAccelerometer(const AccelerometerReading &reading)
     std::ostringstream output;
     // JSON numbers must not inherit digit grouping from the host application's locale.
     output.imbue(std::locale::classic());
-    output << "{\"x\":" << reading.x
-           << ",\"y\":" << reading.y
-           << ",\"z\":" << reading.z << '}';
+    output << "{\"x\":" << reading.x << ",\"y\":" << reading.y << ",\"z\":" << reading.z << '}';
     return output.str();
 }
 

@@ -49,8 +49,7 @@ DiscoveryResult discoverDevices(DiscoveryBackend &backend, const DiscoveryQuery 
     catch (const std::exception &error)
     {
         // Without a card list there is nothing safe to inspect further.
-        result.errors.push_back(
-            {std::nullopt, "enumerate cards", exceptionMessage(error)});
+        result.errors.push_back({std::nullopt, "enumerate cards", exceptionMessage(error)});
         return result;
     }
 
@@ -65,8 +64,7 @@ DiscoveryResult discoverDevices(DiscoveryBackend &backend, const DiscoveryQuery 
         catch (const std::exception &error)
         {
             // Never expose a descriptor containing an unknown serial value.
-            result.errors.push_back(
-                {card, "read serial", exceptionMessage(error)});
+            result.errors.push_back({card, "read serial", exceptionMessage(error)});
             continue;
         }
 
@@ -77,8 +75,7 @@ DiscoveryResult discoverDevices(DiscoveryBackend &backend, const DiscoveryQuery 
         catch (const std::exception &error)
         {
             // Retain the card for diagnostics, but conservatively mark it busy.
-            result.errors.push_back(
-                {card, "check availability", exceptionMessage(error)});
+            result.errors.push_back({card, "check availability", exceptionMessage(error)});
             device.available = false;
         }
 

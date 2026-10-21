@@ -15,9 +15,7 @@
 namespace soapy_sidekiq
 {
 
-RxStreamSession::RxStreamSession(
-    RxStreamBackend &backend,
-    const std::size_t queue_capacity_blocks)
+RxStreamSession::RxStreamSession(RxStreamBackend &backend, const std::size_t queue_capacity_blocks)
     : backend_(backend), queue_(queue_capacity_blocks)
 {
 }
@@ -62,8 +60,7 @@ int RxStreamSession::activateLocked(const RxSessionConfiguration &configuration)
     {
         throw std::invalid_argument("RX sample rate must be positive");
     }
-    if (!configuration.use_rf_timestamp &&
-        configuration.system_timestamp_frequency == 0)
+    if (!configuration.use_rf_timestamp && configuration.system_timestamp_frequency == 0)
     {
         throw std::invalid_argument("system timestamp frequency must be positive");
     }
@@ -91,8 +88,7 @@ int RxStreamSession::activateLocked(const RxSessionConfiguration &configuration)
     {
         queue_.start();
         running_.store(true);
-        receive_thread_ = std::thread(
-            &RxStreamSession::receiveLoop, this, configuration);
+        receive_thread_ = std::thread(&RxStreamSession::receiveLoop, this, configuration);
     }
     catch (...)
     {
@@ -104,9 +100,12 @@ int RxStreamSession::activateLocked(const RxSessionConfiguration &configuration)
         {
             // Cleanup must not wait for an external PPS edge.
             const int status = backend_.stop(configuration.handle, false);
-            if (status == 0 || status == -ENODEV) active_ = false;
+            if (status == 0 || status == -ENODEV)
+                active_ = false;
         }
-        catch (...) {}
+        catch (...)
+        {
+        }
         throw;
     }
     return 0;
@@ -129,14 +128,20 @@ int RxStreamSession::deactivate(const bool on_pps)
     {
         if (active_)
             stop_status = backend_.stop(active_configuration_.handle, on_pps);
-        if (stop_status == 0 || stop_status == -ENODEV) active_ = false;
+        if (stop_status == 0 || stop_status == -ENODEV)
+            active_ = false;
     }
-    catch (...) { stop_error = std::current_exception(); }
+    catch (...)
+    {
+        stop_error = std::current_exception();
+    }
 
     // Keep activation serialized until the old worker exits. It never takes
     // lifecycle_mutex_, so joining here cannot deadlock with receiveLoop.
-    if (receive_thread_.joinable()) receive_thread_.join();
-    if (stop_error) std::rethrow_exception(stop_error);
+    if (receive_thread_.joinable())
+        receive_thread_.join();
+    if (stop_error)
+        std::rethrow_exception(stop_error);
     return stop_status;
 }
 
@@ -158,10 +163,8 @@ void RxStreamSession::shutdown() noexcept
     }
 }
 
-RxReadResult RxStreamSession::read(
-    std::int16_t *output,
-    const std::size_t requested_samples,
-    const std::chrono::microseconds timeout)
+RxReadResult RxStreamSession::read(std::int16_t *output, const std::size_t requested_samples,
+                                   const std::chrono::microseconds timeout)
 {
     return queue_.read(output, requested_samples, timeout);
 }
@@ -240,8 +243,7 @@ void RxStreamSession::receiveLoop(RxSessionConfiguration configuration) noexcept
             // Discontinuities are diagnostic; the valid block is still queued.
             if (have_last_timestamp)
             {
-                const std::uint64_t expected =
-                    last_timestamp + configuration.block_samples;
+                const std::uint64_t expected = last_timestamp + configuration.block_samples;
                 if (result.rf_timestamp != expected)
                 {
                     timestamp_discontinuities_.fetch_add(1);
@@ -250,9 +252,8 @@ void RxStreamSession::receiveLoop(RxSessionConfiguration configuration) noexcept
             have_last_timestamp = true;
             last_timestamp = result.rf_timestamp;
 
-            const std::uint64_t timestamp = configuration.use_rf_timestamp
-                ? result.rf_timestamp
-                : result.system_timestamp;
+            const std::uint64_t timestamp =
+                configuration.use_rf_timestamp ? result.rf_timestamp : result.system_timestamp;
             const TimestampRate frequency =
                 configuration.use_rf_timestamp
                     ? configuration.sample_rate

@@ -48,7 +48,7 @@ struct RxReceiveResult
 /** Hardware boundary used by RxStreamSession and its non-hardware tests. */
 class RxStreamBackend
 {
-public:
+  public:
     virtual ~RxStreamBackend() = default;
 
     /**
@@ -98,16 +98,14 @@ struct RxSessionConfiguration
  */
 class RxStreamSession
 {
-public:
+  public:
     /**
      * Construct a session around a backend that must outlive this object.
      * @param backend Hardware adapter used by the worker thread.
      * @param queue_capacity_blocks Maximum number of queued hardware blocks.
      * @throws std::invalid_argument when queue_capacity_blocks is zero.
      */
-    explicit RxStreamSession(
-        RxStreamBackend &backend,
-        std::size_t queue_capacity_blocks = 64);
+    explicit RxStreamSession(RxStreamBackend &backend, std::size_t queue_capacity_blocks = 64);
 
     /** Stop the backend and join the receive worker if still active. */
     ~RxStreamSession();
@@ -159,10 +157,8 @@ public:
      * @param timeout Maximum wait for samples or a lifecycle transition.
      * @return Queue result containing status, count, and timestamp metadata.
      */
-    RxReadResult read(
-        std::int16_t *output,
-        std::size_t requested_samples,
-        std::chrono::microseconds timeout);
+    RxReadResult read(std::int16_t *output, std::size_t requested_samples,
+                      std::chrono::microseconds timeout);
 
     /** @return True while the receive worker should continue running. */
     bool running() const;
@@ -179,30 +175,30 @@ public:
     /** @return Backend error code saved by the receive worker, or zero. */
     int receiveError() const;
 
-private:
-  /** Start with lifecycle_mutex_ held; validate configuration before backend IO. */
-  int activateLocked(const RxSessionConfiguration &configuration);
+  private:
+    /** Start with lifecycle_mutex_ held; validate configuration before backend IO. */
+    int activateLocked(const RxSessionConfiguration &configuration);
 
-  /**
-   * Worker entry point; all failures are translated into session state.
-   * @param configuration Immutable settings copied into the worker thread.
-   */
-  void receiveLoop(RxSessionConfiguration configuration) noexcept;
+    /**
+     * Worker entry point; all failures are translated into session state.
+     * @param configuration Immutable settings copied into the worker thread.
+     */
+    void receiveLoop(RxSessionConfiguration configuration) noexcept;
 
-  /** Non-owning backend reference; the caller guarantees its lifetime. */
-  RxStreamBackend &backend_;
-  /** Synchronized producer/consumer handoff owned by this session. */
-  RxSampleQueue queue_;
-  mutable std::mutex lifecycle_mutex_;
-  std::thread receive_thread_;
-  std::atomic<bool> running_{};
-  std::atomic<bool> failed_{};
-  std::atomic<std::size_t> hardware_overruns_{};
-  std::atomic<std::size_t> timestamp_discontinuities_{};
-  std::atomic<int> receive_error_{};
-  RxSessionConfiguration active_configuration_{};
-  /** Hardware ownership, retained after failed stops; guarded by lifecycle_mutex_. */
-  bool active_{};
+    /** Non-owning backend reference; the caller guarantees its lifetime. */
+    RxStreamBackend &backend_;
+    /** Synchronized producer/consumer handoff owned by this session. */
+    RxSampleQueue queue_;
+    mutable std::mutex lifecycle_mutex_;
+    std::thread receive_thread_;
+    std::atomic<bool> running_{};
+    std::atomic<bool> failed_{};
+    std::atomic<std::size_t> hardware_overruns_{};
+    std::atomic<std::size_t> timestamp_discontinuities_{};
+    std::atomic<int> receive_error_{};
+    RxSessionConfiguration active_configuration_{};
+    /** Hardware ownership, retained after failed stops; guarded by lifecycle_mutex_. */
+    bool active_{};
 };
 
 } // namespace soapy_sidekiq

@@ -15,7 +15,7 @@ namespace soapy_sidekiq
 /** Adapts the Sidekiq C receive API to the testable RxStreamBackend contract. */
 class SidekiqRxBackend final : public RxStreamBackend
 {
-public:
+  public:
     /**
      * Bind the backend to one initialized Sidekiq card.
      * @param card SDK card index used by all receive operations.
@@ -31,7 +31,7 @@ public:
     /** @copydoc RxStreamBackend::receive */
     RxReceiveResult receive() override;
 
-private:
+  private:
     /** Initialized SDK card index owned by the surrounding device. */
     std::uint8_t card_;
 };

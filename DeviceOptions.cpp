@@ -18,29 +18,24 @@ namespace
 {
 
 /** Parse a bounded unsigned decimal argument with no ignored characters. */
-std::uint32_t parseUnsigned(
-    const std::string &value,
-    const std::string &name,
-    const std::uint32_t maximum)
+std::uint32_t parseUnsigned(const std::string &value, const std::string &name,
+                            const std::uint32_t maximum)
 {
     // from_chars rejects signs, whitespace, and trailing characters uniformly.
     std::uint32_t parsed = 0;
     const char *begin = value.data();
     const char *end = begin + value.size();
     const auto conversion = std::from_chars(begin, end, parsed);
-    if (value.empty() || conversion.ec != std::errc{} || conversion.ptr != end ||
-        parsed > maximum)
+    if (value.empty() || conversion.ec != std::errc{} || conversion.ptr != end || parsed > maximum)
     {
-        throw std::invalid_argument(
-            "invalid " + name + " value '" + value + "'");
+        throw std::invalid_argument("invalid " + name + " value '" + value + "'");
     }
     return parsed;
 }
 
 /** Return a nonempty optional keyword value, or nullopt when it is absent. */
-std::optional<std::string> optionalString(
-    const std::map<std::string, std::string> &arguments,
-    const std::string &key)
+std::optional<std::string> optionalString(const std::map<std::string, std::string> &arguments,
+                                          const std::string &key)
 {
     const auto value = arguments.find(key);
     if (value == arguments.end())
@@ -74,27 +69,22 @@ DeviceOptions parseDeviceOptions(const std::map<std::string, std::string> &argum
     if (topology != arguments.end())
     {
         options.topology = static_cast<std::uint8_t>(
-            parseUnsigned(topology->second,
-                          "topology",
-                          std::numeric_limits<std::uint8_t>::max()));
+            parseUnsigned(topology->second, "topology", std::numeric_limits<std::uint8_t>::max()));
     }
 
     const auto tx_block_size = arguments.find("tx_block_size");
     if (tx_block_size != arguments.end())
     {
-        options.tx_block_size = parseUnsigned(
-            tx_block_size->second,
-            "tx_block_size",
-            maxTxBlockSize);
+        options.tx_block_size =
+            parseUnsigned(tx_block_size->second, "tx_block_size", maxTxBlockSize);
         if (options.tx_block_size == 0)
         {
             throw std::invalid_argument("tx_block_size must be greater than zero");
         }
         if ((options.tx_block_size + txHeaderWords) % txPacketIncrementWords != 0)
         {
-            throw std::invalid_argument(
-                "tx_block_size plus the TX header must be a multiple of " +
-                std::to_string(txPacketIncrementWords) + " words");
+            throw std::invalid_argument("tx_block_size plus the TX header must be a multiple of " +
+                                        std::to_string(txPacketIncrementWords) + " words");
         }
     }
 
