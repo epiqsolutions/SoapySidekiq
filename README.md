@@ -32,6 +32,10 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Module installs respect `CMAKE_INSTALL_PREFIX`, `cmake --install --prefix`, and
+`DESTDIR` staging, including with SoapySDR 0.4.0/0.4.1's older module helper.
+An explicit module prefix does not install beside the SoapySDR dependency.
+
 The build respects `CXX`, `-DCMAKE_CXX_COMPILER=...`, and CMake toolchain files.
 The module requests C++17 without compiler extensions. For example:
 
@@ -178,6 +182,20 @@ write admission.
 CF32 components clip to [-1, 1], infinities clip to the corresponding endpoint,
 and NaN converts to zero before scaling to the card's TX full scale.
 
+The constructor argument `tx_buffer_count` selects 1–30000 preallocated host TX
+blocks; the compatibility default remains 30000. It is independent of
+`tx_block_size`, which defaults to 16380 complex samples. For example,
+`driver=sidekiq,card=0,tx_buffer_count=1024` uses 1024 blocks. Smaller pools reduce
+host memory and the number of outstanding sends, and may reach back-pressure
+sooner; writes retain their timeout and accepted-prefix contract.
+
+Payload plus SDK header storage is `4 * (tx_block_size + 4) * tx_buffer_count`
+bytes, excluding allocator, shared-owner, and status overhead. At the default
+block size this is 64 MiB for 1024 blocks and about 1.83 GiB for 30000 blocks.
+The limit bounds the count, rather than the total bytes; a larger block size
+also increases memory use. A lower default awaits throughput/latency measurements
+on supported cards.
+
 `listSampleRates()` retains a compatibility list spaced at 250 kHz within the
 SDK's reported bounds. It does not enumerate the exact profiles of cards with
 discrete rate support; the SDK validates each requested rate.
@@ -276,11 +294,23 @@ into logged `SOAPY_SDR_STREAM_ERROR` results. Unsupported options still return
 stream is already active or still owns a PPS startup thread, including a failed
 PPS start. This keeps repeated activation from replacing a joinable thread.
 
+Status-returning stream calls contain exceptions from user-installed diagnostic
+sinks. Logging failures do not turn a successful activation into an error,
+replace an SDK failure code, or hide an already accepted TX sample prefix.
+This diagnostic policy does not suppress backend failures.
+
 SDK stop failures from `deactivateStream()` return `SOAPY_SDR_STREAM_ERROR` and
 retain stream ownership so the caller can retry. TX stops keep new writes
 blocked after failure. `closeStream()` raises an exception if RX hardware
 cannot be stopped and retains the stream for recovery; active TX must be
 deactivated successfully before it can be closed.
+
+Device destruction closes TX write/status admission, drains admitted calls, and
+joins TX PPS startup before stopping TX, releasing stream storage, and removing
+callbacks. A pending SDK PPS start can still keep shutdown waiting for its edge;
+this cleanup does not cancel that SDK call. Accepted contexts retain their
+individual blocks and completion state; callbacks that never arrive remain an
+unresolved SDK shutdown lifetime issue.
 
 ## Sensors
 
