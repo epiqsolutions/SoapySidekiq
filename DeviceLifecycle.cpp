@@ -18,6 +18,7 @@
 #include <cstring>
 #include <cinttypes>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -80,26 +81,6 @@ void logging_handler(int32_t priority, const char *message) noexcept
     }
 }
 
-void SoapySidekiq::completeTx(const std::shared_ptr<TxCompletion> &completion, uint32_t txIndex)
-{
-    if (completion == nullptr || txIndex >= completion->slots.size())
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "TX completion received invalid buffer index %u", txIndex);
-        return;
-    }
-    bool unexpected_status;
-    {
-        std::lock_guard<std::mutex> lock(completion->mutex);
-        unexpected_status = completion->slots[txIndex] != 1;
-        completion->slots[txIndex] = 0;
-        ++completion->completed;
-    }
-    completion->changed.notify_all();
-    // Publish before calling a potentially throwing/reentrant diagnostic sink.
-    if (unexpected_status)
-        SoapySDR_logf(SOAPY_SDR_ERROR, "TX completion received a buffer that was not reserved");
-}
-
 // compares two strings and if equal range and equal values per character
 // returns true.
 bool equalsIgnoreCase(const std::string &a, const std::string &b)
@@ -148,6 +129,14 @@ skiq_rx_hdl_t SoapySidekiq::getFirstRxHandle(void) const
 skiq_tx_hdl_t SoapySidekiq::getFirstTxHandle(void) const
 {
     return getTxHandle(0);
+}
+
+void SoapySidekiq::configureWhileRxInactive(const std::function<void()> &configure)
+{
+    if (rx_session != nullptr)
+        rx_session->configureInactive(configure);
+    else
+        configure();
 }
 
 // Acquire constructor callback resources as one transaction. No stream can be
@@ -304,6 +293,11 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("skiq_read_num_rx_chans failed (card " + std::to_string(card) +
                                  ", status " + std::to_string(status) + ")");
     }
+    if (channels > std::size(param.rx_param))
+        throw std::runtime_error("skiq_read_num_rx_chans returned too many channels (card " +
+                                 std::to_string(card) + ", channels " + std::to_string(channels) +
+                                 ", table capacity " + std::to_string(std::size(param.rx_param)) +
+                                 ")");
     num_rx_channels = channels;
 
     for (size_t chan = 0; chan < num_rx_channels; chan++)
@@ -320,6 +314,11 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         throw std::runtime_error("skiq_read_num_tx_chans failed (card " + std::to_string(card) +
                                  ", status " + std::to_string(status) + ")");
     }
+    if (channels > std::size(param.tx_param))
+        throw std::runtime_error("skiq_read_num_tx_chans returned too many channels (card " +
+                                 std::to_string(card) + ", channels " + std::to_string(channels) +
+                                 ", table capacity " + std::to_string(std::size(param.tx_param)) +
+                                 ")");
     num_tx_channels = channels;
     for (size_t chan = 0; chan < num_tx_channels; chan++)
     {
@@ -408,8 +407,7 @@ SoapySidekiq::~SoapySidekiq(void)
     }
     rx_session.reset();
     rx_backend.reset();
-    delete active_rx_stream;
-    active_rx_stream = nullptr;
+    active_rx_stream.reset();
 
     skiq_register_tx_complete_callback(card, nullptr);
 

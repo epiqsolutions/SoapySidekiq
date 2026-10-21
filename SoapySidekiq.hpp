@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <functional>
 #include <sidekiq_api.h>
 
 #include <condition_variable>
@@ -26,12 +27,7 @@
 #include <SoapySidekiq/TxCompletionState.hpp>
 #include <SoapySidekiq/TxBlockPool.hpp>
 
-inline constexpr int DEFAULT_SAMPLE_RATE = 20000000;
-inline constexpr int DEFAULT_BANDWIDTH = 18000000;
-inline constexpr int DEFAULT_FREQUENCY = 1000000000;
-inline constexpr int DEFAULT_SLEEP_US = 1;
-inline constexpr int SLEEP_1SEC = 1000000;
-inline constexpr unsigned long long NANOS_IN_SEC = 1000000000ULL;
+inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
 
 /**
  * @brief Owns a Sidekiq card's streams and callback state.
@@ -247,6 +243,9 @@ class SoapySidekiq : public SoapySDR::Device
     };
 
   private:
+    /** Serialize coupled RX/TX rate changes with the RX session's hardware ownership. */
+    void configureWhileRxInactive(const std::function<void()> &configure);
+
     /** Throwing activation implementation behind the public stream-status boundary. */
     int activateStreamImpl(SoapySDR::Stream *stream, int flags, long long timeNs, size_t numElems);
 
@@ -287,15 +286,11 @@ class SoapySidekiq : public SoapySDR::Device
     skiq_rx_hdl_t getFirstRxHandle(void) const;
     skiq_tx_hdl_t getFirstTxHandle(void) const;
 
-    long long convert_timestamp_to_nanos(const uint64_t timestamp,
-                                         const uint64_t timestamp_freq) const;
-
     //  sidekiq card
     std::string part_str;
     skiq_part_t part;
     skiq_param_t param;
     uint8_t card{};
-    std::string timeSource{};
     uint32_t resolution{};
     double maxValue{};   // RX ADC full scale.
     double txMaxValue{}; // TX host full scale accounts for DAC bit alignment.
@@ -307,7 +302,8 @@ class SoapySidekiq : public SoapySDR::Device
     std::string timetype{};
     std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
-    StreamHandle *active_rx_stream{};
+    /** Own the RX token; the opaque Soapy handle borrows its stable address. */
+    std::unique_ptr<StreamHandle> active_rx_stream;
 
     uint8_t num_rx_channels{};
     std::vector<uint32_t> rx_sample_rates;
@@ -337,7 +333,8 @@ class SoapySidekiq : public SoapySDR::Device
     int tx_start_status{};
     bool tx_stream_active{};
     bool first_transmit{};
-    StreamHandle *active_tx_stream{};
+    /** Own the TX token until close or device shutdown. */
+    std::unique_ptr<StreamHandle> active_tx_stream;
 
     uint8_t num_tx_channels{};
     std::vector<uint32_t> tx_sample_rates;
@@ -349,7 +346,6 @@ class SoapySidekiq : public SoapySDR::Device
     //  setting
     bool iq_swap{};
     bool counter{};
-    bool log{};
     bool rfTimeSource{};
     uint64_t sys_freq{};
 
@@ -358,7 +354,6 @@ class SoapySidekiq : public SoapySDR::Device
     /** Prepare all block owners and bookkeeping before publishing a TX stream. */
     void initializeTxBuffers();
     uint32_t currTXBuffIndex{};
-    uint32_t p_tx_block_index{};
 
     // TX callback static function
     // The registration requires a static function instead of a method so
@@ -378,7 +373,8 @@ class SoapySidekiq : public SoapySDR::Device
 
     // tx thread
     std::thread _tx_streaming_thread;
-    void tx_streaming_start(skiq_tx_hdl_t tx_handle);
+    /** Publish asynchronous startup completion before exception-contained diagnostics. */
+    void tx_streaming_start(skiq_tx_hdl_t tx_handle) noexcept;
 
     /** Publish completion using only the submitting stream's retained state. */
     static void completeTx(const std::shared_ptr<TxCompletion> &completion, uint32_t txIndex);

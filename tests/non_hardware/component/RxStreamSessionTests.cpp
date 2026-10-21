@@ -9,6 +9,7 @@
 #include <SoapySidekiq/ScopeExit.hpp>
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
@@ -71,9 +72,10 @@ public:
     {
         std::unique_lock<std::mutex> lock(mutex_);
         // Real SDK receive has a bounded timeout, including after stop failure.
-        event_available_.wait_for(lock, 10ms, [this] {
-            return !events_.empty() || !streaming_;
-        });
+        event_available_.wait_for(
+            lock, 10ms, [this] { return throw_on_receive_ || !events_.empty() || !streaming_; });
+        if (throw_on_receive_)
+            throw std::runtime_error("injected receive exception");
         if (events_.empty())
         {
             return {RxReceiveStatus::no_data, 0, {}, 0, 0, 0};
@@ -96,6 +98,16 @@ public:
         event_available_.notify_one();
     }
 
+    /** Wake receive and enable/clear an exception under the backend state lock. */
+    void throwOnReceive(bool enabled)
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            throw_on_receive_ = enabled;
+        }
+        event_available_.notify_all();
+    }
+
     int start_status{};
     int stop_status{};
     bool throw_on_stop{};
@@ -106,7 +118,8 @@ public:
     bool started_on_pps{};
     bool stopped_on_pps{};
 
-private:
+  private:
+    bool throw_on_receive_{};
     std::mutex mutex_;
     std::condition_variable event_available_;
     std::deque<RxReceiveResult> events_;
@@ -448,4 +461,137 @@ TEST_CASE("RX stop retry may choose immediate cleanup after a PPS stop failure")
     REQUIRE_EQ(session.deactivate(), 0);
     REQUIRE(!backend.stopped_on_pps);
     REQUIRE_EQ(backend.stop_calls, 2);
+}
+
+TEST_CASE("inactive configuration tracks hardware ownership through failed worker and stop paths")
+{
+    FakeRxBackend backend;
+    RxStreamSession session(backend);
+    unsigned updates = 0;
+    session.configureInactive([&] { ++updates; });
+    REQUIRE_EQ(session.activate(configuration()), 0);
+    REQUIRE_THROWS_AS(session.configureInactive([&] { ++updates; }), std::logic_error);
+    backend.enqueue({RxReceiveStatus::error, 0, {}, 0, 0, -77});
+    std::array<std::int16_t, 2> output{};
+    REQUIRE(session.read(output.data(), 1, 1s).status == RxReadStatus::error);
+    REQUIRE(!session.running());
+    REQUIRE_THROWS_AS(session.configureInactive([&] { ++updates; }), std::logic_error);
+    backend.stop_status = -EIO;
+    REQUIRE_EQ(session.deactivate(), -EIO);
+    REQUIRE_THROWS_AS(session.configureInactive([&] { ++updates; }), std::logic_error);
+    REQUIRE_EQ(updates, 1u);
+    backend.stop_status = 0;
+    REQUIRE_EQ(session.deactivate(), 0);
+    session.configureInactive([&] { ++updates; });
+    REQUIRE_EQ(updates, 2u);
+}
+
+TEST_CASE("configuration snapshot and activation wait for the inactive transaction to finish")
+{
+    FakeRxBackend backend;
+    RxStreamSession session(backend);
+    std::promise<void> entered, release, attempting;
+    const auto released = release.get_future().share();
+    bool release_sent = false;
+    soapy_sidekiq::ScopeExit unblock(
+        [&]() noexcept
+        {
+            if (!release_sent)
+                release.set_value();
+        });
+    std::atomic<std::uint32_t> configured_handle{0};
+    std::uint32_t observed_handle = 0;
+    auto configure = std::async(std::launch::async,
+                                [&]
+                                {
+                                    session.configureInactive(
+                                        [&]
+                                        {
+                                            entered.set_value();
+                                            released.wait();
+                                            configured_handle = 3;
+                                        });
+                                });
+    entered.get_future().wait();
+    auto start = std::async(std::launch::async,
+                            [&]
+                            {
+                                attempting.set_value();
+                                return session.activateConfigured(
+                                    [&]
+                                    {
+                                        observed_handle = configured_handle.load();
+                                        auto value = configuration();
+                                        value.handle = observed_handle;
+                                        return value;
+                                    });
+                            });
+    attempting.get_future().wait();
+    const auto state = start.wait_for(30ms);
+    release.set_value();
+    release_sent = true;
+    configure.get();
+    REQUIRE_EQ(start.get(), 0);
+    REQUIRE(state == std::future_status::timeout);
+    REQUIRE_EQ(observed_handle, 3u);
+    REQUIRE_EQ(backend.started_handle, 3u);
+    REQUIRE_EQ(session.deactivate(), 0);
+}
+
+TEST_CASE("failed configuration preparation leaves the session inactive and retries are serialized")
+{
+    FakeRxBackend backend;
+    RxStreamSession session(backend);
+    REQUIRE_THROWS_AS(session.configureInactive([] { throw std::runtime_error("configure"); }),
+                      std::runtime_error);
+    REQUIRE_THROWS_AS(session.activateConfigured([]() -> RxSessionConfiguration
+                                                 { throw std::runtime_error("readback"); }),
+                      std::runtime_error);
+    REQUIRE_EQ(backend.start_calls, 0);
+    unsigned snapshots = 0;
+    const auto prepare = [&]
+    {
+        ++snapshots;
+        return configuration();
+    };
+    REQUIRE_EQ(session.activateConfigured(prepare), 0);
+    REQUIRE_THROWS_AS(session.activateConfigured(prepare), std::logic_error);
+    REQUIRE_EQ(snapshots, 1u);
+    REQUIRE_EQ(backend.start_calls, 1);
+    REQUIRE_EQ(session.deactivate(), 0);
+}
+
+TEST_CASE("RX receive exceptions wake readers and permit a clean session restart")
+{
+    FakeRxBackend backend;
+    RxStreamSession session(backend);
+    REQUIRE_EQ(session.activate(configuration()), 0);
+    std::array<std::int16_t, 4> output{};
+    std::promise<void> reader_entered;
+    auto reading = std::async(std::launch::async,
+                              [&]
+                              {
+                                  reader_entered.set_value();
+                                  return session.read(output.data(), 2, 2s);
+                              });
+    reader_entered.get_future().wait();
+    backend.throwOnReceive(true);
+    REQUIRE(reading.wait_for(2s) == std::future_status::ready);
+    REQUIRE(reading.get().status == RxReadStatus::error);
+    REQUIRE(session.failed());
+    REQUIRE(!session.running());
+    REQUIRE_EQ(session.receiveError(), -1);
+    // Worker failure retains hardware until the normal stop/join path runs.
+    REQUIRE_THROWS_AS(session.activate(configuration()), std::logic_error);
+    REQUIRE_EQ(session.deactivate(), 0);
+    backend.throwOnReceive(false);
+    REQUIRE_EQ(session.activate(configuration()), 0);
+    backend.enqueue(samples(7, {1, -2, 3, -4}, 0));
+    const auto resumed = session.read(output.data(), 2, 1s);
+    REQUIRE(resumed.status == RxReadStatus::samples);
+    REQUIRE_EQ(resumed.samples, std::size_t{2});
+    REQUIRE((output == std::array<std::int16_t, 4>({1, -2, 3, -4})));
+    REQUIRE(!session.failed());
+    REQUIRE_EQ(session.receiveError(), 0);
+    REQUIRE_EQ(session.deactivate(), 0);
 }

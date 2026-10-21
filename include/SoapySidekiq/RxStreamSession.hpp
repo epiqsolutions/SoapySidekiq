@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -124,6 +125,22 @@ public:
     int activate(const RxSessionConfiguration &configuration);
 
     /**
+     * Capture configuration and start hardware under one lifecycle lock.
+     * @param prepare Called only while no previous session owns hardware/worker.
+     * @return Backend start status.
+     * The callback must not re-enter session start/stop/configuration methods.
+     */
+    int activateConfigured(const std::function<RxSessionConfiguration()> &prepare);
+
+    /**
+     * Run a configuration transaction only while RX owns no hardware or worker.
+     * @param configure Callback serialized with activation and deactivation.
+     * @throws std::logic_error while active, including retained failed-stop ownership.
+     * The callback must not re-enter session start/stop/configuration methods.
+     */
+    void configureInactive(const std::function<void()> &configure);
+
+    /**
      * Stop hardware, wake readers, and join the worker.
      * @param on_pps Wait for PPS when true; false stops immediately.
      * @return Backend stop status, or zero when already inactive.
@@ -163,26 +180,29 @@ public:
     int receiveError() const;
 
 private:
-    /**
-     * Worker entry point; all failures are translated into session state.
-     * @param configuration Immutable settings copied into the worker thread.
-     */
-    void receiveLoop(RxSessionConfiguration configuration) noexcept;
+  /** Start with lifecycle_mutex_ held; validate configuration before backend IO. */
+  int activateLocked(const RxSessionConfiguration &configuration);
 
-    /** Non-owning backend reference; the caller guarantees its lifetime. */
-    RxStreamBackend &backend_;
-    /** Synchronized producer/consumer handoff owned by this session. */
-    RxSampleQueue queue_;
-    mutable std::mutex lifecycle_mutex_;
-    std::thread receive_thread_;
-    std::atomic<bool> running_{};
-    std::atomic<bool> failed_{};
-    std::atomic<std::size_t> hardware_overruns_{};
-    std::atomic<std::size_t> timestamp_discontinuities_{};
-    std::atomic<int> receive_error_{};
-    RxSessionConfiguration active_configuration_{};
-    /** Hardware ownership, retained after failed stops; guarded by lifecycle_mutex_. */
-    bool active_{};
+  /**
+   * Worker entry point; all failures are translated into session state.
+   * @param configuration Immutable settings copied into the worker thread.
+   */
+  void receiveLoop(RxSessionConfiguration configuration) noexcept;
+
+  /** Non-owning backend reference; the caller guarantees its lifetime. */
+  RxStreamBackend &backend_;
+  /** Synchronized producer/consumer handoff owned by this session. */
+  RxSampleQueue queue_;
+  mutable std::mutex lifecycle_mutex_;
+  std::thread receive_thread_;
+  std::atomic<bool> running_{};
+  std::atomic<bool> failed_{};
+  std::atomic<std::size_t> hardware_overruns_{};
+  std::atomic<std::size_t> timestamp_discontinuities_{};
+  std::atomic<int> receive_error_{};
+  RxSessionConfiguration active_configuration_{};
+  /** Hardware ownership, retained after failed stops; guarded by lifecycle_mutex_. */
+  bool active_{};
 };
 
 } // namespace soapy_sidekiq

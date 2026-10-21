@@ -109,7 +109,10 @@ oracle checks 1,000 blocks with eight partial reads each. The RX lifecycle
 fixture compiles the production close/deactivate methods and RX activation
 branch with the real RxStreamSession, an injected receive failure, and fake
 SDK start/stop calls. It covers close/reuse, stop failure with retry, and
-already-stopped hardware. Stream setup, actual SDK I/O, and destructor cleanup
+already-stopped hardware. Configuration cases reject rate/bandwidth writes in
+either direction while RX retains ownership, including worker and stop failures.
+A concurrent session test holds configuration open and verifies activation waits
+before reading its snapshot and starting hardware. Stream setup, actual SDK I/O, and destructor cleanup
 are outside that fixture's coverage.
 
 The session component cases additionally cover concurrent activation during
@@ -163,3 +166,10 @@ Constructor-option tests bound `tx_buffer_count` to 1–30000 and reject malform
 values. Production writer cases use one- and two-block pools to verify ring
 wrap, synchronous reuse, delayed-completion back-pressure, accepted prefixes, and
 suffix retry. Default pool tuning still requires hardware throughput measurements.
+
+Stream-method fixtures read the shared, RX, and TX implementation units. Complete
+methods are extracted by signature and their unindented closing brace, preserving
+the real bodies without depending on which implementation file contains the next
+method. Multi-method fixtures compose their required bodies explicitly. The SDK
+module builds and links all three units; these fixtures still use injected SDK
+operations and do not replace a real module build.

@@ -162,12 +162,18 @@ TX accepts CS16 or normalized CF32 and requires each nonempty `writeStream`
 request to contain a whole number of `getStreamMTU()` samples, with at most
 `INT_MAX` samples per call. It does not stage partial hardware blocks. Invalid
 counts or null nonempty buffers return `SOAPY_SDR_STREAM_ERROR`; a zero-length
-write returns zero without reading buffers. If back-pressure accepts only a
-prefix, advance the input by that many complex samples and retry the suffix.
-A hard SDK submission failure or packet preparation failure returns
-`SOAPY_SDR_STREAM_ERROR` if no samples were accepted; otherwise it returns the accepted prefix. The rejected packet's
+write on an admitted TX stream returns zero without reading buffers. If
+back-pressure accepts only a prefix, advance the input by that many complex
+samples and retry the suffix. A hard SDK submission failure or packet
+preparation failure returns `SOAPY_SDR_STREAM_ERROR` if no samples were
+accepted; otherwise it returns the accepted prefix. The rejected packet's
 reservation/context are released, while accepted packets retain completion
 ownership.
+
+TX write admission opens after activation and closes when deactivation begins.
+Writes before activation or after deactivation return `SOAPY_SDR_STREAM_ERROR`,
+including zero-length requests. A configured stream token alone does not open
+write admission.
 
 CF32 components clip to [-1, 1], infinities clip to the corresponding endpoint,
 and NaN converts to zero before scaling to the card's TX full scale.
@@ -243,8 +249,12 @@ version of a negative error code.
 RX activation reads the current actual sample rate and, when selected, the
 current system timestamp frequency. Fractional sample rates retain their exact
 binary value through the worker and partial-read timestamp calculation.
-Configure rates, clocks, and timestamp selection before activating RX; stop
-and reactivate RX after changing them so it captures a fresh timing snapshot.
+Sample-rate and bandwidth setters in either direction reject changes while RX
+owns hardware or a receive worker, since RX/TX clocks may be coupled. Successfully
+deactivate RX before changing them; a failed stop or failed worker still blocks
+these setters. Activation captures its timing snapshot under the same lock.
+Configure clocks and timestamp selection before activating RX; stop and reactivate
+RX after changing them so it captures a fresh timing snapshot.
 
 `getHardwareTime` uses system time for the empty selector or `sys_timestamp`.
 Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle

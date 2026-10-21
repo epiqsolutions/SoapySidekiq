@@ -198,13 +198,26 @@ string(APPEND settings_source "\n${rf_controls_source}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../TimeClock.cpp)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../TimeClock.cpp" time_clock_source)
 string(APPEND settings_source "\n${time_clock_source}")
-string(FIND "${settings_source}" "void logging_handler(" log_start)
-string(FIND "${settings_source}" "void SoapySidekiq::completeTx(" log_end)
-if(log_start LESS 0 OR log_end LESS log_start)
-    message(FATAL_ERROR "Could not locate the production SDK logging callback")
-endif()
-math(EXPR log_length "${log_end} - ${log_start}")
-string(SUBSTRING "${settings_source}" ${log_start} ${log_length} log_callback)
+# Extract a complete top-level method without depending on adjacent methods
+# or implementation-unit order. Bodies use an unindented closing brace.
+function(extract_cpp_method output source_variable signature)
+    string(FIND "${${source_variable}}" "${signature}" method_start)
+    if(method_start LESS 0)
+        message(FATAL_ERROR "Could not locate production method: ${signature}")
+    endif()
+    string(SUBSTRING "${${source_variable}}" ${method_start} -1 method_tail)
+    string(FIND "${method_tail}" "\n}\n" method_end)
+    if(method_end LESS 0)
+        message(FATAL_ERROR "Could not locate closing brace: ${signature}")
+    endif()
+    math(EXPR method_length "${method_end} + 3")
+    string(SUBSTRING "${method_tail}" 0 ${method_length} method)
+    set(${output} "${method}" PARENT_SCOPE)
+endfunction()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../TxStreaming.cpp ../../RxStreaming.cpp)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../TxStreaming.cpp" tx_streaming_source)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../RxStreaming.cpp" rx_streaming_source)
+extract_cpp_method(log_callback settings_source "void logging_handler(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/SdkLogCallback.inc" "${log_callback}")
 add_executable(sdk_logging_tests support/TestMain.cpp component/SdkLoggingTests.cpp)
 target_include_directories(sdk_logging_tests PRIVATE
@@ -214,13 +227,7 @@ add_test(NAME sdk-logging.all COMMAND sdk_logging_tests)
 set_tests_properties(sdk-logging.all PROPERTIES LABELS "component;non-hardware")
 
 # TX wait regressions use real completion publication, not a duplicated notifier.
-string(FIND "${settings_source}" "void SoapySidekiq::completeTx(" completion_start)
-string(FIND "${settings_source}" "bool equalsIgnoreCase(" completion_end)
-if(completion_start LESS 0 OR completion_end LESS completion_start)
-    message(FATAL_ERROR "Could not locate the production TX completion method")
-endif()
-math(EXPR completion_length "${completion_end} - ${completion_start}")
-string(SUBSTRING "${settings_source}" ${completion_start} ${completion_length} completion_method)
+extract_cpp_method(completion_method tx_streaming_source "void SoapySidekiq::completeTx(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxCompletionMethod.inc" "${completion_method}")
 
 # Exercise the actual constructor registration transaction with failing APIs.
@@ -245,30 +252,12 @@ set_tests_properties(tx-callback-initialization.all PROPERTIES LABELS "component
 # Fail configuration if its boundaries change rather than testing a stale copy.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Streaming.cpp)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Streaming.cpp" streaming_source)
-string(FIND "${streaming_source}" "void SoapySidekiq::tx_complete_callback(" tx_callback_start)
-string(FIND "${streaming_source}" "long long SoapySidekiq::convert_timestamp_to_nanos(" tx_callback_end)
-if(tx_callback_start LESS 0 OR tx_callback_end LESS tx_callback_start)
-    message(FATAL_ERROR "Could not locate the production TX completion callback")
-endif()
-math(EXPR tx_callback_length "${tx_callback_end} - ${tx_callback_start}")
-string(SUBSTRING "${streaming_source}" ${tx_callback_start} ${tx_callback_length} tx_callback)
+string(APPEND streaming_source "\n${tx_streaming_source}\n${rx_streaming_source}")
+extract_cpp_method(tx_callback streaming_source "void SoapySidekiq::tx_complete_callback(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxCompletionCallback.inc" "${tx_callback}")
-string(FIND "${streaming_source}" "int SoapySidekiq::writeStream(" tx_write_start)
-string(FIND "${streaming_source}" "int SoapySidekiq::readStreamStatus(" tx_write_end)
-if(tx_write_start LESS 0 OR tx_write_end LESS tx_write_start)
-    message(FATAL_ERROR "Could not locate the production TX write method for regression tests")
-endif()
-math(EXPR tx_write_length "${tx_write_end} - ${tx_write_start}")
-string(SUBSTRING "${streaming_source}" ${tx_write_start} ${tx_write_length} tx_write_method)
+extract_cpp_method(tx_write_method streaming_source "int SoapySidekiq::writeStream(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxWriteMethod.inc" "${tx_write_method}")
-
-string(FIND "${streaming_source}" "std::string SoapySidekiq::getNativeStreamFormat(" native_start)
-string(FIND "${streaming_source}" "SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(" native_end)
-if(native_start LESS 0 OR native_end LESS native_start)
-    message(FATAL_ERROR "Could not locate production native stream format method")
-endif()
-math(EXPR native_length "${native_end} - ${native_start}")
-string(SUBSTRING "${streaming_source}" ${native_start} ${native_length} native_method)
+extract_cpp_method(native_method streaming_source "std::string SoapySidekiq::getNativeStreamFormat(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/NativeStreamFormat.inc" "${native_method}")
 
 find_package(Threads REQUIRED)
@@ -291,38 +280,32 @@ function(extract_stream_method output start_marker end_marker)
     string(SUBSTRING "${streaming_source}" ${method_start} ${method_length} method)
     set(${output} "${method}" PARENT_SCOPE)
 endfunction()
-extract_stream_method(stream_lookup "SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle("
-    "void SoapySidekiq::tx_complete_callback(")
-extract_stream_method(tx_buffer_init "void SoapySidekiq::initializeTxBuffers("
-    "void SoapySidekiq::closeStream(")
+extract_cpp_method(stream_lookup streaming_source "SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle(")
+extract_cpp_method(tx_buffer_init streaming_source "void SoapySidekiq::initializeTxBuffers(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxBufferInitialization.inc" "${tx_buffer_init}")
-extract_stream_method(tx_close "void SoapySidekiq::closeStream("
-    "size_t SoapySidekiq::getStreamMTU(")
+extract_cpp_method(tx_close streaming_source "void SoapySidekiq::closeStream(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxCloseMethod.inc" "${tx_close}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamHandleLookup.inc" "${stream_lookup}")
-extract_stream_method(stream_mtu "size_t SoapySidekiq::getStreamMTU("
-    "int SoapySidekiq::activateStream(")
+extract_cpp_method(stream_mtu streaming_source "size_t SoapySidekiq::getStreamMTU(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamMtuMethod.inc" "${stream_mtu}")
-extract_stream_method(stream_read "int SoapySidekiq::readStream("
-    "int SoapySidekiq::writeStream(")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamReadMethod.inc" "${stream_read}")
-string(FIND "${streaming_source}" "int SoapySidekiq::readStreamStatus(" status_start)
-if(status_start LESS 0)
-    message(FATAL_ERROR "Could not locate stream status method")
+extract_cpp_method(stream_read streaming_source "int SoapySidekiq::readStream(")
+# Preserve a separate status-boundary implementation when present (PR #100).
+string(FIND "${streaming_source}" "int SoapySidekiq::readStreamImpl(" read_body_start)
+if(NOT read_body_start LESS 0)
+    extract_cpp_method(stream_read_body streaming_source "int SoapySidekiq::readStreamImpl(")
+    string(APPEND stream_read "\n${stream_read_body}")
 endif()
-string(SUBSTRING "${streaming_source}" ${status_start} -1 stream_status)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamReadMethod.inc" "${stream_read}")
+extract_cpp_method(stream_status streaming_source "int SoapySidekiq::readStreamStatus(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamStatusMethod.inc" "${stream_status}")
-extract_stream_method(tx_start "void SoapySidekiq::tx_streaming_start("
-    "/*******************************************************************\n * Stream API")
+extract_cpp_method(tx_start streaming_source "void SoapySidekiq::tx_streaming_start(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxStartMethod.inc" "${tx_start}")
-extract_stream_method(rx_close "void SoapySidekiq::closeStream("
-    "size_t SoapySidekiq::getStreamMTU(")
-extract_stream_method(rx_deactivate "int SoapySidekiq::deactivateStream("
-    "int SoapySidekiq::readStream(")
-extract_stream_method(tx_stop_writes "void SoapySidekiq::stopTxWrites("
-    "void SoapySidekiq::shutdownTx(")
-extract_stream_method(tx_shutdown "void SoapySidekiq::shutdownTx("
-    "void SoapySidekiq::tx_streaming_start(")
+extract_cpp_method(rx_close streaming_source "void SoapySidekiq::closeStream(")
+extract_cpp_method(rx_deactivate streaming_source "int SoapySidekiq::deactivateStream(")
+extract_cpp_method(tx_stop_writes streaming_source "void SoapySidekiq::stopTxWrites(")
+extract_cpp_method(tx_stop_stream streaming_source "int SoapySidekiq::stopTxStream(")
+string(APPEND tx_stop_writes "\n${tx_stop_stream}")
+extract_cpp_method(tx_shutdown streaming_source "void SoapySidekiq::shutdownTx(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxShutdownMethod.inc" "${tx_shutdown}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxStopWritesMethod.inc" "${tx_stop_writes}")
 string(FIND "${settings_source}" "SoapySidekiq::~SoapySidekiq(" destructor_start)
@@ -341,8 +324,9 @@ target_link_libraries(tx_shutdown_tests PRIVATE non_hardware_test_options Thread
 add_test(NAME tx-shutdown.all COMMAND tx_shutdown_tests)
 set_tests_properties(tx-shutdown.all PROPERTIES LABELS "component;non-hardware" TIMEOUT 10)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxDeactivateMethod.inc" "${rx_deactivate}")
-extract_stream_method(activate_method "int SoapySidekiq::activateStream("
-    "int SoapySidekiq::deactivateStream(")
+extract_cpp_method(activate_wrapper streaming_source "int SoapySidekiq::activateStream(")
+extract_cpp_method(activate_body streaming_source "int SoapySidekiq::activateStreamImpl(")
+set(activate_method "${activate_wrapper}\n${activate_body}")
 
 # Reuse the extraction boundary checks for side-effect-free device metadata.
 function(extract_settings_method output start_marker end_marker)
@@ -371,8 +355,10 @@ extract_settings_method(channel_count "size_t SoapySidekiq::getNumChannels(" "\n
 string(APPEND channel_count "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelValidationMethods.inc"
     "${channel_count}\n${channel_validation}")
-extract_stream_method(stream_metadata "std::vector<std::string> SoapySidekiq::getStreamFormats("
-    "void SoapySidekiq::stopTxWrites(")
+extract_cpp_method(stream_formats streaming_source "std::vector<std::string> SoapySidekiq::getStreamFormats(")
+extract_cpp_method(stream_native streaming_source "std::string SoapySidekiq::getNativeStreamFormat(")
+extract_cpp_method(stream_arguments streaming_source "SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(")
+set(stream_metadata "${stream_formats}\n${stream_native}\n${stream_arguments}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelMetadataMethods.inc"
     "${channel_mapping}\n${stream_metadata}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ChannelMappingMethods.inc" "${channel_mapping}")
@@ -395,6 +381,16 @@ target_include_directories(antenna_tests PRIVATE
 target_link_libraries(antenna_tests PRIVATE non_hardware_test_options)
 add_test(NAME antenna.all COMMAND antenna_tests)
 set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
+
+extract_settings_method(constructor_counts "    status = skiq_read_num_rx_chans("
+    "    uint8_t tmp_resolution")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ConstructorChannelCounts.inc" "${constructor_counts}")
+add_executable(constructor_channel_count_tests support/TestMain.cpp component/ConstructorChannelCountTests.cpp)
+target_include_directories(constructor_channel_count_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(constructor_channel_count_tests PRIVATE non_hardware_test_options)
+add_test(NAME constructor-channel-counts.all COMMAND constructor_channel_count_tests)
+set_tests_properties(constructor-channel-counts.all PROPERTIES LABELS "component;non-hardware")
 
 extract_settings_method(topology_configuration "    if (options.topology.has_value())"
     "    status = skiq_read_parameters(")
@@ -568,8 +564,10 @@ math(EXPR tx_if_start "${tx_branch} + 9")
 string(SUBSTRING "${activate_method}" ${tx_if_start} -1 tx_activate_body)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxActivationMethods.inc"
     "${tx_activate_prefix}    ${tx_activate_body}")
+extract_settings_method(rx_configuration_guard "void SoapySidekiq::configureWhileRxInactive(" "\n}\n")
+string(APPEND rx_configuration_guard "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RxLifecycleMethods.inc"
-    "${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
+    "${rx_configuration_guard}\n${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
 add_executable(rx_lifecycle_tests
     support/TestMain.cpp component/RxLifecycleTests.cpp ../../RxSampleQueue.cpp ../../RxStreamSession.cpp)
 target_include_directories(rx_lifecycle_tests PRIVATE
@@ -594,7 +592,7 @@ endif()
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
-            topology_configuration_tests channel_metadata_tests
+            constructor_channel_count_tests topology_configuration_tests channel_metadata_tests
             identification_tests sensor_metadata_tests
             sample_rate_capability_tests frequency_tests
             rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests
