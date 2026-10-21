@@ -157,3 +157,10 @@ Constructor-option tests bound `tx_buffer_count` to 1–30000 and reject malform
 values. Production writer cases use one- and two-block pools to verify ring
 wrap, synchronous reuse, delayed-completion back-pressure, accepted prefixes, and
 suffix retry. Default pool tuning still requires hardware throughput measurements.
+
+Stream-method fixtures read the shared, RX, and TX implementation units. Complete
+methods are extracted by signature and their unindented closing brace, preserving
+the real bodies without depending on which implementation file contains the next
+method. Multi-method fixtures compose their required bodies explicitly. The SDK
+module builds and links all three units; these fixtures still use injected SDK
+operations and do not replace a real module build.

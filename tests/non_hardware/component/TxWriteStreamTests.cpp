@@ -1878,7 +1878,7 @@ TEST_CASE("immediate and PPS deactivation keep empty and nonempty writes outside
         REQUIRE_EQ(stop_calls, 1);
         REQUIRE(!device.tx_stream_active);
         REQUIRE(device.tx_writes_stopping);
-        REQUIRE(device.active_tx_stream == &device.handle);
+        REQUIRE(device.active_tx_stream.get() == &device.handle);
         const auto prior_waits = device.tx_completion->changed.deadlines.size();
         std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
         const void *buffers[]{input.data()};

@@ -81,26 +81,6 @@ void logging_handler(int32_t priority, const char *message) noexcept
     }
 }
 
-void SoapySidekiq::completeTx(const std::shared_ptr<TxCompletion> &completion, uint32_t txIndex)
-{
-    if (completion == nullptr || txIndex >= completion->slots.size())
-    {
-        SoapySDR_logf(SOAPY_SDR_ERROR, "TX completion received invalid buffer index %u", txIndex);
-        return;
-    }
-    bool unexpected_status;
-    {
-        std::lock_guard<std::mutex> lock(completion->mutex);
-        unexpected_status = completion->slots[txIndex] != 1;
-        completion->slots[txIndex] = 0;
-        ++completion->completed;
-    }
-    completion->changed.notify_all();
-    // Publish before calling a potentially throwing/reentrant diagnostic sink.
-    if (unexpected_status)
-        SoapySDR_logf(SOAPY_SDR_ERROR, "TX completion received a buffer that was not reserved");
-}
-
 // compares two strings and if equal range and equal values per character
 // returns true.
 bool equalsIgnoreCase(const std::string &a, const std::string &b)
