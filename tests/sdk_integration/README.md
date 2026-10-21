@@ -100,6 +100,12 @@ The registered cases cover:
   until the held worker finishes, then checks stop/unregister/exit order.
   Cleanup guards release the script before joining futures on assertion failure.
 
+- Three concrete stream-validation cases reject null/inaccessible/closed tokens,
+  wrong directions, unsupported activation/deactivation/write flags, finite
+  bursts, invalid counts/buffers, and negative timeouts. They verify no SDK
+  access, no pending sends, and reuse of valid tokens after rejected controls.
+  SDK block-size queries and transmit attempts are explicitly recorded.
+
 The scripted object target alone enables two observation points in
 `TxStreaming.cpp`: after writer admission on entering the PPS-wait path, and
 after draining callers on entering the PPS-worker join path. Mutex-protected
