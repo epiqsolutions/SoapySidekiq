@@ -20,6 +20,10 @@ run is claimed here.
   card. Logical channels use the SDK parameter table, including non-contiguous
   handle maps. Invalid channels, names, numeric values, and unsupported stream
   options produce explicit errors.
+- Stream setup rejects nonempty per-stream keyword maps before SDK access.
+  The driver advertises no stream options; previously such values, including
+  the unused `bufflen`, were silently ignored. Constructor-only options must
+  be supplied when opening the device.
 - RX uses an owned worker/session and bounded sample queue. Partial reads retain
   sample order and timestamp phase. Actual fractional rates, RF/system counter
   conversion, and signed nanosecond overflow are checked. Worker failures wake

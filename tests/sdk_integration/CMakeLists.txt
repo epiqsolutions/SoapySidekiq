@@ -26,7 +26,7 @@ foreach(source IN LISTS driver_sources)
 endforeach()
 
 add_library(scripted_driver_objects OBJECT ${native_sources}
-    FakeSdk.cpp DriverIntegrationTests.cpp PpsLifecycleTests.cpp
+    FakeSdk.cpp DriverIntegrationTests.cpp PpsLifecycleTests.cpp StreamValidationTests.cpp
     ../non_hardware/support/TestMain.cpp)
 target_compile_definitions(scripted_driver_objects PRIVATE SOAPYSIDEKIQ_DRIVER_TEST_HOOKS=1)
 target_compile_features(scripted_driver_objects PRIVATE cxx_std_17)

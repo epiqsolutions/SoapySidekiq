@@ -164,7 +164,9 @@ The current streaming implementation supports:
 Simultaneous RX and TX are supported. Multi-channel Soapy streams are not currently implemented.
 
 There are no configurable per-stream arguments. `getStreamArgsInfo()` returns
-an empty list; the former `bufflen` advertisement was unused by `setupStream()`.
+an empty list. A nonempty per-stream argument map now raises an argument error
+before SDK access, including the former unused `bufflen` option. Constructor
+options belong in the device arguments, rather than the stream arguments.
 Query `getStreamMTU()` after setup for the actual buffer sample count. RX uses
 the SDK's balanced receive mode. Set the device constructor argument
 `tx_block_size` to choose a validated TX payload size before stream setup.

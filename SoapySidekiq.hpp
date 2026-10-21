@@ -90,7 +90,7 @@ class SoapySidekiq : public SoapySDR::Device
     SoapySDR::ArgInfoList getStreamArgsInfo(const int direction,
                                             const size_t channel) const override;
 
-    /** Configure one logical channel in CS16 or CF32; at most one stream per direction. */
+    /** Configure one CS16/CF32 channel per direction; reject nonempty per-stream arguments. */
     SoapySDR::Stream *setupStream(const int direction, const std::string &format,
                                   const std::vector<size_t> &channels = std::vector<size_t>(),
                                   const SoapySDR::Kwargs &args = SoapySDR::Kwargs()) override;

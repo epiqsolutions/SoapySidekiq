@@ -99,6 +99,24 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
 #include "ChannelMetadataMethods.inc"
 #include "RxSetupBlockSizeMethod.inc"
 
+TEST_CASE("stream arguments reject before SDK reads or setup-state changes")
+{
+    for (const int direction : {SOAPY_SDR_RX, SOAPY_SDR_TX})
+        for (const auto *format : {"CS16", "CF32"})
+            for (const auto *key : {"bufflen", "tx_block_size", "unknown"})
+            {
+                SoapySidekiq device;
+                sdk_block_reads = 0;
+                REQUIRE_THROWS_AS(device.setupStream(direction, format, {0}, {{key, "1024"}}),
+                                  std::invalid_argument);
+                REQUIRE_EQ(sdk_block_reads, 0u);
+                REQUIRE_EQ(device.rx_payload_size_in_words, std::uint32_t{1020});
+                REQUIRE_EQ(device.current_tx_block_size, std::uint32_t{252});
+                REQUIRE(device.active_rx_stream == nullptr);
+                REQUIRE(device.active_tx_stream == nullptr);
+            }
+}
+
 TEST_CASE("logical channels map to the SDK table even for non-contiguous handles")
 {
     SoapySidekiq device;
