@@ -133,9 +133,12 @@ Do not adopt the prototype's behavior unchanged:
 Decision: retain the existing production RF boundary and reuse the prototype's
 regression ideas. The coupled-failure cases additionally model a write changing
 hardware before reporting failure, and failed/invalid/missing post-write
-readbacks. They verify all host cache entries remain unchanged while fresh
-getters and opposite-direction retries observe backend state. Host cache safety
-does not imply hardware rollback or establish a card's physical coupling model.
+readbacks. Fresh getters and opposite-direction retries observe backend state;
+no host-state policy can imply hardware rollback or establish physical coupling.
+The subsequent dead-state audit removed the four retained RF snapshots because
+production no longer consumed them. Constructor and post-write validation are
+preserved, and the regressions exercise their errors and observable readback
+rather than snapshots with no consumer.
 
 Reconsider a distinct RF backend if another hardware implementation or a stable
 end-to-end injection requirement provides a concrete use. Shared SDK/card

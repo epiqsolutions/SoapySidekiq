@@ -632,28 +632,14 @@ SoapySDR::RangeList SoapySidekiq::getSampleRateRange(const int direction,
     return {SoapySDR::Range(minimum, maximum)};
 }
 
-void SoapySidekiq::initializeRateCaches()
+void SoapySidekiq::validateInitialRateConfiguration()
 {
-    // A constructor may encounter partial SDK outputs or a failure on a later
-    // handle. Validate into local storage before exposing any initial snapshot.
-    std::vector<uint32_t> rx_rates(num_rx_channels), rx_widths(num_rx_channels);
-    std::vector<uint32_t> tx_rates(num_tx_channels), tx_widths(num_tx_channels);
+    // Preserve constructor validation for every mapped handle without retaining
+    // snapshots that can become stale when RX/TX clocks are coupled.
     for (size_t channel = 0; channel < num_rx_channels; ++channel)
-    {
-        const auto observed = readRateAndBandwidth(SOAPY_SDR_RX, channel);
-        rx_rates[channel] = static_cast<uint32_t>(observed.actual_rate);
-        rx_widths[channel] = observed.actual_bandwidth;
-    }
+        (void)readRateAndBandwidth(SOAPY_SDR_RX, channel);
     for (size_t channel = 0; channel < num_tx_channels; ++channel)
-    {
-        const auto observed = readRateAndBandwidth(SOAPY_SDR_TX, channel);
-        tx_rates[channel] = static_cast<uint32_t>(observed.actual_rate);
-        tx_widths[channel] = observed.actual_bandwidth;
-    }
-    rx_sample_rates.swap(rx_rates);
-    rx_bandwidths.swap(rx_widths);
-    tx_sample_rates.swap(tx_rates);
-    tx_bandwidths.swap(tx_widths);
+        (void)readRateAndBandwidth(SOAPY_SDR_TX, channel);
 }
 
 SoapySidekiq::RateAndBandwidth SoapySidekiq::readRateAndBandwidth(const int direction,
@@ -687,8 +673,6 @@ void SoapySidekiq::applyRateAndBandwidth(const int direction, const size_t chann
                                          const uint32_t rate, const uint32_t bandwidth)
 {
     validateChannel(direction, channel);
-    auto &cached_rate = (direction == SOAPY_SDR_RX ? rx_sample_rates : tx_sample_rates).at(channel);
-    auto &cached_bw = (direction == SOAPY_SDR_RX ? rx_bandwidths : tx_bandwidths).at(channel);
     const int status =
         direction == SOAPY_SDR_RX
             ? skiq_write_rx_sample_rate_and_bandwidth(card, getRxHandle(channel), rate, bandwidth)
@@ -700,12 +684,9 @@ void SoapySidekiq::applyRateAndBandwidth(const int direction, const size_t chann
                                  std::to_string(rate) + ", bandwidth " + std::to_string(bandwidth) +
                                  ", status " + std::to_string(status) + ")");
 
-    // The SDK may write some outputs before reporting failure. Keep every
-    // output local and commit both cache entries only after validated success.
-    // This preserves last-known cache state; it cannot undo a hardware write.
-    const auto observed = readRateAndBandwidth(direction, channel);
-    cached_rate = static_cast<uint32_t>(observed.actual_rate);
-    cached_bw = observed.actual_bandwidth;
+    // Report unusable or failed post-write readback even though the hardware
+    // may already have changed. Future operations obtain their own fresh values.
+    (void)readRateAndBandwidth(direction, channel);
 }
 
 void SoapySidekiq::setBandwidth(const int direction, const size_t channel, const double bw)

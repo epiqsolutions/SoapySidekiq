@@ -371,7 +371,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     SoapySDR_logf(SOAPY_SDR_TRACE, "channel mode set to single");
 
     // Apply the same checked SDK readback contract used by RF configuration.
-    initializeRateCaches();
+    validateInitialRateConfiguration();
 
     // Source setters require initialized hardware, so apply validated names last.
     if (options.clock_source.has_value())
