@@ -519,7 +519,7 @@ extract_settings_method(bandwidth_set "void SoapySidekiq::setBandwidth("
     "std::vector<double> SoapySidekiq::listSampleRates(")
 extract_settings_method(bandwidth_get "double SoapySidekiq::getBandwidth(" "\n}\n")
 string(APPEND bandwidth_get "\n}\n")
-extract_settings_method(rate_initialization "void SoapySidekiq::initializeRateCaches(" "\n}\n")
+extract_settings_method(rate_initialization "void SoapySidekiq::validateInitialRateConfiguration(" "\n}\n")
 string(APPEND rate_initialization "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RateBandwidthMethods.inc"
     "${rate_initialization}\n${rate_set}\n${rate_get}\n${rate_helpers}\n${bandwidth_set}\n${bandwidth_get}")

@@ -4,6 +4,13 @@ Audited on 2026-10-21 against master `3b17726`. This records the implemented
 SoapySidekiq entry points and their existing regression coverage. It is not a
 hardware result or a claim that unmerged API additions have been audited.
 
+Follow-up against master `694e694` plus the RF snapshot cleanup: the same 28
+scalar-channel methods remain. Unused retained rate/bandwidth vectors have been
+removed; constructor validation and fresh SDK readback still use every mapped
+handle. The RF/session regressions now also exercise the real ownership gate
+and fresh-rate restart behavior. Pending API contributions remain outside this
+inventory.
+
 ## Common boundary
 
 `validateChannel(direction, channel)` asks `getNumChannels(direction)` to reject
@@ -37,7 +44,7 @@ are in [RFControls.cpp](../RFControls.cpp) and [Streaming.cpp](../Streaming.cpp)
 | `listGains`, `hasGainMode`, `setGainMode`, `getGainMode` | Direct validation; RX mode operations use the supplied mapped handle. TX reports manual mode without an SDK call. | [GainModeTests.cpp](../tests/non_hardware/component/GainModeTests.cpp), [GainTests.cpp](../tests/non_hardware/component/GainTests.cpp) |
 | Named and unnamed `setGain`, `getGain`, `getGainRange` | Unnamed methods validate directly; named methods validate through `validateGainName` and `listGains` before delegating. Reads/writes use mapped handles; TX limits use the selected parameter-table entry. RX advertised range still follows the card profile at this revision; see pending #80 below. | [GainTests.cpp](../tests/non_hardware/component/GainTests.cpp) |
 | `setFrequency`, `getFrequency`, `getFrequencyRange` | Direct validation; reads/writes use the supplied mapped handle. The SDK range query is card-wide per direction, after channel validation. | [FrequencyTests.cpp](../tests/non_hardware/component/FrequencyTests.cpp) |
-| `setSampleRate`, `getSampleRate`, `setBandwidth`, `getBandwidth` | Setters validate before their lifecycle/configuration transaction; getters delegate to validated `readRateAndBandwidth`. SDK access and cache entries use the supplied channel. Setters reject changes while RX owns hardware or a worker. | [RateBandwidthTests.cpp](../tests/non_hardware/component/RateBandwidthTests.cpp), [RxLifecycleTests.cpp](../tests/non_hardware/component/RxLifecycleTests.cpp) |
+| `setSampleRate`, `getSampleRate`, `setBandwidth`, `getBandwidth` | Setters validate before their lifecycle/configuration transaction; getters delegate to validated `readRateAndBandwidth`. SDK access uses the supplied channel. Setters reject changes while RX owns hardware or a worker. | [RateBandwidthTests.cpp](../tests/non_hardware/component/RateBandwidthTests.cpp), [RxLifecycleTests.cpp](../tests/non_hardware/component/RxLifecycleTests.cpp) |
 | `getSampleRateRange`, `listSampleRates` | Range validates directly; listing delegates to range. SDK min/max are card-wide, so validation does not imply per-handle rate capabilities. | [SampleRateCapabilityTests.cpp](../tests/non_hardware/component/SampleRateCapabilityTests.cpp) |
 
 ## Stream channel lists and opaque handles

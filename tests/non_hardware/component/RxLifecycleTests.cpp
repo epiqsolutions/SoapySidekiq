@@ -269,10 +269,6 @@ public:
     double maxValue{2048};
     std::uint64_t sys_freq{1000000};
     std::uint8_t num_rx_channels{2}, num_tx_channels{2};
-    std::vector<std::uint32_t> rx_sample_rates{20000000, 20000000};
-    std::vector<std::uint32_t> tx_sample_rates{20000000, 20000000};
-    std::vector<std::uint32_t> rx_bandwidths{18000000, 18000000};
-    std::vector<std::uint32_t> tx_bandwidths{18000000, 18000000};
     std::unique_ptr<StreamHandle> active_rx_stream, active_tx_stream;
     FixtureBackend backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
@@ -315,7 +311,7 @@ public:
     double getSampleRate(int, std::size_t) const;
     void setBandwidth(int, std::size_t, double);
     double getBandwidth(int, std::size_t) const;
-    void initializeRateCaches();
+    void validateInitialRateConfiguration();
     RateAndBandwidth readRateAndBandwidth(int, std::size_t) const;
     void applyRateAndBandwidth(int, std::size_t, std::uint32_t, std::uint32_t);
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
@@ -481,7 +477,7 @@ TEST_CASE("stream MTU reports positive sizes and rejects an invalid direction")
     device.active_rx_stream->direction = SOAPY_SDR_RX;
 }
 
-TEST_CASE("RX activation refreshes actual fractional rate instead of the stale cache")
+TEST_CASE("RX activation reads the fresh actual fractional rate")
 {
     SoapySidekiq device;
     auto *stream = device.setupRx();
@@ -894,13 +890,10 @@ TEST_CASE("RF transactions use the real RX ownership gate and restart from coupl
 
         device.setSampleRate(SOAPY_SDR_TX, 1, 3);
         REQUIRE_EQ(sdk.rf_write_handle, 2u);
-        REQUIRE_EQ(device.rx_sample_rates[channel], 20000000u);
         REQUIRE_EQ(device.getSampleRate(SOAPY_SDR_RX, channel), 3.5);
         device.setBandwidth(SOAPY_SDR_RX, channel, 1);
         REQUIRE_EQ(sdk.rf_write_handle, device.getRxHandle(channel));
         REQUIRE_EQ(sdk.rf.at(device.getRxHandle(channel)).rate, 3u);
-        REQUIRE_EQ(device.rx_sample_rates[channel], 3u);
-        REQUIRE_EQ(device.rx_sample_rates[1 - channel], 20000000u);
 
         sdk.delivered = false;
         sdk.rf_timestamp = 7;
@@ -942,10 +935,6 @@ TEST_CASE("RX restart refreshes coupled hardware after failed RF writes or post-
                 auto *const tx_owner = device.active_tx_stream.get();
                 REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
                 REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
-                const auto rx_rates = device.rx_sample_rates;
-                const auto tx_rates = device.tx_sample_rates;
-                const auto rx_widths = device.rx_bandwidths;
-                const auto tx_widths = device.tx_bandwidths;
                 if (write_error)
                 {
                     sdk.write_before_error = true;
@@ -955,10 +944,6 @@ TEST_CASE("RX restart refreshes coupled hardware after failed RF writes or post-
                     sdk.fail_rate_read = sdk.rate_reads + 2; // Prefetch succeeds, readback fails.
                 REQUIRE_THROWS_AS(device.setSampleRate(direction, channel, 3), std::runtime_error);
                 REQUIRE_EQ(sdk.rf_writes, 1u);
-                REQUIRE(device.rx_sample_rates == rx_rates);
-                REQUIRE(device.tx_sample_rates == tx_rates);
-                REQUIRE(device.rx_bandwidths == rx_widths);
-                REQUIRE(device.tx_bandwidths == tx_widths);
                 sdk.rf_write_status = 0;
                 sdk.fail_rate_read = 0;
                 REQUIRE_EQ(device.getSampleRate(SOAPY_SDR_RX, channel), 3.5);

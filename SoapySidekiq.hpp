@@ -352,7 +352,7 @@ class SoapySidekiq : public SoapySDR::Device
     GainProfile gainProfile() const;
     /** Validate channel attenuation bounds and return the TX gain span in dB. */
     double txGainMaximum(size_t channel) const;
-    /** Validated SDK configuration; caches change only after complete readback. */
+    /** Validated fresh SDK rate/bandwidth readback for one mapped handle. */
     struct RateAndBandwidth
     {
         /** SDK configured samples/s, reused when changing only bandwidth. */
@@ -362,11 +362,11 @@ class SoapySidekiq : public SoapySDR::Device
         /** Validated nonzero hardware filter bandwidth in Hz. */
         uint32_t actual_bandwidth;
     };
-    /** Populate all initial RF caches only after every SDK readback is validated. */
-    void initializeRateCaches();
+    /** Validate constructor rate/bandwidth readback for every mapped RX/TX handle. */
+    void validateInitialRateConfiguration();
     /** Read and validate fresh SDK values for the logical channel's mapped handle. */
     RateAndBandwidth readRateAndBandwidth(int direction, size_t channel) const;
-    /** Write hardware then commit caches after valid readback; no hardware rollback guarantee. */
+    /** Write hardware and validate fresh readback; no hardware rollback guarantee. */
     void applyRateAndBandwidth(int direction, size_t channel, uint32_t rate, uint32_t bandwidth);
     /** Validate a logical RX channel and return its SDK parameter-table handle. */
     skiq_rx_hdl_t getRxHandle(const size_t channel) const;
@@ -406,10 +406,6 @@ class SoapySidekiq : public SoapySDR::Device
 
     /** Validated RX parameter-table count. */
     uint8_t num_rx_channels{};
-    /** Last successful RX actual-rate snapshots, truncated to integral samples/s. */
-    std::vector<uint32_t> rx_sample_rates;
-    /** Last successful RX actual-bandwidth snapshots in Hz. */
-    std::vector<uint32_t> rx_bandwidths;
     /** RX payload size in 32-bit words, also the CS16 complex-sample MTU. */
     uint32_t rx_payload_size_in_words{};
 
@@ -452,10 +448,6 @@ class SoapySidekiq : public SoapySDR::Device
 
     /** Validated TX parameter-table count. */
     uint8_t num_tx_channels{};
-    /** Last successful TX actual-rate snapshots, truncated to integral samples/s. */
-    std::vector<uint32_t> tx_sample_rates;
-    /** Last successful TX actual-bandwidth snapshots in Hz. */
-    std::vector<uint32_t> tx_bandwidths;
     /** Serialize SDK underrun polling and startup counter reset. */
     std::timed_mutex tx_status_mutex;
     /** Last underrun count; guarded by tx_status_mutex; reset after a successful start. */
