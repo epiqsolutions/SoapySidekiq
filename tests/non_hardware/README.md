@@ -194,6 +194,23 @@ checks that the next partial timestamp produces a stream error with cleared
 metadata and untouched output, even when diagnostics throw. CS16 and CF32 both
 recover after deactivation and reactivation with a representable epoch.
 
+The shutdown fixture runs the production PPS worker and device destructor
+against a held SDK start. Twelve startup/status/stop/logging scenarios verify
+admission closes before the simulated edge, the worker publishes and joins before
+hardware stop, and callback removal/SDK exit follow stream cleanup. A separate
+case models an accepted context delivered after device destruction: the real
+completion callback releases its retained block/context and bookkeeping, even
+when an unexpected-slot diagnostic throws. Callback delivery is scripted; these
+checks do not establish an SDK barrier or recover contexts with no callback.
+
+These cases extend the production fixes merged in PR #23 instead of importing
+its old implementation: [TX method cases](component/TxWriteStreamTests.cpp)
+retain failed-start latching, retry/reset, and bounded write gates; the shutdown
+fixture checks worker cleanup. [Time readback](component/TimeReadbackTests.cpp)
+and [time setting](component/TimeSettingTests.cpp) cases verify fresh system
+frequency, counter units, checked conversions, SDK failures, and RX ownership
+policy. Physical PPS/RF behavior remains a separate hardware campaign.
+
 Combined PPS lifecycle coverage runs the real TX startup worker alongside the
 RX activation method and real RX session/queue. A scripted SDK holds TX startup,
 then serializes RX PPS startup behind TX publication and a separate test edge.

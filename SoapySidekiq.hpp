@@ -460,7 +460,7 @@ class SoapySidekiq : public SoapySDR::Device
     std::vector<uint32_t> tx_bandwidths;
     /** Serialize SDK underrun polling and startup counter reset. */
     std::timed_mutex tx_status_mutex;
-    /** Last consumed underrun count; guarded by tx_status_mutex and reset after start. */
+    /** Last underrun count; guarded by tx_status_mutex; reset after a successful start. */
     uint32_t tx_underruns{};
     /** Configured TX complex samples per block; positive before writes are admitted. */
     uint32_t current_tx_block_size{};
