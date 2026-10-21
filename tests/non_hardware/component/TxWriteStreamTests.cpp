@@ -4,6 +4,7 @@
  */
 
 #include "TestHarness.hpp"
+#include <SoapySidekiq/Diagnostic.hpp>
 
 #include <cstddef>
 #include <chrono>
@@ -1773,10 +1774,10 @@ TEST_CASE("throwing diagnostics after immediate TX start retain ownership for de
     };
     soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
     auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
-    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
     REQUIRE(failed_log);
     REQUIRE(device.tx_stream_active);
-    REQUIRE(device.tx_writes_stopping);
+    REQUIRE(!device.tx_writes_stopping);
     const auto before = stop_calls;
     stop_status = 0;
     REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
@@ -2114,4 +2115,62 @@ TEST_CASE("unexpected PPS backend exceptions wake writers with a retained startu
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
     REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 0),
                SOAPY_SDR_STREAM_ERROR);
+}
+
+TEST_CASE("throwing diagnostics preserve the accepted TX prefix after preparation failure")
+{
+    SoapySidekiq device;
+    device.txUseShort = true;
+    device.on_submit = [] { passedStruct::fail_allocation = true; };
+    log_hook = [] { throw std::runtime_error("injected diagnostic failure"); };
+    soapy_sidekiq::ScopeExit restore(
+        []() noexcept
+        {
+            log_hook = {};
+            passedStruct::fail_allocation = false;
+        });
+    std::vector<std::int16_t> input(4 * device.current_tx_block_size, 17);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    REQUIRE_EQ(device.writeStream(stream, buffers, 2 * device.current_tx_block_size, flags, 0, 0),
+               static_cast<int>(device.current_tx_block_size));
+    REQUIRE_EQ(device.attempts, std::size_t{1});
+    REQUIRE_EQ(device.transmitted.size(), std::size_t{1});
+    REQUIRE_EQ(device.tx_completion->slots[0], 0);
+    REQUIRE_EQ(device.tx_completion->slots[1], 0);
+    REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("throwing diagnostics cannot replace TX activation status stop retry or status errors")
+{
+    resetUnderruns();
+    SoapySidekiq device;
+    device.tx_stream_active = false;
+    device.tx_writes_stopping = true;
+    activation_calls.clear();
+    activation_fail_at = 1;
+    log_hook = [] { throw std::runtime_error("injected diagnostic failure"); };
+    soapy_sidekiq::ScopeExit restore([]() noexcept { log_hook = {}; });
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(!device.tx_stream_active);
+    activation_fail_at = 0;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    REQUIRE(device.tx_stream_active);
+    REQUIRE(!device.tx_writes_stopping);
+    underrun_status = -EIO;
+    std::size_t channels = 99;
+    int flags = 99;
+    long long time = 99;
+    REQUIRE_EQ(device.readStreamStatus(stream, channels, flags, time, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.active_tx_status_readers, std::size_t{0});
+    stop_status = -EIO;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(device.tx_stream_active);
+    REQUIRE(device.tx_writes_stopping);
+    stop_status = 0;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    REQUIRE(!device.tx_stream_active);
 }

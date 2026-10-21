@@ -290,6 +290,11 @@ into logged `SOAPY_SDR_STREAM_ERROR` results. Unsupported options still return
 stream is already active or still owns a PPS startup thread, including a failed
 PPS start. This keeps repeated activation from replacing a joinable thread.
 
+Status-returning stream calls contain exceptions from user-installed diagnostic
+sinks. Logging failures do not turn a successful activation into an error,
+replace an SDK failure code, or hide an already accepted TX sample prefix.
+This diagnostic policy does not suppress backend failures.
+
 SDK stop failures from `deactivateStream()` return `SOAPY_SDR_STREAM_ERROR` and
 retain stream ownership so the caller can retry. TX stops keep new writes
 blocked after failure. `closeStream()` raises an exception if RX hardware

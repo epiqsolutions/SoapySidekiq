@@ -136,6 +136,12 @@ tests/run_logged.sh non_hardware_asan \
     tests/non_hardware/run_suite.sh build/non_hardware-asan
 ```
 
+Stream diagnostic regressions install throwing log sinks while actual production
+methods encounter TX preparation failure after an accepted prefix, activation
+success/error, SDK status-read failure, failed-stop retry, and RX activation
+validation failure followed by retry. They verify backend results/admission and
+reservation/context cleanup survive failed diagnostics.
+
 TX completion contexts retain shared bookkeeping rather than a device pointer.
 Late-completion cases destroy the fixture device before invoking the production
 callback and replace the stream state before completing an older reservation.
