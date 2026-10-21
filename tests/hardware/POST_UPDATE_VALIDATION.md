@@ -81,12 +81,15 @@ startup has returned and stop has completed. Supply an edge to allow the normal
 join/stop path to finish. The production-method tests cover this controlled
 ordering; hardware must establish the SDK/card behavior.
 
-The SDK PPS call has no established bounded cancellation path in this series.
-For an intentionally absent-edge diagnostic, use a separate bounded process
-and save the timeout/SDK state. Do not mark teardown as passing because the
-outer process was killed, or require destruction to return before delivering
-an edge. A process timeout can leave recovery work for the operator/SDK; record
-that outcome before reusing the card.
+The [SDK lifetime review](../../docs/SDK_LIFETIME.md) distinguishes the SDK's
+documented missing-PPS timeout history from caller-controlled cancellation.
+No bounded cancellation path is established in this series. For an intentionally
+absent-edge diagnostic, use a separate bounded process and record elapsed time,
+the SDK return status if it returns, and whether the outer process timeout fired.
+Keep SDK startup errors separate from writer deadlines. Do not mark teardown
+as passing because the outer process was killed, or require destruction to
+return before delivering an edge. A process timeout can leave recovery work
+for the operator/SDK; record that outcome before reusing the card.
 
 ## Completion record
 

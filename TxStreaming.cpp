@@ -76,8 +76,8 @@ void SoapySidekiq::stopTxWrites()
 int SoapySidekiq::stopTxStream(bool on_pps)
 {
     stopTxWrites();
-    // The SDK PPS start can still block waiting for its edge. Join before stop
-    // or before device destruction can invalidate the worker's device pointer.
+    // Cancelling a writer does not cancel SDK startup. Join after the SDK call
+    // returns (edge or error), before stopping hardware or destroying device state.
     if (_tx_streaming_thread.joinable())
         _tx_streaming_thread.join();
     if (!tx_stream_active || active_tx_stream == nullptr)
