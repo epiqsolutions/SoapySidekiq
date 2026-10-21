@@ -372,6 +372,17 @@ target_link_libraries(antenna_tests PRIVATE non_hardware_test_options)
 add_test(NAME antenna.all COMMAND antenna_tests)
 set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
 
+extract_settings_method(topology_configuration "    if (options.topology.has_value())"
+    "    status = skiq_read_parameters(")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TopologyConfiguration.inc" "${topology_configuration}")
+add_executable(topology_configuration_tests support/TestMain.cpp component/TopologyConfigurationTests.cpp)
+target_include_directories(topology_configuration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_libraries(topology_configuration_tests PRIVATE non_hardware_test_options)
+add_test(NAME topology-configuration.all COMMAND topology_configuration_tests)
+set_tests_properties(topology-configuration.all PROPERTIES LABELS "component;non-hardware")
+
 extract_settings_method(time_set "void SoapySidekiq::setHardwareTime(" "\n}\n")
 extract_settings_method(time_case_fold "bool equalsIgnoreCase(" "\n}\n")
 string(APPEND time_case_fold "\n}\n")
@@ -559,7 +570,8 @@ endif()
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
-            channel_metadata_tests identification_tests sensor_metadata_tests
+            topology_configuration_tests channel_metadata_tests
+            identification_tests sensor_metadata_tests
             sample_rate_capability_tests frequency_tests
             rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests
             time_readback_tests time_setting_tests pps_source_tests clock_tests settings_tests

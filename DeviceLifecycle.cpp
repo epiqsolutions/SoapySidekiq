@@ -264,8 +264,8 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
         }
         else
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "Topology not supported on card %u; ignoring request",
-                          card, status);
+            throw std::invalid_argument("Topology " + std::to_string(*options.topology) +
+                                        " is not supported by card " + std::to_string(card));
         }
     }
 
