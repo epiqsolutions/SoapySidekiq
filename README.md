@@ -238,6 +238,11 @@ binary value through the worker and partial-read timestamp calculation.
 Configure rates, clocks, and timestamp selection before activating RX; stop
 and reactivate RX after changing them so it captures a fresh timing snapshot.
 
+RX read exceptions from allocation or timestamp arithmetic return
+`SOAPY_SDR_STREAM_ERROR` with flags and output timestamp cleared. A failing
+log sink cannot replace that error result. After an unrepresentable timestamp,
+deactivate and reactivate with a valid timestamp epoch before continuing.
+
 `getHardwareTime` uses system time for the empty selector or `sys_timestamp`.
 Explicit `rx_rf_timestamp` and `tx_rf_timestamp` read the first mapped handle
 with the SDK's current actual rate, preserving fractional Hz. Missing rates,
