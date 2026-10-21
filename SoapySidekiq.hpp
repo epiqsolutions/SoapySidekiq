@@ -246,6 +246,10 @@ class SoapySidekiq : public SoapySDR::Device
     /** Throwing activation implementation behind the public stream-status boundary. */
     int activateStreamImpl(SoapySDR::Stream *stream, int flags, long long timeNs, size_t numElems);
 
+    /** RX read body; the public boundary translates allocation/timing exceptions to status. */
+    int readStreamImpl(SoapySDR::Stream *stream, void *const *buffs, size_t numElems, int &flags,
+                       long long &timeNs, long timeoutUs);
+
     /** Resolve only this device's currently owned opaque stream tokens. */
     StreamHandle *findStreamHandle(SoapySDR::Stream *stream) const noexcept;
 

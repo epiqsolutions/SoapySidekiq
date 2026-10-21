@@ -126,3 +126,9 @@ cmake --build build/non_hardware-asan --parallel
 tests/run_logged.sh non_hardware_asan \
     tests/non_hardware/run_suite.sh build/non_hardware-asan
 ```
+
+The RX read boundary regression uses the real session/queue with a first-sample
+timestamp just below int64 nanosecond overflow. It consumes one sample, then
+checks that the next partial timestamp produces a stream error with cleared
+metadata and untouched output, even when diagnostics throw. CS16 and CF32 both
+recover after deactivation and reactivation with a representable epoch.
