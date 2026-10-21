@@ -8,6 +8,8 @@ project(SoapySidekiq LANGUAGES CXX)
 
 option(SOAPYSIDEKIQ_BUILD_MODULE "Build the SDK-dependent SoapySDR module" ON)
 option(SOAPYSIDEKIQ_BUILD_TESTS "Build the SDK-independent regression suite" OFF)
+option(SOAPYSIDEKIQ_BUILD_SDK_INTEGRATION_TESTS
+    "Build native driver integration tests with SDK headers and scripted SDK symbols" OFF)
 
 if(SOAPYSIDEKIQ_BUILD_TESTS)
     enable_testing()
@@ -15,6 +17,9 @@ if(SOAPYSIDEKIQ_BUILD_TESTS)
 endif()
 
 if(NOT SOAPYSIDEKIQ_BUILD_MODULE)
+    if(SOAPYSIDEKIQ_BUILD_SDK_INTEGRATION_TESTS)
+        message(FATAL_ERROR "SDK integration tests require the native module configuration")
+    endif()
     return()
 endif()
 
@@ -101,6 +106,11 @@ endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProjectWarnings.cmake")
 soapy_sidekiq_enable_warnings(SidekiqSupport PRIVATE)
+
+if(SOAPYSIDEKIQ_BUILD_SDK_INTEGRATION_TESTS)
+    enable_testing()
+    add_subdirectory(tests/sdk_integration)
+endif()
 
 # Remove only files recorded by this build's install step; support DESTDIR.
 add_custom_target(uninstall

@@ -243,3 +243,10 @@ TX startup uses the production worker body; its token, admission, and stop
 responsibility remain intact across RX retuning/restart. TX submissions and
 physical RF continuity are outside this fixture. Synthetic low fractional rates
 make timestamp assertions exact; they do not advertise hardware-supported rates.
+
+The optional [concrete-driver integration test](../sdk_integration/README.md)
+compiles the real device and SDK backend with scripted SDK symbols. Its three
+cases cover discovery/construction, CS16/CF32 RX/TX, constructor rollback, and
+late completion through actual device destruction. That test requires installed
+SDK headers and SoapySDR development files, and links no SDK library. It is
+separate from this SDK-free suite; stub-generation tooling checks run here.

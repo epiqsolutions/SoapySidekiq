@@ -145,6 +145,12 @@ directories instead.
 
 ## API documentation
 
+For a small test across the concrete driver and its SDK backend, see the
+[optional native scripted-SDK integration test](tests/sdk_integration/README.md).
+It compiles against installed SDK headers while linking scripted/fail-fast SDK
+definitions, so its cases require no cards. Keep its cross-component scenarios
+small; detailed behavior matrices belong in the focused portable fixtures.
+
 The [2026-10-21 integration checkpoint](docs/validation/2026-10-21-integration.md)
 pins the combined-tree build, analysis, documentation, and install checks and
 their limits. Repeat affected checks after later changes; it is not hardware

@@ -143,3 +143,21 @@ rather than snapshots with no consumer.
 Reconsider a distinct RF backend if another hardware implementation or a stable
 end-to-end injection requirement provides a concrete use. Shared SDK/card
 integration and hardware cross-direction validation remain separate work.
+
+## Full fake-device prototype
+
+The `a593d96` prototype's `FakeSidekiqDevice.hpp` and seven accompanying cases
+test a separate simulator: card lookup, its own initialized flag, queued RX/TX
+events, and stored callbacks. They do not construct the production device or
+execute its SDK backend. Its shutdown clears pending callbacks, which cannot
+establish the current retained-context or SDK quiescence contract.
+
+Decision: retain the scenario ideas and use the
+[native scripted-SDK integration target](../tests/sdk_integration/README.md)
+for the small combined path. It compiles the actual concrete driver, registry
+adapter, and backend with installed SDK types, and links only scripted or
+fail-fast SDK definitions. Three cases connect discovery, construction,
+configuration, both stream formats/directions, delivered callbacks, constructor
+rollback, and shutdown. The existing portable fixtures cover the detailed
+matrices. No additional production backend interface or copied simulator is
+needed for this boundary; physical SDK guarantees remain unverified.
