@@ -109,7 +109,7 @@ TEST_CASE("every exposed channel advertises both implemented stream formats")
             REQUIRE(device.getStreamFormats(direction, channel) == expected);
 }
 
-TEST_CASE("stream metadata uses direction-specific full scale and block size")
+TEST_CASE("native stream metadata uses direction-specific full scale")
 {
     SoapySidekiq device;
     double scale = 0;
@@ -117,14 +117,8 @@ TEST_CASE("stream metadata uses direction-specific full scale and block size")
     REQUIRE_EQ(scale, 2047.0);
     REQUIRE_EQ(device.getNativeStreamFormat(SOAPY_SDR_TX, 2, scale), std::string{"CS16"});
     REQUIRE_EQ(scale, 8191.0);
-    const auto rx = device.getStreamArgsInfo(SOAPY_SDR_RX, 1);
-    const auto tx = device.getStreamArgsInfo(SOAPY_SDR_TX, 2);
-    REQUIRE_EQ(rx.size(), std::size_t{1});
-    REQUIRE_EQ(tx.size(), std::size_t{1});
-    REQUIRE_EQ(rx[0].key, std::string{"bufflen"});
-    REQUIRE_EQ(tx[0].key, std::string{"bufflen"});
-    REQUIRE_EQ(rx[0].value, std::string{"1020"});
-    REQUIRE_EQ(tx[0].value, std::string{"252"});
+    REQUIRE(device.getStreamArgsInfo(SOAPY_SDR_RX, 1).empty());
+    REQUIRE(device.getStreamArgsInfo(SOAPY_SDR_TX, 2).empty());
 }
 
 TEST_CASE("metadata consistently rejects invalid directions without changing output")
