@@ -47,6 +47,8 @@ struct Script
     std::vector<std::vector<std::int16_t>> transmitted;
     std::vector<PendingSend> pending;
     std::vector<int> send_results;
+    bool tx_pps_entered{}, tx_pps_released{};
+    unsigned pps_writer_waits{}, pps_joins{};
 };
 extern std::mutex mutex;
 extern Script script;
@@ -54,4 +56,8 @@ void reset(const std::string &failure = {});
 Script snapshot();
 /** Deliver captured callbacks in reverse order, including after device destruction. */
 void completeAll() noexcept;
+/** Wait at most two seconds for the real worker to enter scripted PPS startup. */
+bool waitForTxPps();
+/** Release a held scripted PPS call, including assertion-failure cleanup. */
+void releaseTxPps() noexcept;
 } // namespace scripted_sdk
