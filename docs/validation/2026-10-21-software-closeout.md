@@ -2,9 +2,11 @@
 
 Checked source: master `d5424eac7fb93a603a237ff7fbd92ac1ba53421c`, through
 #135, plus this PR's documentation and comment-only cleanup. Modified C++ files
-have identical non-comment tokens. This completes the available software
-cleanup/audit pass, subject to independent review; it does not complete the
-hardware and SDK-dependent release gates below.
+have identical non-comment tokens. This records the cleanup/audit pass at that
+revision. Follow-up work subsequently found constructor-source and stream-keyword
+validation defects, fixed in #137/#143. See the [software follow-up](2026-10-21-software-followup.md)
+for the newer evidence. This checkpoint was not proof that all software work was
+complete, and does not complete hardware or SDK-dependent release gates.
 
 By request, draft PRs #80–#86 are excluded. They were neither modified nor used
 as prerequisites for this pass. Audit their additions separately if integrated.

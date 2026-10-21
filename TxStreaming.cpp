@@ -27,16 +27,16 @@ void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
     (void)p_data;
     // Completion owns the accepted submission's context, including on every
     // diagnostic/exception path. Never unwind through the SDK's C boundary.
-    std::unique_ptr<TxSendContext> instance(static_cast<TxSendContext *>(p_user));
+    std::unique_ptr<TxSendContext> context(static_cast<TxSendContext *>(p_user));
     try
     {
-        if (instance == nullptr || instance->completion == nullptr)
+        if (context == nullptr || context->completion == nullptr)
         {
             SoapySDR_log(SOAPY_SDR_ERROR, "tx_complete callback received invalid user data");
             return;
         }
 
-        completeTx(instance->completion, instance->txIndex);
+        completeTx(context->completion, context->txIndex);
     }
     catch (...)
     {
