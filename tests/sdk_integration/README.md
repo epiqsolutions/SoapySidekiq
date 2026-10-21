@@ -39,7 +39,7 @@ declarations. Native cases are a separate optional CTest executable.
 
 ## Scope
 
-Four registered cases cover:
+Six registered cases cover:
 
 - Real discovery/factory construction, mapped handles, rate/bandwidth
   configuration, invalid setup and inactive write rejection, CS16/CF32 RX and
@@ -49,6 +49,11 @@ Four registered cases cover:
   failure points, checking that successful SDK acquisition is released once.
 - Invalid clock/time constructor names reject before any SDK call; parser
   choices are also checked against the actual source metadata.
+- Optional topology/clock/disabled-PPS construction applies configuration before
+  publishing callbacks. Unsupported topology, topology/clock SDK errors, and
+  an initial PPS timestamp-read error release SDK ownership exactly once and
+  permit a clean construction retry. The PPS error occurs before its observation
+  wait; this case does not touch the kernel fallback or supply a physical edge.
 - A queue-full accepted prefix, active-close rejection, actual device
   destruction with a retained send, and subsequent callback delivery using
   the retained block/context. Cleanup guards deliver held contexts if an
