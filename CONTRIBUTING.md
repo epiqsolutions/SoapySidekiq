@@ -94,6 +94,25 @@ For SDK-dependent files, configure a real module build with
 `clang-tidy-14 -p build/module Settings.cpp`. Never treat analysis of fake test
 fixtures as analysis of the entire hardware-owning device.
 
+## SDK errors and stream results
+
+Keep error translation at the API or backend boundary that owns its contract:
+
+| Boundary | Failure policy |
+| --- | --- |
+| RF, settings, clock/time, metadata | Throw a descriptive exception for invalid requests or SDK failures. |
+| Stream setup/close and unsigned MTU queries | Throw for invalid arguments or lifecycle failures; never encode a negative status in an unsigned result. |
+| Status-returning stream calls | Return signed SoapySDR codes for routine SDK errors, timeouts, and back-pressure; preserve an accepted TX sample prefix. |
+| Sensor reads | Translate typed backend errors to the documented legacy string fallback and diagnostics. |
+| SDK callbacks/workers | Publish completion/error state before diagnostics and contain exceptions at the C/thread boundary. |
+
+A single unconditional SDK-status-to-exception helper would break these distinct
+contracts. Share validation and diagnostic containment where their semantics
+match. Include operation, card, channel/handle, requested value, and SDK status
+when available. Use `reportDiagnostic` only around synchronous diagnostics in a
+status-returning path; backend operations and their errors must stay outside it.
+A failing user log sink must not replace the operation's result or accepted prefix.
+
 ## Tests and CI
 
 Run the [non-hardware suite](tests/non_hardware/README.md) before pushing:
