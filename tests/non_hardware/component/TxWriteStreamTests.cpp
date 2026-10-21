@@ -1,6 +1,6 @@
 /**
  * @file TxWriteStreamTests.cpp
- * @brief Verifies production multi-block TX writes with a synchronous fake SDK.
+ * @brief Verifies production TX writes, completion, and PPS startup with a scripted SDK.
  */
 
 #include "TestHarness.hpp"
@@ -31,7 +31,7 @@
 #include <SoapySidekiq/StreamConfiguration.hpp>
 #include <vector>
 
-// Accepted sends complete synchronously; PPS startup can succeed or fail.
+// Sends may complete inline or later; a controlled PPS call can wait for a test edge.
 // Stand-ins match the members used by writeStream without opening a real device.
 #define SOAPY_SDR_TX 0
 #define SOAPY_SDR_RX 1
@@ -109,8 +109,11 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *, passedStruct *);
 using skiq_tx_hdl_t = unsigned;
 using skiq_rx_hdl_t = unsigned;
 int stop_status{}, stop_calls{};
+std::function<void()> stop_hook;
 int skiq_stop_tx_streaming(std::uint8_t, skiq_tx_hdl_t)
 {
+    if (stop_hook)
+        stop_hook();
     ++stop_calls;
     return stop_status;
 }
@@ -1839,6 +1842,171 @@ TEST_CASE("small TX pools retain accepted prefixes under back-pressure and retry
             device.writeStream(stream, suffix, device.current_tx_block_size, flags, 0, 100000),
             static_cast<int>(device.current_tx_block_size));
         REQUIRE_EQ(device.tx_completion->completed, static_cast<std::uint64_t>(count + 1));
+    }
+}
+
+TEST_CASE(
+    "actual PPS activation gates writes until the worker publishes its result and resets on retry")
+{
+    using namespace std::chrono_literals;
+    for (const int start_status : {0, -EIO})
+    {
+        SoapySidekiq device;
+        device.tx_stream_active = false;
+        device.tx_writes_stopping = true;
+        device.tx_underruns = 99;
+        activation_calls.clear();
+        activation_fail_at = 0;
+        pps_start_status = start_status;
+        stop_status = 0;
+        std::promise<void> entered, release, writer_waiting;
+        std::future<int> writing;
+        std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+        const void *buffers[]{input.data()};
+        const auto released = release.get_future().share();
+        bool edge_released = false;
+        // Release the fake edge and join before destroying captured promises,
+        // including when an assertion fails while the SDK call is held open.
+        soapy_sidekiq::ScopeExit cleanup(
+            [&]() noexcept
+            {
+                if (!edge_released)
+                    release.set_value();
+                if (writing.valid())
+                    writing.wait();
+                if (device._tx_streaming_thread.joinable())
+                    device._tx_streaming_thread.join();
+                pps_start_hook = {};
+                wait_hook = {};
+            });
+        pps_start_hook = [&]
+        {
+            entered.set_value();
+            released.wait();
+        };
+        auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+        REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+        REQUIRE(entered.get_future().wait_for(1s) == std::future_status::ready);
+        int flags = 0;
+        REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 0),
+                   SOAPY_SDR_TIMEOUT);
+        REQUIRE_EQ(device.attempts, std::size_t{0});
+        {
+            std::lock_guard<std::mutex> lock(device.tx_mutex);
+            REQUIRE(!device.tx_start_finished);
+        }
+        wait_hook = [&] { writer_waiting.set_value(); };
+        writing =
+            std::async(std::launch::async,
+                       [&]
+                       {
+                           int write_flags = 0;
+                           return device.writeStream(stream, buffers, device.current_tx_block_size,
+                                                     write_flags, 0, 1000000);
+                       });
+        REQUIRE(writer_waiting.get_future().wait_for(1s) == std::future_status::ready);
+        release.set_value();
+        edge_released = true;
+        REQUIRE(writing.wait_for(500ms) == std::future_status::ready);
+        REQUIRE_EQ(writing.get(), start_status == 0 ? static_cast<int>(device.current_tx_block_size)
+                                                    : SOAPY_SDR_STREAM_ERROR);
+        device._tx_streaming_thread.join();
+        REQUIRE(device.tx_start_finished);
+        REQUIRE_EQ(device.tx_start_status, start_status);
+        REQUIRE_EQ(device.tx_underruns, start_status == 0 ? 0u : 99u);
+        REQUIRE_EQ(device.attempts, start_status == 0 ? std::size_t{1} : std::size_t{0});
+        REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+        REQUIRE(!device.tx_stream_active);
+        REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+        activation_calls.clear();
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+        REQUIRE(!device.first_transmit);
+        const auto before = device.attempts;
+        REQUIRE_EQ(device.writeStream(stream, buffers, device.current_tx_block_size, flags, 0, 0),
+                   static_cast<int>(device.current_tx_block_size));
+        REQUIRE_EQ(device.attempts, before + 1);
+        REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    }
+}
+
+TEST_CASE("deactivation cancels PPS-gated writes but joins pending SDK startup before stopping TX")
+{
+    using namespace std::chrono_literals;
+    for (const int stop_flags : {0, SOAPY_SDR_HAS_TIME})
+    {
+        SoapySidekiq device;
+        device.tx_stream_active = false;
+        device.tx_writes_stopping = true;
+        activation_calls.clear();
+        activation_fail_at = 0;
+        pps_start_status = 0;
+        stop_status = 0;
+        std::promise<void> entered, release, writer_waiting;
+        const auto released = release.get_future().share();
+        bool edge_released = false;
+        std::atomic<bool> stopped{false};
+        std::future<int> writing, stopping;
+        // Futures must finish before captured device/input state leaves scope.
+        std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+        const void *buffers[]{input.data()};
+        soapy_sidekiq::ScopeExit cleanup(
+            [&]() noexcept
+            {
+                if (!edge_released)
+                    release.set_value();
+                if (writing.valid())
+                    writing.wait();
+                if (stopping.valid())
+                    stopping.wait();
+                if (device._tx_streaming_thread.joinable())
+                    device._tx_streaming_thread.join();
+                pps_start_hook = {};
+                stop_hook = {};
+                wait_hook = {};
+            });
+        pps_start_hook = [&]
+        {
+            entered.set_value();
+            released.wait();
+        };
+        stop_hook = [&] { stopped.store(true); };
+        auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+        REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+        REQUIRE(entered.get_future().wait_for(1s) == std::future_status::ready);
+        auto *const owned_pool = device.tx_blocks.get();
+        REQUIRE_THROWS_AS(device.closeStream(stream), std::runtime_error);
+        REQUIRE(device.active_tx_stream.get() == &device.handle);
+        REQUIRE(device.tx_blocks.get() == owned_pool);
+        wait_hook = [&] { writer_waiting.set_value(); };
+        writing =
+            std::async(std::launch::async,
+                       [&]
+                       {
+                           int flags = 0;
+                           return device.writeStream(stream, buffers, device.current_tx_block_size,
+                                                     flags, 0, 1000000);
+                       });
+        REQUIRE(writer_waiting.get_future().wait_for(1s) == std::future_status::ready);
+        stopping = std::async(std::launch::async,
+                              [&] { return device.deactivateStream(stream, stop_flags, 0); });
+        REQUIRE(writing.wait_for(1s) == std::future_status::ready);
+        REQUIRE_EQ(writing.get(), SOAPY_SDR_STREAM_ERROR);
+        // The real SDK PPS call has no cancellation API. Verify the lifetime
+        // ordering while held, then explicitly deliver the edge for cleanup.
+        REQUIRE(stopping.wait_for(20ms) == std::future_status::timeout);
+        REQUIRE(!stopped.load());
+        REQUIRE_EQ(device.attempts, std::size_t{0});
+        REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+        release.set_value();
+        edge_released = true;
+        REQUIRE_EQ(stopping.get(), 0);
+        REQUIRE(stopped.load());
+        REQUIRE(!device._tx_streaming_thread.joinable());
+        REQUIRE(!device.tx_stream_active);
+        REQUIRE(device.tx_writes_stopping);
+        REQUIRE(device.active_tx_stream.get() == &device.handle);
     }
 }
 
