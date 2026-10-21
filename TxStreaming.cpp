@@ -146,6 +146,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
                               const size_t numElems, int &flags, const long long timeNs,
                               const long timeoutUs)
 {
+    (void)timeNs; // Timed writes are rejected by the flags check below.
     int status = 0;
     const StreamHandle *stream_handle = findStreamHandle(stream);
     if (stream_handle == nullptr)
@@ -231,7 +232,8 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
     // Pointer to the location in the input buffer to transmit from
     const char *inbuff_ptr = static_cast<const char *>(buffs[0]);
 
-    uint32_t num_blocks = numElems / current_tx_block_size;
+    // numElems already fits the API's int return type, and block size is positive.
+    const auto num_blocks = static_cast<uint32_t>(numElems / current_tx_block_size);
 
     uint32_t curr_block = 0;
 
