@@ -232,14 +232,21 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_read_rx_block_size failed: "
                                            "card: %u status: %d\n",
                                            card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_rx_block_size failed (card " +
+                                     std::to_string(card) + ", status " + std::to_string(status) +
+                                     ")");
         }
-        SoapySDR_logf(SOAPY_SDR_TRACE, "In rx 3");
-        rx_block_size_in_bytes = status;
-        rx_block_size_in_words = status / 4;
-
-        rx_payload_size_in_bytes = status - SKIQ_RX_HEADER_SIZE_IN_BYTES;
-        rx_payload_size_in_words = rx_payload_size_in_bytes / 4;
+        const auto block_bytes = static_cast<uint32_t>(status);
+        constexpr uint32_t word_bytes = sizeof(uint32_t);
+        if (block_bytes <= SKIQ_RX_HEADER_SIZE_IN_BYTES || block_bytes % word_bytes != 0)
+            throw std::runtime_error(
+                "skiq_read_rx_block_size returned an invalid unpacked block (card " +
+                std::to_string(card) + ", bytes " + std::to_string(block_bytes) + ")");
+        // Validate before subtracting the header or publishing MTU-related sizes.
+        rx_block_size_in_bytes = block_bytes;
+        rx_block_size_in_words = block_bytes / word_bytes;
+        rx_payload_size_in_bytes = block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES;
+        rx_payload_size_in_words = rx_payload_size_in_bytes / word_bytes;
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
                       rx_payload_size_in_words);

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -33,7 +34,27 @@ struct ArgInfo
     } type{};
 };
 using ArgInfoList = std::vector<ArgInfo>;
+using Kwargs = std::map<std::string, std::string>;
+struct Stream
+{
+};
 } // namespace SoapySDR
+
+constexpr std::uint32_t SKIQ_RX_HEADER_SIZE_IN_BYTES = 24;
+constexpr int skiq_rx_stream_mode_balanced = 0;
+namespace
+{
+int sdk_block_bytes = 4096;
+unsigned sdk_block_reads{};
+std::uint8_t sdk_card{};
+} // namespace
+int skiq_read_rx_block_size(std::uint8_t card, int mode)
+{
+    REQUIRE_EQ(mode, skiq_rx_stream_mode_balanced);
+    sdk_card = card;
+    ++sdk_block_reads;
+    return sdk_block_bytes;
+}
 
 /** Only SDK channel tables and metadata state are needed by these real methods. */
 class SoapySidekiq
@@ -49,6 +70,12 @@ class SoapySidekiq
         std::array<HandleEntry, 3> tx_param{{{6}, {2}, {9}}};
     } param;
     std::uint8_t num_rx_channels{2}, num_tx_channels{3};
+    std::uint8_t card{5};
+    void *active_rx_stream{}, *active_tx_stream{};
+    std::uint32_t rx_block_size_in_words{100}, rx_block_size_in_bytes{400},
+        rx_payload_size_in_bytes{376};
+    SoapySDR::Stream *setupStream(int, const std::string &, const std::vector<std::size_t> &,
+                                  const SoapySDR::Kwargs &);
     double maxValue{2047}, txMaxValue{8191};
     std::uint32_t rx_payload_size_in_words{1020}, current_tx_block_size{252};
 
@@ -72,6 +99,7 @@ static soapy_sidekiq::StreamDirection streamDirection(int direction)
 
 #include "ChannelValidationMethods.inc"
 #include "ChannelMetadataMethods.inc"
+#include "RxSetupBlockSizeMethod.inc"
 
 TEST_CASE("logical channels map to the SDK table even for non-contiguous handles")
 {
@@ -148,4 +176,54 @@ TEST_CASE("metadata consistently rejects unavailable channels without changing o
         REQUIRE_THROWS_AS(device.getStreamArgsInfo(direction, channel), std::out_of_range);
         REQUIRE_EQ(scale, 456.0);
     }
+}
+
+TEST_CASE("RX setup rejects header-only short empty and misaligned SDK blocks before cache changes")
+{
+    for (const int bytes : {0, 1, 20, 23, 24, 25, 26, 27, 29, 4095})
+    {
+        SoapySidekiq device;
+        sdk_block_bytes = bytes;
+        sdk_block_reads = 0;
+        REQUIRE_THROWS_AS(device.setupStream(SOAPY_SDR_RX, "CS16", {1}, {}), std::runtime_error);
+        REQUIRE_EQ(sdk_block_reads, 1u);
+        REQUIRE_EQ(sdk_card, std::uint8_t{5});
+        REQUIRE_EQ(device.rx_block_size_in_bytes, std::uint32_t{400});
+        REQUIRE_EQ(device.rx_block_size_in_words, std::uint32_t{100});
+        REQUIRE_EQ(device.rx_payload_size_in_bytes, std::uint32_t{376});
+        REQUIRE_EQ(device.rx_payload_size_in_words, std::uint32_t{1020});
+    }
+}
+
+TEST_CASE("RX setup computes payload and MTU sizes from validated SDK bytes")
+{
+    for (const int bytes : {28, 4096})
+    {
+        SoapySidekiq device;
+        sdk_block_bytes = bytes;
+        (void)device.setupStream(SOAPY_SDR_RX, "CS16", {1}, {});
+        REQUIRE_EQ(device.rx_block_size_in_bytes, static_cast<std::uint32_t>(bytes));
+        REQUIRE_EQ(device.rx_block_size_in_words, static_cast<std::uint32_t>(bytes / 4));
+        REQUIRE_EQ(device.rx_payload_size_in_bytes, static_cast<std::uint32_t>(bytes - 24));
+        REQUIRE_EQ(device.rx_payload_size_in_words, static_cast<std::uint32_t>((bytes - 24) / 4));
+    }
+}
+
+TEST_CASE("RX setup SDK block-size errors retain operation card and status")
+{
+    SoapySidekiq device;
+    sdk_block_bytes = -5;
+    try
+    {
+        (void)device.setupStream(SOAPY_SDR_RX, "CS16", {1}, {});
+        REQUIRE(false);
+    }
+    catch (const std::runtime_error &error)
+    {
+        const std::string message = error.what();
+        REQUIRE(message.find("skiq_read_rx_block_size") != std::string::npos);
+        REQUIRE(message.find("card 5") != std::string::npos);
+        REQUIRE(message.find("status -5") != std::string::npos);
+    }
+    REQUIRE_EQ(device.rx_block_size_in_bytes, std::uint32_t{400});
 }
