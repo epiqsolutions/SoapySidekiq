@@ -5,6 +5,10 @@ endif()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(Threads REQUIRED)
 option(SOAPYSIDEKIQ_SDK_INTEGRATION_ASAN "Instrument native scripted-SDK tests with ASan/UBSan" OFF)
+option(SOAPYSIDEKIQ_SDK_INTEGRATION_TSAN "Instrument native scripted-SDK tests with TSan" OFF)
+if(SOAPYSIDEKIQ_SDK_INTEGRATION_ASAN AND SOAPYSIDEKIQ_SDK_INTEGRATION_TSAN)
+    message(FATAL_ERROR "Native ASan/UBSan and TSan require separate build directories")
+endif()
 
 get_target_property(driver_sources SidekiqSupport SOURCES)
 get_target_property(driver_source_dir SidekiqSupport SOURCE_DIR)
@@ -56,6 +60,13 @@ if(SOAPYSIDEKIQ_SDK_INTEGRATION_ASAN)
     target_compile_options(scripted_driver_tests PRIVATE
         -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie)
     target_link_options(scripted_driver_tests PRIVATE -fsanitize=address,undefined -no-pie)
+endif()
+if(SOAPYSIDEKIQ_SDK_INTEGRATION_TSAN)
+    target_compile_options(scripted_driver_objects PRIVATE
+        -fsanitize=thread -fno-omit-frame-pointer)
+    target_compile_options(scripted_driver_tests PRIVATE
+        -fsanitize=thread -fno-omit-frame-pointer)
+    target_link_options(scripted_driver_tests PRIVATE -fsanitize=thread)
 endif()
 add_test(NAME scripted-driver.all COMMAND scripted_driver_tests)
 set_tests_properties(scripted-driver.all PROPERTIES LABELS "integration;non-hardware;sdk-headers"
