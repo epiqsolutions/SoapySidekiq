@@ -1,0 +1,8 @@
+# Run from the repository root; inherit the public reference and warning policy.
+@INCLUDE = docs/Doxyfile
+PROJECT_BRIEF = SoapySidekiq internal ownership and synchronization reference
+OUTPUT_DIRECTORY = build/internal-docs
+WARN_LOGFILE = build/internal-docs/warnings.log
+EXTRACT_PRIVATE = YES
+EXTRACT_STATIC = YES
+EXTRACT_ANON_NSPACES = YES

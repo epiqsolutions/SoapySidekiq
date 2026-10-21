@@ -40,9 +40,10 @@ inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
 /**
  * @brief Owns a Sidekiq card's streams and callback state.
  *
- * Instances remain at a stable address while SDK callbacks and worker threads
- * refer to them. Copying and moving are explicitly disabled so these references
- * and the ownership of device resources cannot be transferred.
+ * Instances remain at a stable address while worker threads refer to them.
+ * Accepted TX callbacks retain their own completion state and blocks without
+ * referring to the device. Copying and moving are disabled so worker references
+ * and device resource ownership cannot be transferred.
  */
 class SoapySidekiq : public SoapySDR::Device
 {
@@ -340,98 +341,153 @@ class SoapySidekiq : public SoapySDR::Device
     /** Existing card-specific RX index conversion. */
     struct GainProfile
     {
+        /** SDK gain index corresponding to zero dB. */
         double rx_offset;
+        /** SDK index increments per dB of RX gain. */
         double rx_steps_per_db;
+        /** Highest aggregate RX gain in dB for this legacy profile. */
         double rx_maximum;
     };
+    /** Select the legacy card-wide RX index conversion; reject unknown models. */
     GainProfile gainProfile() const;
+    /** Validate channel attenuation bounds and return the TX gain span in dB. */
     double txGainMaximum(size_t channel) const;
     /** Validated SDK configuration; caches change only after complete readback. */
     struct RateAndBandwidth
     {
+        /** SDK configured samples/s, reused when changing only bandwidth. */
         uint32_t configured_rate;
+        /** Validated hardware samples/s, retaining its fractional part. */
         double actual_rate;
+        /** Validated nonzero hardware filter bandwidth in Hz. */
         uint32_t actual_bandwidth;
     };
     /** Populate all initial RF caches only after every SDK readback is validated. */
     void initializeRateCaches();
+    /** Read and validate fresh SDK values for the logical channel's mapped handle. */
     RateAndBandwidth readRateAndBandwidth(int direction, size_t channel) const;
+    /** Write hardware then commit caches after valid readback; no hardware rollback guarantee. */
     void applyRateAndBandwidth(int direction, size_t channel, uint32_t rate, uint32_t bandwidth);
+    /** Validate a logical RX channel and return its SDK parameter-table handle. */
     skiq_rx_hdl_t getRxHandle(const size_t channel) const;
+    /** Validate a logical TX channel and return its SDK parameter-table handle. */
     skiq_tx_hdl_t getTxHandle(const size_t channel) const;
+    /** Map logical RX channel zero; reject a card with no RX channels. */
     skiq_rx_hdl_t getFirstRxHandle(void) const;
+    /** Map logical TX channel zero; reject a card with no TX channels. */
     skiq_tx_hdl_t getFirstTxHandle(void) const;
 
-    //  sidekiq card
+    /** Copied SDK product name used for hardware identification. */
     std::string part_str;
+    /** SDK product discriminator used for card-specific API policy. */
     skiq_part_t part;
+    /** Copied SDK parameter table; logical channels index its mapped handles. */
     skiq_param_t param;
+    /** SDK card identifier selected during construction. */
     uint8_t card{};
+    /** RX ADC resolution in bits, reported by the SDK at construction. */
     uint32_t resolution{};
-    double maxValue{};   // RX ADC full scale.
-    double txMaxValue{}; // TX host full scale accounts for DAC bit alignment.
+    /** RX ADC full scale used for normalized CF32 conversion. */
+    double maxValue{};
+    /** TX host full scale, accounting for the card's DAC bit alignment. */
+    double txMaxValue{};
 
+    /** RX stream uses CS16 directly rather than converting to CF32. */
     bool rxUseShort{};
+    /** TX stream supplies CS16 directly rather than normalized CF32. */
     bool txUseShort{};
 
-    // RX hardware adapter must outlive the session that references it.
+    /** Timestamp-source setting exposed through the settings API. */
     std::string timetype{};
+    /** Owned adapter; declared before the session so it outlives that borrower. */
     std::unique_ptr<soapy_sidekiq::RxStreamBackend> rx_backend;
+    /** Own the RX worker/queue; stop it before releasing the adapter or SDK. */
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
     /** Own the RX token; the opaque Soapy handle borrows its stable address. */
     std::unique_ptr<StreamHandle> active_rx_stream;
 
+    /** Validated RX parameter-table count. */
     uint8_t num_rx_channels{};
+    /** Last successful RX actual-rate snapshots, truncated to integral samples/s. */
     std::vector<uint32_t> rx_sample_rates;
+    /** Last successful RX actual-bandwidth snapshots in Hz. */
     std::vector<uint32_t> rx_bandwidths;
+    /** RX payload size in 32-bit words, also the CS16 complex-sample MTU. */
     uint32_t rx_payload_size_in_words{};
 
-    //  tx
+    /** Protect PPS result publication/waits and coordinate TX admission cancellation. */
     std::mutex tx_mutex;
+    /** Wake writers after PPS startup publication or admission cancellation. */
     std::condition_variable tx_cv;
+    /** Validated constructor limit for TX blocks and reservation slots. */
     std::uint32_t tx_buffer_count{soapy_sidekiq::defaultTxBufferCount};
+    /** Reservation/notification storage retained independently by accepted contexts. */
     using TxCompletion = soapy_sidekiq::TxCompletionState<>;
+    /** Current stream bookkeeping; accepted contexts can outlive this reference. */
     std::shared_ptr<TxCompletion> tx_completion;
-    // Written with tx_mutex and tx_completion->mutex held; read with either held.
+    /** Admission gate; write with both TX/completion mutexes, read with either held. */
     bool tx_writes_stopping{true};
-    std::size_t active_tx_writers{};        // Guarded by tx_completion->mutex.
-    std::size_t active_tx_status_readers{}; // Guarded by tx_completion->mutex.
+    /** Admitted writes to drain before stop; guarded by tx_completion->mutex. */
+    std::size_t active_tx_writers{};
+    /** Admitted status calls to drain before stop; guarded by tx_completion->mutex. */
+    std::size_t active_tx_status_readers{};
     /** Close write/status admission and drain admitted calls before stopping hardware. */
     void stopTxWrites();
     /** Drain API calls, join PPS startup, and stop hardware; failed stops remain retryable. */
     int stopTxStream(bool on_pps);
     /** Best-effort destruction cleanup; accepted callbacks retain their own storage. */
     void shutdownTx() noexcept;
+    /** PPS worker published a result; guarded by tx_mutex. */
     bool tx_start_finished{};
+    /** Published PPS SDK status; guarded by tx_mutex. */
     int tx_start_status{};
+    /** Retain stop responsibility after activation, including failed-stop retries. */
     bool tx_stream_active{};
+    /**
+     * PPS first-write gate: activation initializes it before opening admission.
+     * writeStream checks it before locking tx_mutex, then clears it under that lock.
+     * Callers serialize writes and activation; status polling reads it under tx_mutex.
+     */
     bool first_transmit{};
     /** Own the TX token until close or device shutdown. */
     std::unique_ptr<StreamHandle> active_tx_stream;
 
+    /** Validated TX parameter-table count. */
     uint8_t num_tx_channels{};
+    /** Last successful TX actual-rate snapshots, truncated to integral samples/s. */
     std::vector<uint32_t> tx_sample_rates;
+    /** Last successful TX actual-bandwidth snapshots in Hz. */
     std::vector<uint32_t> tx_bandwidths;
+    /** Serialize SDK underrun polling and startup counter reset. */
     std::timed_mutex tx_status_mutex;
-    uint32_t tx_underruns{}; // Guarded by tx_status_mutex; reset after successful SDK start.
+    /** Last underrun count; guarded by tx_status_mutex; reset after a successful start. */
+    uint32_t tx_underruns{};
+    /** Configured TX complex samples per block; positive before writes are admitted. */
     uint32_t current_tx_block_size{};
 
-    //  setting
+    /** Last successful I/Q-order setting. */
     bool iq_swap{};
+    /** Last successful all-handle RX data-source selection: counter rather than IQ. */
     bool counter{};
+    /** Select RF sample timestamps; false selects the system counter. */
     bool rfTimeSource{};
+    /** Last SDK system-counter frequency readback in ticks/s. */
     uint64_t sys_freq{};
 
+    /** SDK-allocated blocks shared individually with accepted contexts. */
     using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
+    /** Own the pool; its destruction leaves accepted blocks retained by callbacks. */
     std::unique_ptr<TxBlocks> tx_blocks;
     /** Prepare all block owners and bookkeeping before publishing a TX stream. */
     void initializeTxBuffers();
+    /**
+     * Next circular pool slot; initialized before admission and advanced by writeStream.
+     * Callers serialize writes; tx_mutex does not protect this index or payload access.
+     * Individual slot reservations are protected by tx_completion->mutex.
+     */
     uint32_t currTXBuffIndex{};
 
-    // TX callback static function
-    // The registration requires a static function instead of a method so
-    // this must be created to be able to register it.
-    // Each accepted context retains its bookkeeping and SDK block independently.
+    /** Consume an accepted context without device access or unwinding through the SDK. */
     static void tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
                                      void *p_user) noexcept;
 
