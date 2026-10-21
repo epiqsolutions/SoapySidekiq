@@ -515,7 +515,7 @@ target_link_libraries(rate_bandwidth_tests PRIVATE non_hardware_test_options)
 add_test(NAME rate-bandwidth.all COMMAND rate_bandwidth_tests)
 set_tests_properties(rate-bandwidth.all PROPERTIES LABELS "component;non-hardware")
 extract_stream_method(rx_setup_prefix "SoapySDR::Stream *SoapySidekiq::setupStream("
-    "        if (format == \"CS16\")")
+    "        rxUseShort = request.format")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RxSetupBlockSizeMethod.inc"
     "${rx_setup_prefix}        (void)rx_handle;\n    }\n    (void)args;\n    return nullptr;\n}\n")
 add_executable(channel_metadata_tests support/TestMain.cpp component/ChannelMetadataTests.cpp
