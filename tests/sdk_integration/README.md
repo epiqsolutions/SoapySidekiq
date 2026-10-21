@@ -62,7 +62,7 @@ declarations. Native cases are a separate optional CTest executable.
 
 ## Scope
 
-Eight registered cases cover:
+The registered cases cover:
 
 - Real discovery/factory construction, mapped handles, rate/bandwidth
   configuration, invalid setup and inactive write rejection, CS16/CF32 RX and
