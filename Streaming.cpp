@@ -220,11 +220,11 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             throw std::runtime_error(
                 "skiq_read_rx_block_size returned an invalid unpacked block (card " +
                 std::to_string(card) + ", bytes " + std::to_string(block_bytes) + ")");
-        // Validate before subtracting the header or publishing MTU-related sizes.
-        rx_block_size_in_bytes = block_bytes;
-        rx_block_size_in_words = block_bytes / word_bytes;
-        rx_payload_size_in_bytes = block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES;
-        rx_payload_size_in_words = rx_payload_size_in_bytes / word_bytes;
+        // Keep setup-only byte sizes local; only the payload sample count is
+        // needed by the configured stream's MTU and receive-session methods.
+        const auto payload_bytes =
+            static_cast<uint32_t>(block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES);
+        rx_payload_size_in_words = payload_bytes / word_bytes;
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
                       rx_payload_size_in_words);

@@ -210,10 +210,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
     iq_swap = true;
     counter = false;
     card = 0;
-    rx_block_size_in_words = 0;
-    rx_block_size_in_bytes = 0;
     rx_payload_size_in_words = 1018;
-    rx_payload_size_in_bytes = 0;
     rfTimeSource = true;
     timetype = "rf_timestamp";
     complete_count = 0;

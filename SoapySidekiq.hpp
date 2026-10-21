@@ -373,9 +373,6 @@ class SoapySidekiq : public SoapySDR::Device
     uint8_t num_rx_channels{};
     std::vector<uint32_t> rx_sample_rates;
     std::vector<uint32_t> rx_bandwidths;
-    uint32_t rx_block_size_in_words{};
-    uint32_t rx_block_size_in_bytes{};
-    uint32_t rx_payload_size_in_bytes{};
     uint32_t rx_payload_size_in_words{};
 
     //  tx
