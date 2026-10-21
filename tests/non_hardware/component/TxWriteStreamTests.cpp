@@ -42,7 +42,7 @@
 #define SOAPY_SDR_TIMEOUT -3
 #define SOAPY_SDR_UNDERFLOW -4
 #define SKIQ_TX_ASYNC_SEND_QUEUE_FULL 1
-#define DEFAULT_NUM_BUFFERS 3
+constexpr std::uint32_t fixture_tx_buffer_count = 3;
 std::function<void()> log_hook;
 // Evaluate diagnostic arguments as the real logging API does, even for a quiet sink.
 enum
@@ -270,7 +270,7 @@ public:
   std::thread _tx_streaming_thread;
   bool first_transmit{false}, txUseShort{false}, iq_swap{true};
   std::uint32_t p_tx_block_index{};
-  std::uint32_t tx_buffer_count{DEFAULT_NUM_BUFFERS};
+  std::uint32_t tx_buffer_count{fixture_tx_buffer_count};
   std::uint32_t current_tx_block_size{252}, tx_block_index{};
   std::uint8_t card{};
   double maxValue{32767};
@@ -281,7 +281,8 @@ public:
   using TxBlocks = soapy_sidekiq::TxBlockPool<skiq_tx_block_t>;
   std::unique_ptr<TxBlocks> tx_blocks;
   void initializeTxBuffers();
-  std::shared_ptr<TxCompletion> tx_completion{std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS)};
+  std::shared_ptr<TxCompletion> tx_completion{
+      std::make_shared<TxCompletion>(fixture_tx_buffer_count)};
   std::mutex tx_mutex;
   FixtureCondition tx_cv;
   bool tx_start_finished{};
@@ -1025,7 +1026,7 @@ TEST_CASE("TX callback rejects out-of-range indices without touching status stor
     SoapySidekiq device;
     auto *context = new TxSendContext;
     context->completion = device.tx_completion;
-    context->txIndex = DEFAULT_NUM_BUFFERS;
+    context->txIndex = fixture_tx_buffer_count;
     log_hook = [] { throw std::runtime_error("injected log failure"); };
     soapy_sidekiq::ScopeExit reset([]() noexcept { log_hook = {}; });
     SoapySidekiq::tx_complete_callback(0, nullptr, context);
@@ -1683,7 +1684,7 @@ TEST_CASE("old stream completions cannot release a new stream reservation")
     context->txIndex = 0;
     const auto old = context->completion;
     old->slots[0] = 1;
-    device.tx_completion = std::make_shared<TxCompletion>(DEFAULT_NUM_BUFFERS);
+    device.tx_completion = std::make_shared<TxCompletion>(fixture_tx_buffer_count);
     device.tx_completion->slots[0] = 1;
     SoapySidekiq::tx_complete_callback(0, nullptr, context);
     REQUIRE_EQ(old->slots[0], 0);
@@ -1695,7 +1696,7 @@ TEST_CASE("old stream completions cannot release a new stream reservation")
 
 TEST_CASE("TX block allocation failure unwinds its prefix without replacing published owners")
 {
-    for (std::size_t prefix = 0; prefix < DEFAULT_NUM_BUFFERS; ++prefix)
+    for (std::size_t prefix = 0; prefix < fixture_tx_buffer_count; ++prefix)
     {
         SoapySidekiq device;
         const auto *pool = device.tx_blocks.get();
@@ -1718,7 +1719,7 @@ TEST_CASE("TX block owners release unused storage when the device is destroyed")
     const auto baseline = skiq_tx_block_t::live.load();
     {
         SoapySidekiq device;
-        REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline + DEFAULT_NUM_BUFFERS);
+        REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline + fixture_tx_buffer_count);
     }
     REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline);
 }
@@ -1752,7 +1753,7 @@ TEST_CASE("closing TX retains accepted blocks until completion and isolates a re
     auto *block = accepted->block.get();
     SoapySidekiq::tx_complete_callback(0, block, accepted.release());
     REQUIRE(retained.expired());
-    REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline + DEFAULT_NUM_BUFFERS);
+    REQUIRE_EQ(skiq_tx_block_t::live.load(), baseline + fixture_tx_buffer_count);
     REQUIRE_EQ(device.tx_completion->slots[0], 1);
     REQUIRE_EQ(device.tx_completion->completed, std::uint64_t{0});
 }

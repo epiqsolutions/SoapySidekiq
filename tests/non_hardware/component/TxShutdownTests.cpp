@@ -22,8 +22,8 @@
 #include <vector>
 
 using namespace std::chrono_literals;
-constexpr int DEFAULT_NUM_BUFFERS = 3, SOAPY_SDR_ERROR = 1, SOAPY_SDR_INFO = 2,
-              SOAPY_SDR_STREAM_ERROR = -2;
+constexpr std::uint32_t fixture_tx_buffer_count = 3;
+constexpr int SOAPY_SDR_ERROR = 1, SOAPY_SDR_INFO = 2, SOAPY_SDR_STREAM_ERROR = -2;
 using skiq_tx_hdl_t = unsigned;
 namespace
 {
@@ -162,7 +162,7 @@ class SoapySidekiq
         }
     };
     std::uint8_t card{3};
-    std::uint32_t tx_buffer_count{DEFAULT_NUM_BUFFERS};
+    std::uint32_t tx_buffer_count{fixture_tx_buffer_count};
     std::uint32_t current_tx_block_size{252}, tx_block_index{};
     std::mutex tx_mutex;
     ObservedCondition tx_cv;

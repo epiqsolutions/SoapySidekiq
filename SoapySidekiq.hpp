@@ -5,26 +5,24 @@
 
 #pragma once
 
-#include <functional>
-#include <sidekiq_api.h>
-
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include <sidekiq_api.h>
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 #include <SoapySDR/Version.h>
 #include <SoapySidekiq/DeviceOptions.hpp>
-#include <SoapySidekiq/TxCompletionState.hpp>
 #include <SoapySidekiq/TxBlockPool.hpp>
+#include <SoapySidekiq/TxCompletionState.hpp>
 
 // The owners are destroyed out of line; users of this declaration do not need
 // the RX worker, queue, or sample-conversion definitions.
@@ -33,9 +31,6 @@ namespace soapy_sidekiq
 class RxStreamBackend;
 class RxStreamSession;
 } // namespace soapy_sidekiq
-
-/** Legacy number of preallocated host TX blocks per configured stream. */
-inline constexpr int DEFAULT_NUM_BUFFERS = 30000;
 
 /**
  * @brief Owns a Sidekiq card's streams and callback state.
