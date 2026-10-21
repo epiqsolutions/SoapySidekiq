@@ -90,6 +90,42 @@ int skiq_stop_tx_streaming_on_1pps(std::uint8_t card, skiq_tx_hdl_t handle, int)
 {
     return skiq_stop_tx_streaming(card, handle);
 }
+// Script configuration and immediate-start failures at their actual SDK boundary.
+constexpr int skiq_iq_order_iq = 0, skiq_tx_immediate_data_flow_mode = 0,
+              skiq_tx_transfer_mode_async = 0;
+std::vector<std::string> activation_calls;
+std::size_t activation_fail_at{};
+unsigned activation_handle{};
+int recordActivation(const char *operation)
+{
+    activation_calls.emplace_back(operation);
+    return activation_calls.size() == activation_fail_at ? -EIO : 0;
+}
+int skiq_write_iq_order_mode(std::uint8_t, int)
+{
+    return recordActivation("iq_order");
+}
+int skiq_write_tx_block_size(std::uint8_t, unsigned handle, std::uint32_t)
+{
+    activation_handle = handle;
+    return recordActivation("block_size");
+}
+int skiq_write_tx_data_flow_mode(std::uint8_t, unsigned, int)
+{
+    return recordActivation("data_flow");
+}
+int skiq_write_tx_transfer_mode(std::uint8_t, unsigned, int)
+{
+    return recordActivation("transfer_mode");
+}
+int skiq_write_num_tx_threads(std::uint8_t, unsigned)
+{
+    return recordActivation("threads");
+}
+int skiq_start_tx_streaming(std::uint8_t, unsigned)
+{
+    return recordActivation("start");
+}
 int pps_start_status{};
 int skiq_start_tx_streaming_on_1pps(std::uint8_t, skiq_tx_hdl_t, int)
 {
@@ -177,7 +213,8 @@ public:
     bool tx_writes_stopping{};
     std::size_t active_tx_writers{}, active_tx_status_readers{};
     std::thread _tx_streaming_thread;
-    bool first_transmit{false}, txUseShort{false};
+    bool first_transmit{false}, txUseShort{false}, iq_swap{true};
+    std::uint32_t p_tx_block_index{};
     std::uint32_t current_tx_block_size{252}, currTXBuffIndex{};
     std::uint8_t card{};
     double maxValue{32767};
@@ -207,6 +244,8 @@ public:
 
     ~SoapySidekiq()
     {
+        if (_tx_streaming_thread.joinable())
+            _tx_streaming_thread.join();
         for (auto *context : pending)
             delete context;
     }
@@ -223,6 +262,8 @@ public:
     static void tx_complete_callback(int32_t, skiq_tx_block_t *, void *) noexcept;
     void stopTxWrites();
     int deactivateStream(SoapySDR::Stream *, int, long long);
+    int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
+    int activateStreamImpl(SoapySDR::Stream *, int, long long, std::size_t);
 };
 
 #include "TxCompletionMethod.inc"
@@ -285,6 +326,7 @@ int skiq_transmit(std::uint8_t, unsigned, skiq_tx_block_t *block, passedStruct *
 }
 
 #include "StreamHandleLookup.inc"
+#include "TxActivationMethods.inc"
 #include "StreamStatusMethod.inc"
 
 static soapy_sidekiq::StreamDirection streamDirection(int direction)
@@ -515,9 +557,9 @@ TEST_CASE("hard TX errors release reservation and context before a retry")
     std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
     const void *buffers[]{input.data()};
     int flags = 0;
-    REQUIRE_THROWS_AS(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
-                                         buffers, device.current_tx_block_size, flags, 0, 0),
-                      std::runtime_error);
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.p_tx_status[0], 0);
     REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
@@ -535,9 +577,9 @@ TEST_CASE("CF32 conversion failure releases its reserved TX block and context")
     std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
     const void *buffers[]{input.data()};
     int flags = 0;
-    REQUIRE_THROWS_AS(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
-                                         buffers, device.current_tx_block_size, flags, 0, 0),
-                      std::invalid_argument);
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.p_tx_status[0], 0);
     REQUIRE_EQ(device.attempts, std::size_t{0});
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
@@ -551,9 +593,9 @@ TEST_CASE("callback context allocation failure releases its reserved TX block")
     int flags = 0;
     passedStruct::fail_allocation = true;
     soapy_sidekiq::ScopeExit restore([]() noexcept { passedStruct::fail_allocation = false; });
-    REQUIRE_THROWS_AS(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle),
-                                         buffers, device.current_tx_block_size, flags, 0, 0),
-                      std::bad_alloc);
+    REQUIRE_EQ(device.writeStream(reinterpret_cast<SoapySDR::Stream *>(&device.handle), buffers,
+                                  device.current_tx_block_size, flags, 0, 0),
+               SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(device.p_tx_status[0], 0);
     REQUIRE_EQ(device.attempts, std::size_t{0});
     REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
@@ -1354,6 +1396,162 @@ TEST_CASE("TX status timeout includes waiting for another counter poller")
     REQUIRE(ready);
     REQUIRE_EQ(result, SOAPY_SDR_TIMEOUT);
     REQUIRE_EQ(underrun_reads, std::size_t{0});
+}
+
+TEST_CASE("hard TX submission failures preserve accepted prefixes and permit exact suffix retry")
+{
+    for (const bool deferred : {false, true})
+        for (const std::size_t accepted : {std::size_t{1}, std::size_t{2}})
+        {
+            SoapySidekiq device;
+            device.txUseShort = true;
+            device.defer_completion = deferred;
+            device.send_results.assign(accepted, 0);
+            device.send_results.push_back(-EIO);
+            const std::size_t block = device.current_tx_block_size;
+            std::vector<std::int16_t> input(6 * block);
+            for (std::size_t i = 0; i < input.size(); ++i)
+                input[i] = static_cast<std::int16_t>(static_cast<int>(i) - 700);
+            const void *buffers[]{input.data()};
+            auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+            int flags = 0;
+            const int prefix = device.writeStream(stream, buffers, 3 * block, flags, 0, 0);
+            REQUIRE_EQ(prefix, static_cast<int>(accepted * block));
+            REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+            REQUIRE_EQ(device.currTXBuffIndex, static_cast<std::uint32_t>(accepted));
+            REQUIRE_EQ(device.p_tx_status[accepted], 0);
+            REQUIRE_EQ(passedStruct::live.load(), deferred ? accepted : std::size_t{0});
+            const void *suffix[]{input.data() + 2 * prefix};
+            REQUIRE_EQ(device.writeStream(stream, suffix, 3 * block - prefix, flags, 0, 0),
+                       static_cast<int>(3 * block - prefix));
+            REQUIRE_EQ(device.transmitted.size(), std::size_t{3});
+            for (std::size_t packet = 0; packet < 3; ++packet)
+            {
+                const auto first = input.begin() + static_cast<std::ptrdiff_t>(2 * block * packet);
+                REQUIRE(device.transmitted[packet] ==
+                        std::vector<std::int16_t>(first, first + 2 * block));
+            }
+            REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+            REQUIRE_EQ(passedStruct::live.load(), deferred ? std::size_t{3} : std::size_t{0});
+        }
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("TX preparation failures preserve prior submissions and release unsent reservations")
+{
+    for (const bool allocation : {false, true})
+        for (const bool deferred : {false, true})
+        {
+            SoapySidekiq device;
+            device.defer_completion = deferred;
+            const std::size_t block = device.current_tx_block_size;
+            std::vector<float> input(4 * block, 0.25f);
+            const void *buffers[]{input.data()};
+            auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+            int flags = 0;
+            device.on_submit = [&]
+            {
+                if (allocation)
+                    passedStruct::fail_allocation = true;
+                else
+                    device.txMaxValue = 0;
+            };
+            soapy_sidekiq::ScopeExit restore([]() noexcept
+                                             { passedStruct::fail_allocation = false; });
+            REQUIRE_EQ(device.writeStream(stream, buffers, 2 * block, flags, 0, 0),
+                       static_cast<int>(block));
+            REQUIRE_EQ(device.p_tx_status[1], 0);
+            REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+            REQUIRE_EQ(device.attempts, std::size_t{1});
+            REQUIRE_EQ(passedStruct::live.load(), deferred ? std::size_t{1} : std::size_t{0});
+            passedStruct::fail_allocation = false;
+            device.txMaxValue = 32767;
+            device.on_submit = {};
+            const void *suffix[]{input.data() + 2 * block};
+            REQUIRE_EQ(device.writeStream(stream, suffix, block, flags, 0, 0),
+                       static_cast<int>(block));
+            REQUIRE_EQ(device.transmitted.size(), std::size_t{2});
+        }
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("TX activation SDK failures return stream errors and allow a clean retry")
+{
+    for (std::size_t failure = 1; failure <= 6; ++failure)
+    {
+        SoapySidekiq device;
+        device.tx_stream_active = false;
+        device.tx_writes_stopping = true;
+        device.handle.tx_handle = 7;
+        auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+        activation_calls.clear();
+        activation_fail_at = failure;
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_EQ(activation_calls.size(), failure);
+        REQUIRE(!device.tx_stream_active);
+        REQUIRE(device.tx_writes_stopping);
+        REQUIRE(!device._tx_streaming_thread.joinable());
+        activation_calls.clear();
+        activation_fail_at = 0;
+        device.tx_underruns = 99;
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+        REQUIRE(device.tx_stream_active);
+        REQUIRE(!device.tx_writes_stopping);
+        REQUIRE_EQ(device.tx_underruns, 0u);
+        REQUIRE_EQ(activation_handle, 7u);
+    }
+}
+
+TEST_CASE("repeated TX activation rejects requests before SDK configuration")
+{
+    SoapySidekiq device;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    activation_calls.clear();
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(activation_calls.empty());
+}
+
+TEST_CASE("PPS TX activation cannot replace a joinable startup thread and can restart after stop")
+{
+    SoapySidekiq device;
+    device.tx_stream_active = false;
+    device.tx_writes_stopping = true;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    activation_calls.clear();
+    activation_fail_at = 0;
+    pps_start_status = -EIO;
+    stop_status = 0;
+    REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), 0);
+    REQUIRE(device._tx_streaming_thread.joinable());
+    const auto configured = activation_calls.size();
+    REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(activation_calls.size(), configured);
+    // The failed startup still owns its thread/stream until deactivation joins it.
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    REQUIRE(!device._tx_streaming_thread.joinable());
+    REQUIRE(!device.tx_stream_active);
+    pps_start_status = 0;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    REQUIRE(device.tx_stream_active);
+    REQUIRE(!device.first_transmit);
+}
+
+TEST_CASE("unsupported TX activation options leave SDK configuration and startup untouched")
+{
+    SoapySidekiq device;
+    device.tx_stream_active = false;
+    device.tx_writes_stopping = true;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    activation_calls.clear();
+    for (const int flags : {8, 16, -1, SOAPY_SDR_HAS_TIME | 8})
+        REQUIRE_EQ(device.activateStream(stream, flags, 0, 0), SOAPY_SDR_NOT_SUPPORTED);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 1), SOAPY_SDR_NOT_SUPPORTED);
+    REQUIRE_EQ(device.activateStream(stream, SOAPY_SDR_HAS_TIME, 1, 0), SOAPY_SDR_NOT_SUPPORTED);
+    REQUIRE(activation_calls.empty());
+    REQUIRE(!device.tx_stream_active);
+    REQUIRE(device.tx_writes_stopping);
+    REQUIRE(!device._tx_streaming_thread.joinable());
 }
 
 TEST_CASE("already stopped TX hardware deactivates successfully for immediate and PPS stops")

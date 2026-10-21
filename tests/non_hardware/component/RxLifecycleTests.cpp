@@ -39,7 +39,7 @@ namespace
 struct FakeSdk
 {
     bool streaming{};
-    int stop_status{};
+    int stop_status{}, start_status{};
     unsigned starts{}, stops{};
     bool stop_on_pps{}, provide_packet{}, delivered{};
     double actual_rate{20000000};
@@ -74,6 +74,8 @@ int skiq_read_sys_timestamp_freq(std::uint8_t, std::uint64_t *frequency)
 }
 int skiq_start_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 {
+    if (sdk.start_status != 0)
+        return sdk.start_status;
     if (sdk.streaming) return -EBUSY;
     sdk.streaming = true;
     ++sdk.starts;
@@ -180,6 +182,7 @@ public:
     std::size_t getStreamMTU(SoapySDR::Stream *) const;
     int readStream(SoapySDR::Stream *, void *const *, std::size_t, int &, long long &, long);
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
+    int activateStreamImpl(SoapySDR::Stream *, int, long long, std::size_t);
     int deactivateStream(SoapySDR::Stream *, int, long long);
     void closeStream(SoapySDR::Stream *);
 };
@@ -374,17 +377,17 @@ TEST_CASE("RX activation validates refreshed rates before any hardware start")
     SoapySidekiq device;
     auto *stream = device.setupRx();
     sdk.rate_status = -5;
-    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::runtime_error);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
     sdk.rate_status = 0;
     sdk.actual_rate = 0;
-    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::invalid_argument);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
     sdk.actual_rate = 20000000;
     device.rfTimeSource = false;
     sdk.frequency_status = -6;
-    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::runtime_error);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
     sdk.frequency_status = 0;
     sdk.system_frequency = 0;
-    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::invalid_argument);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(sdk.starts, 0u);
 }
 
@@ -407,7 +410,7 @@ TEST_CASE("RX timestamp setup rejects omitted actual rate before hardware start"
     SoapySidekiq device;
     auto *stream = device.setupRx();
     sdk.omit_rate = true;
-    REQUIRE_THROWS_AS(device.activateStream(stream, 0, 0, 0), std::invalid_argument);
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
     REQUIRE_EQ(sdk.starts, 0u);
 }
 
@@ -450,6 +453,24 @@ TEST_CASE("immediate RX activation ignores timeNs when HAS_TIME is absent")
     sdk.provide_packet = true;
     REQUIRE_EQ(device.activateStream(stream, 0, 123, 0), 0);
     REQUIRE_EQ(device.deactivateStream(stream, 0, 123), 0);
+}
+
+TEST_CASE("RX startup failures return stream errors and retained hardware cannot be started twice")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    sdk.start_status = -EIO;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(!sdk.streaming);
+    REQUIRE_EQ(sdk.starts, 0u);
+    sdk.start_status = 0;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    device.awaitWorkerFailure();
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE(sdk.streaming);
+    REQUIRE_EQ(sdk.starts, 1u);
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    device.closeStream(stream);
 }
 
 TEST_CASE("failed RX deactivation returns a stream error and preserves hardware stop retry")

@@ -150,7 +150,11 @@ request to contain a whole number of `getStreamMTU()` samples, with at most
 counts or null nonempty buffers return `SOAPY_SDR_STREAM_ERROR`; a zero-length
 write on an admitted TX stream returns zero without reading buffers. If
 back-pressure accepts only a prefix, advance the input by that many complex
-samples and retry the suffix.
+samples and retry the suffix. A hard SDK submission failure or packet
+preparation failure returns `SOAPY_SDR_STREAM_ERROR` if no samples were
+accepted; otherwise it returns the accepted prefix. The rejected packet's
+reservation/context are released, while accepted packets retain completion
+ownership.
 
 TX write admission opens after activation and closes when deactivation begins.
 Writes before activation or after deactivation return `SOAPY_SDR_STREAM_ERROR`,
@@ -238,6 +242,12 @@ Absolute timed starts/stops, additional flags, and finite-burst activation
 (`numElems != 0`) return `SOAPY_SDR_NOT_SUPPORTED`. TX writes accept flags `0`;
 timed writes, end-of-burst, and fragment flags are unsupported. As in the
 SoapySDR contract, `timeNs` is ignored when `HAS_TIME` is absent.
+
+`activateStream()` converts SDK, timing-readback, and session-start exceptions
+into logged `SOAPY_SDR_STREAM_ERROR` results. Unsupported options still return
+`SOAPY_SDR_NOT_SUPPORTED`. TX activation requires prior deactivation when a
+stream is already active or still owns a PPS startup thread, including a failed
+PPS start. This keeps repeated activation from replacing a joinable thread.
 
 SDK stop failures from `deactivateStream()` return `SOAPY_SDR_STREAM_ERROR` and
 retain stream ownership so the caller can retry. TX stops keep new writes

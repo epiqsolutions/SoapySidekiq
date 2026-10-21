@@ -16,6 +16,7 @@
 #include <limits>
 
 #include "SoapySidekiq.hpp"
+#include <exception>
 #include <SoapySDR/Formats.hpp>
 #include <SoapySidekiq/SampleConversion.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
@@ -479,10 +480,23 @@ size_t SoapySidekiq::getStreamMTU(SoapySDR::Stream *stream) const
 
 }
 
-int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
-                                 const int flags,
-                                 const long long timeNs,
+int SoapySidekiq::activateStream(SoapySDR::Stream *stream, const int flags, const long long timeNs,
                                  const size_t numElems)
+{
+    try
+    {
+        return activateStreamImpl(stream, flags, timeNs, numElems);
+    }
+    catch (const std::exception &error)
+    {
+        SoapySDR_logf(SOAPY_SDR_ERROR, "Stream activation failed (card %u): %s", card,
+                      error.what());
+        return SOAPY_SDR_STREAM_ERROR;
+    }
+}
+
+int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
+                                     const long long timeNs, const size_t numElems)
 {
     int status = 0;
     StreamHandle *stream_handle = findStreamHandle(stream);
@@ -575,6 +589,11 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             throw std::runtime_error("TX stream is not the active device TX stream");
         }
 
+        // Replacing a joinable PPS thread would terminate the process. A
+        // configured/failed start must be deactivated before another attempt.
+        if (tx_stream_active || _tx_streaming_thread.joinable())
+            return SOAPY_SDR_STREAM_ERROR;
+
         const skiq_tx_hdl_t tx_handle = stream_handle->tx_handle;
 
         /* set as iq data */
@@ -584,9 +603,8 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             if (status != 0)
             {
                 SoapySDR_logf(SOAPY_SDR_ERROR,
-                             "skiq_write_rx_data_src failed (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
+                              "skiq_write_iq_order_mode failed (card %u) status %d", card, status);
+                return SOAPY_SDR_STREAM_ERROR;
             }
             SoapySDR_logf(SOAPY_SDR_INFO, "TX is set to I then Q order");
         }
@@ -601,7 +619,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                          "skiq_write_tx_block_size failed, (card %u) status %d",
                           card, status);
-            throw std::runtime_error("");
+            return SOAPY_SDR_STREAM_ERROR;
         }
         SoapySDR_logf(SOAPY_SDR_INFO, "TX block size is: %u", current_tx_block_size);
 
@@ -614,7 +632,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
                 SOAPY_SDR_ERROR,
                 "skiq_write_tx_data_flow_mode failed (card %u) status %d",
                 card, status);
-            throw std::runtime_error("");
+            return SOAPY_SDR_STREAM_ERROR;
         }
 
         // running in aync mode
@@ -625,7 +643,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_tx_transfer_mode failed, (card %u) status %d",
                           card, status);
-            throw std::runtime_error("");
+            return SOAPY_SDR_STREAM_ERROR;
         }
 
         // configure 4 threads to be safe, too many and it may consume resources
@@ -635,7 +653,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_write_num_tx_threads failed, (card %u) status %d",
                           card, status);
-            throw std::runtime_error("");
+            return SOAPY_SDR_STREAM_ERROR;
         }
 
         // A new activation must not inherit a failed PPS start's write gate.
@@ -664,7 +682,7 @@ int SoapySidekiq::activateStream(SoapySDR::Stream *stream,
                 SoapySDR_logf(SOAPY_SDR_ERROR,
                               "skiq_start_tx_streaming failed, (card %u) status %d",
                               card, status);
-                throw std::runtime_error("");
+                return SOAPY_SDR_STREAM_ERROR;
             }
             {
                 std::lock_guard<std::timed_mutex> lock(tx_status_mutex);
@@ -984,6 +1002,7 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
             observed_completions = complete_count;
         }
 
+        try
         {
             // Until the SDK accepts this block, unwind its reservation on any
             // allocation, conversion, or submission failure.
@@ -1026,6 +1045,14 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
                 reservation.release();
             }
         }
+        catch (const std::exception &error)
+        {
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                          "TX packet preparation/submission failed (card %u, handle %u): %s", card,
+                          stream_handle->tx_handle, error.what());
+            return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
+                                   : static_cast<int>(curr_block * current_tx_block_size);
+        }
         if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
         {
             // A completion during skiq_transmit must satisfy this predicate
@@ -1050,9 +1077,12 @@ int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
         }
         else if (status != 0)
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_transmit failed, (card %u) status %d",
-                          card, status);
-            throw std::runtime_error("");
+            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_transmit failed (card %u, handle %u), status %d",
+                          card, stream_handle->tx_handle, status);
+            // Accepted packets cannot be rolled back. Report their prefix so
+            // the caller retries only the unsent suffix after a hard SDK error.
+            return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
+                                   : static_cast<int>(curr_block * current_tx_block_size);
         }
         else
         {
