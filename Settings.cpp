@@ -166,10 +166,6 @@ skiq_tx_hdl_t SoapySidekiq::getFirstTxHandle(void) const
 // is released by the constructor's outer rollback guard.
 void SoapySidekiq::initializeTxCallbacks()
 {
-    registerInstance(card, this);
-    soapy_sidekiq::ScopeExit registry_rollback([this]() noexcept
-                                               { unregisterInstance(card, this); });
-
     const int status =
         skiq_register_tx_complete_callback(card, &SoapySidekiq::tx_complete_callback);
     if (status != 0)
@@ -184,7 +180,6 @@ void SoapySidekiq::initializeTxCallbacks()
     // final potentially throwing operation in the device constructor.
     SoapySDR_logf(SOAPY_SDR_TRACE, "leaving constructor", card);
     callback_rollback.release();
-    registry_rollback.release();
 }
 
 // Constructor
@@ -433,7 +428,6 @@ SoapySidekiq::~SoapySidekiq(void)
     delete active_rx_stream;
     active_rx_stream = nullptr;
 
-    unregisterInstance(card, this);
     skiq_register_tx_complete_callback(card, nullptr);
 
     p_tx_status.reset();

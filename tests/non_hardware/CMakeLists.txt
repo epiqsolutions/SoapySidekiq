@@ -288,7 +288,7 @@ function(extract_stream_method output start_marker end_marker)
     set(${output} "${method}" PARENT_SCOPE)
 endfunction()
 extract_stream_method(stream_lookup "SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle("
-    "void SoapySidekiq::registerInstance(")
+    "void SoapySidekiq::tx_complete_callback(")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/StreamHandleLookup.inc" "${stream_lookup}")
 extract_stream_method(stream_mtu "size_t SoapySidekiq::getStreamMTU("
     "int SoapySidekiq::activateStream(")
