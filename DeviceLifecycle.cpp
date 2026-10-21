@@ -81,17 +81,14 @@ void logging_handler(int32_t priority, const char *message) noexcept
     }
 }
 
-/*****************************************************************************/
-/** This is the callback function for once the data has completed being sent.
-    There is no guarantee that the complete callback will be in the order that
-    the data was sent, this function just increments the completion count and
-    signals the main thread that there is space available to send more packets.
-
-    @param status status of the transmit packet completed
-    @param p_block reference to the completed transmit block
-    @param p_user reference to the user data
-    @return void
-*/
+/**
+ * Release a reserved TX slot and publish progress before calling diagnostics.
+ * @param status SDK completion status; currently not interpreted here.
+ * @param p_data SDK block pointer; storage ownership is handled outside this method.
+ * @param txIndex Reserved slot index associated with the accepted submission.
+ * Completions may arrive out of order. The shared status lock protects slot
+ * availability and the progress counter used by writers waiting on queue space.
+ */
 void SoapySidekiq::tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex)
 {
     if (txIndex >= DEFAULT_NUM_BUFFERS || !p_tx_status)

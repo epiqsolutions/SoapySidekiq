@@ -26,6 +26,7 @@ constexpr char SOURCE_1PPS_EXTERNAL[] = "1pps_source_external";
 constexpr char SOURCE_1PPS_INTERNAL[] = "1pps_source_internal";
 } // namespace
 
+/** Try kernel PPS source readback; return false when unavailable or unrecognized. */
 bool readKernel1PpsSource(skiq_1pps_source_t &source)
 {
     std::ifstream input(KERNEL_1PPS_SOURCE_PATH);
@@ -83,6 +84,7 @@ bool readKernel1PpsSource(skiq_1pps_source_t &source)
     return false;
 }
 
+/** Write and flush a supported kernel PPS source; return false on unavailable/rejected IO. */
 bool writeKernel1PpsSource(const skiq_1pps_source_t source)
 {
     const char *value = nullptr;
