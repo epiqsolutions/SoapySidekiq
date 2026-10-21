@@ -56,7 +56,7 @@ struct DiscoveryResult
 /** Hardware boundary used by production discovery and non-hardware fakes. */
 class DiscoveryBackend
 {
-public:
+  public:
     virtual ~DiscoveryBackend() = default;
 
     /**
@@ -90,8 +90,6 @@ public:
  * @param query Optional card or serial filter.
  * @return Matching descriptors and any recoverable diagnostics.
  */
-DiscoveryResult discoverDevices(
-    DiscoveryBackend &backend,
-    const DiscoveryQuery &query = {});
+DiscoveryResult discoverDevices(DiscoveryBackend &backend, const DiscoveryQuery &query = {});
 
 } // namespace soapy_sidekiq

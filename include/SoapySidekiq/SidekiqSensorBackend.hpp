@@ -15,7 +15,7 @@ namespace soapy_sidekiq
 /** Adapts Sidekiq sensor calls to the hardware-independent SensorBackend. */
 class SidekiqSensorBackend final : public SensorBackend
 {
-public:
+  public:
     /**
      * Bind sensor operations to one initialized Sidekiq card.
      * @param card SDK card index used by every backend operation.
@@ -29,10 +29,9 @@ public:
     /** @copydoc SensorBackend::setAccelerometerEnabled */
     int setAccelerometerEnabled(bool enabled) override;
     /** @copydoc SensorBackend::readAccelerometer */
-    int readAccelerometer(
-        std::int16_t &x, std::int16_t &y, std::int16_t &z) override;
+    int readAccelerometer(std::int16_t &x, std::int16_t &y, std::int16_t &z) override;
 
-private:
+  private:
     /** Initialized SDK card index owned by the surrounding device. */
     std::uint8_t card_;
 };

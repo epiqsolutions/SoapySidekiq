@@ -18,6 +18,7 @@ inline constexpr std::uint32_t defaultTxBlockSize = 16380;
 
 /** Preserve the legacy pool by default while bounding constructor overrides. */
 inline constexpr std::uint32_t defaultTxBufferCount = 30000;
+/** Largest accepted pool count, bounding payload storage and completion bookkeeping. */
 inline constexpr std::uint32_t maxTxBufferCount = 30000;
 
 /** SDK packet limits for the driver's unpacked, single-channel TX payload. */

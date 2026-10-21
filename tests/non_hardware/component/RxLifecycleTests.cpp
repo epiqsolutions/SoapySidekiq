@@ -4,11 +4,13 @@
  */
 
 #include "TestHarness.hpp"
+#include <SoapySidekiq/Diagnostic.hpp>
 #include <SoapySidekiq/RxStreamSession.hpp>
 #include <SoapySidekiq/TxCompletionState.hpp>
 #include <SoapySidekiq/TxBlockPool.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <atomic>
@@ -510,6 +512,24 @@ TEST_CASE("failed RX deactivation returns a stream error and preserves hardware 
         device.closeStream(stream);
         REQUIRE(device.active_rx_stream == nullptr);
     }
+}
+
+TEST_CASE("RX activation preserves error status and successful retry when diagnostics throw")
+{
+    SoapySidekiq device;
+    auto *stream = device.setupRx();
+    rx_log_hook = [] { throw std::runtime_error("injected diagnostic failure"); };
+    soapy_sidekiq::ScopeExit restore([]() noexcept { rx_log_hook = {}; });
+    sdk.actual_rate = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(sdk.starts, 0u);
+    sdk.actual_rate = 20000000;
+    sdk.provide_packet = true;
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    REQUIRE_EQ(sdk.starts, 1u);
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    rx_log_hook = {};
+    device.closeStream(stream);
 }
 
 TEST_CASE("RX partial timestamp overflow returns stream error even when diagnostics throw")

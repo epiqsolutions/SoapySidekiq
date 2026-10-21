@@ -97,6 +97,14 @@ TX as upper-14-bit samples in a 16-bit word: their host scale is 32767, not
 packets. They do not execute the constructor's SDK product/width queries or
 measure RF output on hardware.
 
+The gain fixture runs against both modern and SoapySDR 0.4-style range types.
+The legacy type has only minimum/maximum bounds and no step constructor or
+accessor. Both variants exercise the same production gain methods, channel
+validation, conversions, SDK failures, and named controls. Modern range metadata
+still reports RX profile increments and the TX quarter-dB increment; older
+SoapySDR APIs can report only the bounds. This fixture checks API shape, not a
+complete build/link against either real SoapySDR library.
+
 Timestamp cases run both through the compiler-selected implementation and in
 `timestamp_portable_tests`, which forces the portable integer fallback even
 on hosts with `__int128`. Both cover truncation boundaries and signed output
@@ -135,6 +143,12 @@ cmake --build build/non_hardware-asan --parallel
 tests/run_logged.sh non_hardware_asan \
     tests/non_hardware/run_suite.sh build/non_hardware-asan
 ```
+
+Stream diagnostic regressions install throwing log sinks while actual production
+methods encounter TX preparation failure after an accepted prefix, activation
+success/error, SDK status-read failure, failed-stop retry, and RX activation
+validation failure followed by retry. They verify backend results/admission and
+reservation/context cleanup survive failed diagnostics.
 
 TX completion contexts retain shared bookkeeping rather than a device pointer.
 Late-completion cases destroy the fixture device before invoking the production

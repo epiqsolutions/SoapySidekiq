@@ -3,6 +3,7 @@
  * @brief Implements TX buffer ownership, completion, startup, writes, and status.
  */
 #include "SoapySidekiq.hpp"
+#include <SoapySidekiq/Diagnostic.hpp>
 #include <SoapySidekiq/SampleConversion.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <algorithm>
@@ -224,7 +225,8 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
 
     if (first_transmit)
     {
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start");
+        soapy_sidekiq::reportDiagnostic(
+            [&] { SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start"); });
         std::unique_lock<std::mutex> lock(tx_mutex);
         if (!tx_cv.wait_until(lock, deadline,
                               [this] { return tx_start_finished || tx_writes_stopping; }))
@@ -323,9 +325,14 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
         }
         catch (const std::exception &error)
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "TX packet preparation/submission failed (card %u, handle %u): %s", card,
-                          stream_handle->tx_handle, error.what());
+            soapy_sidekiq::reportDiagnostic(
+                [&]
+                {
+                    SoapySDR_logf(
+                        SOAPY_SDR_ERROR,
+                        "TX packet preparation/submission failed (card %u, handle %u): %s", card,
+                        stream_handle->tx_handle, error.what());
+                });
             return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
                                    : static_cast<int>(curr_block * current_tx_block_size);
         }
@@ -354,8 +361,13 @@ int SoapySidekiq::writeStream(SoapySDR::Stream *stream, const void *const *buffs
         }
         else if (status != 0)
         {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_transmit failed (card %u, handle %u), status %d",
-                          card, stream_handle->tx_handle, status);
+            soapy_sidekiq::reportDiagnostic(
+                [&]
+                {
+                    SoapySDR_logf(SOAPY_SDR_ERROR,
+                                  "skiq_transmit failed (card %u, handle %u), status %d", card,
+                                  stream_handle->tx_handle, status);
+                });
             // Accepted packets cannot be rolled back. Report their prefix so
             // the caller retries only the unsent suffix after a hard SDK error.
             return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
@@ -439,10 +451,14 @@ int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, i
                 if (status != 0)
                 {
                     status_lock.unlock();
-                    SoapySDR_logf(
-                        SOAPY_SDR_ERROR,
-                        "skiq_read_tx_num_underruns failed (card %u, handle %u), status %d", card,
-                        stream_handle->tx_handle, status);
+                    soapy_sidekiq::reportDiagnostic(
+                        [&]
+                        {
+                            SoapySDR_logf(SOAPY_SDR_ERROR,
+                                          "skiq_read_tx_num_underruns failed (card %u, handle %u), "
+                                          "status %d",
+                                          card, stream_handle->tx_handle, status);
+                        });
                     return SOAPY_SDR_STREAM_ERROR;
                 }
                 const bool increased = errors > tx_underruns;

@@ -11,38 +11,33 @@
 namespace soapy_sidekiq
 {
 
-StreamRequest validateStreamRequest(
-    const StreamDirection direction,
-    const std::string &format,
-    const std::vector<std::size_t> &channels,
-    const std::size_t available_channels,
-    const bool stream_already_configured)
+StreamRequest validateStreamRequest(const StreamDirection direction, const std::string &format,
+                                    const std::vector<std::size_t> &channels,
+                                    const std::size_t available_channels,
+                                    const bool stream_already_configured)
 {
     if (stream_already_configured)
     {
         // Report lifecycle misuse before secondary format/channel errors.
-        throw std::logic_error(
-            direction == StreamDirection::rx
-                ? "only one RX stream per device is currently supported"
-                : "only one TX stream per device is currently supported");
+        throw std::logic_error(direction == StreamDirection::rx
+                                   ? "only one RX stream per device is currently supported"
+                                   : "only one TX stream per device is currently supported");
     }
     if (channels.size() > 1)
     {
-        throw std::invalid_argument(
-            direction == StreamDirection::rx
-                ? "multi-channel RX streams are not currently supported"
-                : "multi-channel TX streams are not currently supported");
+        throw std::invalid_argument(direction == StreamDirection::rx
+                                        ? "multi-channel RX streams are not currently supported"
+                                        : "multi-channel TX streams are not currently supported");
     }
 
     // Soapy's empty channel list convention selects the first logical channel.
     const std::size_t channel = channels.empty() ? 0 : channels.front();
     if (channel >= available_channels)
     {
-        throw std::out_of_range(
-            std::string{direction == StreamDirection::rx ? "RX" : "TX"} +
-            " stream channel " + std::to_string(channel) +
-            " is unavailable; device has " + std::to_string(available_channels) +
-            " channel(s)");
+        throw std::out_of_range(std::string{direction == StreamDirection::rx ? "RX" : "TX"} +
+                                " stream channel " + std::to_string(channel) +
+                                " is unavailable; device has " +
+                                std::to_string(available_channels) + " channel(s)");
     }
 
     StreamFormat parsed_format;
@@ -56,8 +51,8 @@ StreamRequest validateStreamRequest(
     }
     else
     {
-        throw std::invalid_argument(
-            "unsupported stream format '" + format + "'; expected CS16 or CF32");
+        throw std::invalid_argument("unsupported stream format '" + format +
+                                    "'; expected CS16 or CF32");
     }
 
     return {direction, parsed_format, channel};

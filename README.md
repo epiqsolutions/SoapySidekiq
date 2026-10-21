@@ -32,6 +32,10 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Module installs respect `CMAKE_INSTALL_PREFIX`, `cmake --install --prefix`, and
+`DESTDIR` staging, including with SoapySDR 0.4.0/0.4.1's older module helper.
+An explicit module prefix does not install beside the SoapySDR dependency.
+
 The build respects `CXX`, `-DCMAKE_CXX_COMPILER=...`, and CMake toolchain files.
 The module requests C++17 without compiler extensions. For example:
 
@@ -289,6 +293,11 @@ into logged `SOAPY_SDR_STREAM_ERROR` results. Unsupported options still return
 `SOAPY_SDR_NOT_SUPPORTED`. TX activation requires prior deactivation when a
 stream is already active or still owns a PPS startup thread, including a failed
 PPS start. This keeps repeated activation from replacing a joinable thread.
+
+Status-returning stream calls contain exceptions from user-installed diagnostic
+sinks. Logging failures do not turn a successful activation into an error,
+replace an SDK failure code, or hide an already accepted TX sample prefix.
+This diagnostic policy does not suppress backend failures.
 
 SDK stop failures from `deactivateStream()` return `SOAPY_SDR_STREAM_ERROR` and
 retain stream ownership so the caller can retry. TX stops keep new writes
