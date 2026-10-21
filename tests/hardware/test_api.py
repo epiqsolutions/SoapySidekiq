@@ -1,465 +1,204 @@
 #!/usr/bin/env python3
+"""Report Sidekiq API capabilities/readbacks without retuning or starting streams.
 
-import sys
-import time
-import numpy as np
+Device construction still performs the driver's normal hardware initialization.
+An explicitly supplied topology is applied during construction. Sensor values
+are read only with --read-sensors; accelerometer reads enable/disable sampling.
+"""
+
 import argparse
-import SoapySDR
-from SoapySDR import *
-
-DEFAULT_NUM_BLOCKS = 1000
-
-
-def do_identification(sdr, handle):
-    # *** identification API
-    driver_key = sdr.getDriverKey()
-    print(f"\tdriver key: {driver_key}")
-
-    hardware_info = sdr.getHardwareInfo()
-
-    print(f"\t hardware info:")
-    for key, value in hardware_info.items():
-        print(f"\t{key}: {value}")
+import json
+import math
+from pathlib import Path
+import sys
 
 
-def expect_rejected(operation, description):
-    """Check an invalid API request without aborting the hardware diagnostic."""
-    try:
-        operation()
-    except (RuntimeError, ValueError, IndexError) as error:
-        print(f"\tExpected rejection ({description}): {error}")
-    else:
-        raise AssertionError(f"API accepted {description}")
+def range_info(value):
+    """Serialize a SoapySDR Range without assuming a particular card's limits."""
+    result = {name: float(getattr(value, name)()) for name in ("minimum", "maximum", "step")}
+    if not all(math.isfinite(number) for number in result.values()):
+        raise ValueError("range contains a non-finite value")
+    if result["minimum"] > result["maximum"] or result["step"] < 0:
+        raise ValueError("range has inverted bounds or a negative step")
+    return result
 
 
-def do_frontend(sdr, handle):
-    """Exercise DC mode only where advertised and check invalid channels."""
-    for direction in (SOAPY_SDR_RX, SOAPY_SDR_TX):
-        count = sdr.getNumChannels(direction)
-        if handle < count:
-            supported = sdr.hasDCOffsetMode(direction, handle)
-            print(f"\tDC mode support ({direction}, {handle}): {supported}")
-            if supported:
-                original = sdr.getDCOffsetMode(direction, handle)
-                try:
-                    for automatic in (True, False):
-                        sdr.setDCOffsetMode(direction, handle, automatic)
-                        assert sdr.getDCOffsetMode(direction, handle) == automatic
-                finally:
-                    # Restore the visible DC selection. The SDK automatic
-                    # calibration mode is shared, as documented in README.
-                    sdr.setDCOffsetMode(direction, handle, original)
-            else:
-                expect_rejected(
-                    lambda: sdr.setDCOffsetMode(direction, handle, True),
-                    "automatic DC mode on an unsupported channel",
-                )
-                sdr.setDCOffsetMode(direction, handle, False)
-                assert not sdr.getDCOffsetMode(direction, handle)
-        # The channel count is the first invalid logical index for this direction.
-        expect_rejected(lambda: sdr.hasDCOffsetMode(direction, count), "invalid DC capability channel")
-        expect_rejected(lambda: sdr.getDCOffsetMode(direction, count), "invalid DC readback channel")
-        expect_rejected(lambda: sdr.setDCOffsetMode(direction, count, False), "invalid DC mode channel")
+def argument_info(value):
+    """Serialize the metadata shared by sensor and stream argument APIs."""
+    return {name: str(getattr(value, name))
+            for name in ("key", "name", "description", "units", "type")}
 
 
-def do_gain(sdr, handle):
-    gains = sdr.listGains(SOAPY_SDR_RX, handle)
-    print(f"\t list_gains: {gains}")
+def collect_checks(device, directions, channels=None, read_sensors=False):
+    """Collect independent pass/fail/skip records; never call setters or stream APIs.
 
-    #  *** Gain API
-    gain_mode = sdr.hasGainMode(SOAPY_SDR_RX, handle)
-    print(f"\t has gain mode is: {gain_mode}")
+    directions contains (display name, Soapy direction constant) pairs. Selected
+    logical channels must exist in each requested direction; by default each
+    direction checks all its advertised channels independently.
+    """
+    checks = []
 
-    sdr.setGainMode(SOAPY_SDR_RX, handle, True)
-
-    gain_mode = sdr.getGainMode(SOAPY_SDR_RX, handle)
-    print(f"\t gain mode is: {gain_mode}")
-
-    # set the gain to 0 db
-    sdr.setGainMode(SOAPY_SDR_RX, handle, False)
-    sdr.setGain(SOAPY_SDR_RX, handle, 0)
-    
-    # read_rx_gain() is failing on the x4 so remove it for now.
-    gain = sdr.getGain(SOAPY_SDR_RX, handle)
-    print(f"\tgain value is: {gain}");
-
-    # RX gain requests outside the hardware index range clamp to its boundary.
-    sdr.setGain(SOAPY_SDR_RX, handle, 100)
-    # see if its the same as the old gain
-#    gain = sdr.getGain(SOAPY_SDR_RX, handle)
-#    print(f"\tgain value is: {gain}");
-
-    # set to automatic mode then set gain, should get a warning 
-    sdr.setGainMode(SOAPY_SDR_RX, handle, True)
-    sdr.setGain(SOAPY_SDR_RX, handle, 10)
-
-    # set attenuation
-    sdr.setGain(SOAPY_SDR_TX, handle, 10)
-    gain = sdr.getGain(SOAPY_SDR_TX, handle)
-    print(f"\tattenuation value is: {gain}");
-
-    # Invalid TX gain requests raise instead of silently leaving attenuation unchanged.
-    maximum = sdr.getGainRange(SOAPY_SDR_TX, handle).maximum()
-    expect_rejected(lambda: sdr.setGain(SOAPY_SDR_TX, handle, maximum + 0.25),
-                    "TX gain above the advertised range")
-    gain = sdr.getGain(SOAPY_SDR_TX, handle)
-    print(f"\tattenuation value is: {gain}");
-    
-    # get the rx gain range
-    gain_range = sdr.getGainRange(SOAPY_SDR_RX, handle)
-    print(f"\tgain range max {gain_range.maximum()}")
-    print(f"\tgain range min {gain_range.minimum()}")
-    print(f"\tgain range step {gain_range.step()}")
-
-    # get the rx gain range
-    gain_range_name = sdr.getGainRange(SOAPY_SDR_RX, handle, 'LNA')
-    print(f"\tgain range name max {gain_range_name.maximum()}")
-    print(f"\tgain range name min {gain_range_name.minimum()}")
-    print(f"\tgain range name step {gain_range_name.step()}")
-
-    # get the tx attenuation range
-    gain_range = sdr.getGainRange(SOAPY_SDR_TX, handle)
-    print(f"\tattenuation range max {gain_range.maximum()}")
-    print(f"\tattenuation range min {gain_range.minimum()}")
-    print(f"\tattenuation range step {gain_range.step()}")
-
-
-def do_frequency(sdr, handle):
-    #  *** Frequency API
-
-    # get the rx frequency range
-    range_list = sdr.getFrequencyRange(SOAPY_SDR_RX, handle)
-
-    print("rx freq range")
-    for freq_range in range_list:
-        print(f"\tmax {freq_range.maximum()}")
-        print(f"\tmin {freq_range.minimum()}")
-        print(f"\tstep {freq_range.step()}")
-
-    # get the rx frequency range
-    range_list = sdr.getFrequencyRange(SOAPY_SDR_TX, handle)
-
-    print("tx freq range")
-    for freq_range in range_list:
-        print(f"\tmax {freq_range.maximum()}")
-        print(f"\tmin {freq_range.minimum()}")
-        print(f"\tstep {freq_range.step()}")
-
-    # set the frequency then get it
-    sdr.setFrequency(SOAPY_SDR_RX, handle, 1e9)
-    freq = sdr.getFrequency(SOAPY_SDR_RX, handle)
-    print(f"\trx freq: {freq}")
-
-    sdr.setFrequency(SOAPY_SDR_TX, handle, 2e9)
-    freq = sdr.getFrequency(SOAPY_SDR_TX, handle)
-    print(f"\ttx freq: {freq}")
-
-
-    # set an invalid freq, expect error out
-#    sdr.setFrequency(SOAPY_SDR_RX, handle, 50e6)
-    freq = sdr.getFrequency(SOAPY_SDR_RX, handle)
-    print(f"\trx freq: {freq}")
-
-    # set an invalid freq, expect error out
-#    sdr.setFrequency(SOAPY_SDR_TX, handle, 46e6)
-    freq = sdr.getFrequency(SOAPY_SDR_TX, handle)
-    print(f"\trx freq: {freq}")
-
-
-def do_sample_rate_bw(sdr, handle):
-    #  *** Sample Rate API
-    # get the rx sample rate range
-    range_list = sdr.getSampleRateRange(SOAPY_SDR_RX, handle)
-
-    print("rx sample_rate range")
-    for item in range_list:
-        print(f"\tmax {item.maximum()}")
-        print(f"\tmin {item.minimum()}")
-        print(f"\tstep {item.step()}")
-
-    # get the rx frequency range
-    range_list = sdr.getSampleRateRange(SOAPY_SDR_TX, handle)
-
-    print("tx sample_rate range")
-    for item in range_list:
-        print(f"\tmax {item.maximum()}")
-        print(f"\tmin {item.minimum()}")
-        print(f"\tstep {item.step()}")
-
-    # set the sample_rate then get it
-    sdr.setSampleRate(SOAPY_SDR_RX, handle, 20e6)
-    rate = sdr.getSampleRate(SOAPY_SDR_RX, handle)
-    print(f"\trx sample_rate: {rate}")
-
-    sdr.setSampleRate(SOAPY_SDR_TX, handle, 20e6)
-    rate = sdr.getSampleRate(SOAPY_SDR_TX, handle)
-    print(f"\ttx sample_rate: {rate}")
-
-    # set an invalid sample_rate, expect error out
-#    sdr.setSampleRate(SOAPY_SDR_RX, handle, 20000)
-    rate = sdr.getSampleRate(SOAPY_SDR_RX, handle)
-    print(f"\trx sample_rate: {rate}")
-
-    # set an invalid sample_rate, expect error out
-#    sdr.setSampleRate(SOAPY_SDR_TX, handle, 20000)
-    rate = sdr.getSampleRate(SOAPY_SDR_TX, handle)
-    print(f"\ttx sample_rate: {rate}")
-
-    # do bandwidth API
-    # there is no bandwidth range in libsidekiq
-    
-    # set the bw then get it
-    sdr.setBandwidth(SOAPY_SDR_RX, handle, 20e6)
-    rate = sdr.getBandwidth(SOAPY_SDR_RX, handle)
-    print(f"\trx bw: {rate}")
-
-    sdr.setBandwidth(SOAPY_SDR_TX, handle, 20e6)
-    rate = sdr.getBandwidth(SOAPY_SDR_TX, handle)
-    print(f"\ttx bw: {rate}")
-
-    # low BW does not error out
-    sdr.setBandwidth(SOAPY_SDR_RX, handle, 20000)
-    rate = sdr.getBandwidth(SOAPY_SDR_RX, handle)
-    print(f"\trx bw: {rate}")
-
-    # low BW does not error out
-    sdr.setBandwidth(SOAPY_SDR_TX, handle, 20000)
-    rate = sdr.getBandwidth(SOAPY_SDR_TX, handle)
-    print(f"\ttx bw: {rate}")
-
-def do_settings(sdr, handle):
-    #  *** settings API
-    settings_info = sdr.getSettingInfo()
-    print("settings info")
-
-    for arg_info in settings_info:
-        print("")
-        print(f"\tkey: {arg_info.key}")
-        print(f"\tvalue: {arg_info.value}")
-        print(f"\tname: {arg_info.name}")
-        print(f"\tdescription: {arg_info.description}")
-        print(f"\ttype:: {arg_info.type:}")
-
-    for arg_info in settings_info:
-        setting = sdr.readSetting(arg_info.key)
-        print(f"\tkey {arg_info.key}, value {setting}")
-
-    print("write individual settings")
-    sdr.writeSetting("log", "debug")
-    setting = sdr.readSetting("log")
-    print(f"\tlog, value {setting}")
-
-    #set it back to trace to continue tests
-    sdr.writeSetting("log", "trace")
-    setting = sdr.readSetting("log")
-    print(f"\tlog, value {setting}")
-    
-    sdr.writeSetting("iq_swap", "false")
-    setting = sdr.readSetting("iq_swap")
-    print(f"\tiq_swap, value {setting}")
-
-    sdr.writeSetting("counter", "true")
-    setting = sdr.readSetting("counter")
-    print(f"\tcounter, value {setting}")
-
-    sdr.writeSetting("timetype", "sys_timestamp")
-    setting = sdr.readSetting("timetype")
-    print(f"\ttimetype, value {setting}")
-
-def do_time(sdr, handle):
-    #  *** time API
-    print("do_time")
-    time_sources = sdr.listTimeSources()
-
-    print("timesources list:")
-    for source in time_sources:
-        print(f"\t{source}") 
-
-    print("getTimeSource")
-    source = sdr.getTimeSource()
-    print(f"\t{source}") 
-
-    print("setTimeSource")
-    # Might fail if not present
-    for requested_source in ("1pps_source_external", "1pps_source_internal"):
+    def check(name, operation):
         try:
-            sdr.setTimeSource(requested_source)
-            source = sdr.getTimeSource()
-            print(f"\t{source}")
-        except RuntimeError as ex:
-            print(f"\tskipping {requested_source}: {ex}")
+            details = operation()
+        except Exception as error:
+            checks.append({"name": name, "status": "FAIL", "error": str(error)})
+            return None
+        checks.append({"name": name, "status": "PASS", "details": details})
+        return details
 
-    # cannot set source to unavailable
+    def identity():
+        driver, hardware = device.getDriverKey(), device.getHardwareKey()
+        if not driver or not hardware:
+            raise ValueError("driver/hardware key is empty")
+        return {"driver": driver, "hardware": hardware, "info": dict(device.getHardwareInfo())}
 
-    # hardware time
-    print("hasHardwareTime")
-    source = sdr.hasHardwareTime("rx_rf_timestamp")
-    print(f"\trx_rf ts: {source}") 
+    def stream_metadata(direction, channel):
+        formats = list(device.getStreamFormats(direction, channel))
+        native, scale = device.getNativeStreamFormat(direction, channel)
+        scale = float(scale)
+        if native not in formats or not math.isfinite(scale) or scale <= 0:
+            raise ValueError("native format/full scale disagrees with the advertised formats")
+        return {"formats": formats, "native": native, "full_scale": scale,
+                "arguments": [argument_info(arg)
+                              for arg in device.getStreamArgsInfo(direction, channel)]}
 
-    source = sdr.hasHardwareTime("tx_rf_timestamp")
-    print(f"\ttx_rf ts: {source}") 
+    def rf_metadata(direction, channel):
+        # Record capabilities; do not assume a continuous or exact profile list.
+        return {
+            "antennas": list(device.listAntennas(direction, channel)),
+            "gain_names": list(device.listGains(direction, channel)),
+            "gain_range": range_info(device.getGainRange(direction, channel)),
+            "automatic_gain": bool(device.hasGainMode(direction, channel)),
+            "frequency_ranges": [range_info(value)
+                                 for value in device.getFrequencyRange(direction, channel)],
+            "sample_rate_ranges": [range_info(value)
+                                   for value in device.getSampleRateRange(direction, channel)],
+        }
 
-    source = sdr.hasHardwareTime("sys_timestamp")
-    print(f"\tsys ts: {source}")
+    def rf_readback(direction, channel):
+        values = {"frequency": float(device.getFrequency(direction, channel)),
+                  "sample_rate": float(device.getSampleRate(direction, channel)),
+                  "bandwidth": float(device.getBandwidth(direction, channel))}
+        if not all(math.isfinite(value) and value >= 0 for value in values.values()):
+            raise ValueError("RF readback contains a negative or non-finite value")
+        if values["sample_rate"] == 0 or values["bandwidth"] == 0:
+            raise ValueError("actual sample rate/bandwidth is zero")
+        return values
 
-    source = sdr.hasHardwareTime()
-    print(f"\t{source}") 
+    check("identification", identity)
+    for name, direction in directions:
+        def channel_count():
+            count = device.getNumChannels(direction)
+            if count < 0:
+                raise ValueError("negative channel count")
+            return int(count)
 
-    print("getHardwareTime")
-    source = sdr.getHardwareTime("rx_rf_timestamp")
-    print(f"\trx_rf ts: {source:,}") 
+        count = check(f"{name} channel count", channel_count)
+        if count is None:
+            continue
+        if count == 0 and channels is None:
+            checks.append({"name": f"{name} channels", "status": "SKIP",
+                           "reason": "direction advertises no channels"})
+        selected = range(count) if channels is None else channels
+        for channel in selected:
+            prefix = f"{name} channel {channel}"
+            if channel < 0 or channel >= count:
+                checks.append({"name": prefix, "status": "FAIL",
+                               "error": f"requested channel is outside [0, {count})"})
+                continue
+            check(f"{prefix} stream metadata", lambda: stream_metadata(direction, channel))
+            check(f"{prefix} RF metadata", lambda: rf_metadata(direction, channel))
+            check(f"{prefix} RF readback", lambda: rf_readback(direction, channel))
 
-    source = sdr.getHardwareTime("tx_rf_timestamp")
-    print(f"\ttx_rf ts: {source:,}") 
+    sensors = check("sensor enumeration", lambda: list(device.listSensors()))
+    if sensors is not None:
+        for key in sensors:
+            def sensor_metadata():
+                info = argument_info(device.getSensorInfo(key))
+                if info["key"] != key:
+                    raise ValueError("sensor metadata key differs from the advertised key")
+                return info
+            check(f"sensor {key} metadata", sensor_metadata)
+            if read_sensors:
+                check(f"sensor {key} readback", lambda: str(device.readSensor(key)))
 
-    source = sdr.getHardwareTime("sys_timestamp")
-    print(f"\tsys ts: {source:,}") 
-
-    sdr.setHardwareTime(0, "now")
-    print("getHardwareTime")
-    source = sdr.getHardwareTime("rx_rf_timestamp")
-    print(f"\trx_rf ts: {source:,}") 
-
-    source = sdr.getHardwareTime("tx_rf_timestamp")
-    print(f"\ttx_rf ts: {source:,}") 
-
-    source = sdr.getHardwareTime("sys_timestamp")
-    print(f"\tsys ts: {source:,}") 
-
-    sdr.setHardwareTime(1000000000, "now")
-    sdr.setHardwareTime(1000000000, "1pps")
-
-
-
-def do_clocking(sdr, handle):
-    #  *** clocking API
-    print("do_clocking")
-    clock_sources = sdr.listClockSources()
-
-    print("clocksources list:")
-    for source in clock_sources:
-        print(f"\t{source}") 
-
-    source = sdr.getClockSource()
-    print(f"\t{source}") 
-
-def do_sensors(sdr, handle):
-
-    sensors_list = sdr.listSensors()
-
-    for source in sensors_list:
-        print(f"\t{source}") 
-        sdr.readSensor(source)
-
-
-def main(cardno, serial, topology, handle, rate, bw, freq, gain, num_blocks, file_name):
-    if serial is None:
-        args = dict(driver="sidekiq", card=cardno)
-    else:
-        args = dict(driver="sidekiq", serial=serial)
-
-    if topology:
-        args['topology'] = topology
-
-    SoapySDR.setLogLevel(SOAPY_SDR_TRACE)
-    sdr = SoapySDR.Device(args)
-
-
-    # *** identification API
-    do_identification(sdr, handle)
-
-    # **** Channels API
-    num_rx_channels = sdr.getNumChannels(SOAPY_SDR_RX)
-
-    print(f"\tnum rx channels: {num_rx_channels}")
-
-    num_tx_channels = sdr.getNumChannels(SOAPY_SDR_TX)
-
-    print(f"\tnum tx channels: {num_tx_channels}")
-
-    user_input = input("Press any key to continue")
-    #  *** Sample Rate API
-    do_sample_rate_bw(sdr, handle)
-    user_input = input("Press any key to continue")
-   
-    #  *** Frequency API
-    do_frequency(sdr, handle)
-    user_input = input("Press any key to continue")
-
-    
-    antennas = sdr.listAntennas(SOAPY_SDR_RX, handle)
-    print(f"Antennas: {antennas})")
-
-    antennas = sdr.listAntennas(SOAPY_SDR_TX, handle)
-    print(f"Antennas: {antennas})")
-
-    #  *** Gain API
-    do_gain(sdr, handle)
-    user_input = input("Press any key to continue")
-
-    #  *** Frontend Corrections API
-    do_frontend(sdr, handle)
-
-    user_input = input("Press any key to continue")
-    #  *** settings API
-    do_settings(sdr, handle)
-
-    user_input = input("Press any key to continue")
-    #  *** time API
-    do_time(sdr, handle)
-
-    user_input = input("Press any key to continue")
-    #  *** time API
-    do_clocking(sdr, handle)
-
-    user_input = input("Press any key to continue")
-    do_sensors(sdr, handle)
+    # Enumeration does not require a reference signal or an observed PPS edge.
+    check("clock sources", lambda: list(device.listClockSources()))
+    check("time sources", lambda: list(device.listTimeSources()))
+    summary = {status.lower(): sum(item["status"] == status for item in checks)
+               for status in ("PASS", "FAIL", "SKIP")}
+    return {"checks": checks, "summary": summary}
 
 
-
-def parse_command_line_arguments():
-    """ Create command line options for transmit function """
-    help_formatter = argparse.ArgumentDefaultsHelpFormatter
-    parser = argparse.ArgumentParser(description='tx app template',
-                                     formatter_class=help_formatter)
-
-    parser.add_argument('-c', required=False, dest='card',
-                        default="0", help='Card number') 
-    parser.add_argument('--serial', required=False, dest='serial',
-                        default=None, help='Serial number') 
-    parser.add_argument('--topology', required=False, dest='topology',
-                        default=None, help='Topology ID')
-    parser.add_argument('--handle', type=int, required=False, dest='handle',
-                        default=0, help='Handle [0 or 1]')
-    parser.add_argument('-r', type=float, required=False, dest='rate',
-                        default=40e6, help='Sample Rate')
-    parser.add_argument('-bw', type=float, required=False, dest='bw',
-                        default=None, help='Bandwidth')
-    parser.add_argument('-f', type=float, required=False, dest='freq',
-                        default=1000e6, help='LO Frequency')
-    parser.add_argument('-g', type=int, required=False, dest='gain',
-                        default=None, help='RX gain, otherwise automatic')
-    parser.add_argument('-s', type=int, required=False, dest='num_blocks',
-                        default=DEFAULT_NUM_BLOCKS, help='Number of blocks to collect')
-    parser.add_argument('-d', type=str, required=False, dest='dest',
-                        default='samples.bin', help='File name where samples are written')
-
-    
-    return parser.parse_args(sys.argv[1:])
+def bounded_integer(low, high):
+    """Build an argparse converter for a hardware identifier or logical channel."""
+    def convert(text):
+        try:
+            value = int(text)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError("expected an integer") from error
+        if not low <= value <= high:
+            raise argparse.ArgumentTypeError(f"must be in [{low}, {high}]")
+        return value
+    return convert
 
 
-if __name__ == '__main__':
-    pars = parse_command_line_arguments()
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    selector = parser.add_mutually_exclusive_group(required=True)
+    selector.add_argument("-c", "--cardno", type=bounded_integer(0, 255), help="SDK card index")
+    selector.add_argument("--serial", help="exact hardware serial")
+    parser.add_argument("--topology", type=bounded_integer(0, 255),
+                        help="explicit SDK topology applied when constructing the device")
+    parser.add_argument("--direction", choices=("rx", "tx", "both"), default="both")
+    parser.add_argument("--channel", "--handle", action="append", type=bounded_integer(0, 255),
+                        help="logical channel to check (repeatable); default: all advertised channels")
+    parser.add_argument("--read-sensors", action="store_true",
+                        help="also read values; accelerometer reads enable/disable its sampling")
+    parser.add_argument("--json", type=Path, help="write a machine-readable result file")
+    args = parser.parse_args(argv)
+    if args.serial is not None and not args.serial.strip():
+        parser.error("serial must not be empty")
+    return args
 
-    make_float = False
 
-    main(pars.card, 
-        pars.serial, 
-        pars.topology,
-        pars.handle, 
-        pars.rate, 
-        pars.bw, 
-        pars.freq, 
-        pars.gain,
-        pars.num_blocks,
-        pars.dest) 
+def main(argv=None):
+    args = parse_args(argv)
+    device_args = {"driver": "sidekiq"}
+    device_args["serial" if args.serial is not None else "card"] = (
+        args.serial if args.serial is not None else str(args.cardno))
+    if args.topology is not None:
+        device_args["topology"] = str(args.topology)
+    stage = "device construction"
+    try:
+        # Keep --help usable on hosts without the Python SoapySDR bindings.
+        import SoapySDR
+        device = SoapySDR.Device(device_args)
+        stage = "API diagnostic"
+        directions = []
+        if args.direction in ("rx", "both"):
+            directions.append(("RX", SoapySDR.SOAPY_SDR_RX))
+        if args.direction in ("tx", "both"):
+            directions.append(("TX", SoapySDR.SOAPY_SDR_TX))
+        report = collect_checks(device, directions, args.channel, args.read_sensors)
+    except Exception as error:
+        report = {"checks": [{"name": stage, "status": "FAIL", "error": str(error)}],
+                  "summary": {"pass": 0, "fail": 1, "skip": 0}}
+    report["device_args"] = device_args
+    for item in report["checks"]:
+        detail = item.get("error", item.get("reason", ""))
+        print(f"[{item['status']}] {item['name']}" + (f": {detail}" if detail else ""))
+    summary = report["summary"]
+    print(f"{summary['pass']} passed, {summary['fail']} failed, {summary['skip']} skipped")
+    if args.json is not None:
+        try:
+            args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        except OSError as error:
+            print(f"Cannot write report {args.json}: {error}", file=sys.stderr)
+            return 1
+    return int(summary["fail"] != 0)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
