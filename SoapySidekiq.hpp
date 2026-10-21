@@ -375,7 +375,8 @@ class SoapySidekiq : public SoapySDR::Device
 
     // tx thread
     std::thread _tx_streaming_thread;
-    void tx_streaming_start(skiq_tx_hdl_t tx_handle);
+    /** Publish asynchronous startup completion before exception-contained diagnostics. */
+    void tx_streaming_start(skiq_tx_hdl_t tx_handle) noexcept;
 
     // tx callback method
     void tx_complete(int32_t status, skiq_tx_block_t *p_data, uint32_t txIndex);
