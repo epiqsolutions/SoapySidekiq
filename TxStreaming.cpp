@@ -108,20 +108,17 @@ void SoapySidekiq::shutdownTx() noexcept
     tx_blocks.reset();
 }
 
-void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
+void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle) noexcept
 {
-    SoapySDR_log(SOAPY_SDR_TRACE, "entering tx_streaming_start");
-    const int status = skiq_start_tx_streaming_on_1pps(card, tx_handle, 0);
-    if (status != 0)
+    int status = SOAPY_SDR_STREAM_ERROR;
+    try
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR,
-                      "skiq_start_tx_streaming_on_1pps failed, (card %u) status %d", card, status);
+        status = skiq_start_tx_streaming_on_1pps(card, tx_handle, 0);
     }
-    else
+    catch (...)
     {
-        SoapySDR_logf(SOAPY_SDR_INFO, "TX start streaming on 1pps completed");
+        // Treat an unexpected backend exception like a failed asynchronous start.
     }
-
     {
         std::scoped_lock lock(tx_mutex, tx_status_mutex);
         if (status == 0)
@@ -130,6 +127,21 @@ void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
         tx_start_finished = true;
     }
     tx_cv.notify_all();
+
+    // Publish and wake waiters before invoking a user-installed diagnostic sink.
+    try
+    {
+        if (status != 0)
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                          "skiq_start_tx_streaming_on_1pps failed (card %u, handle %u), status %d",
+                          card, tx_handle, status);
+        else
+            SoapySDR_logf(SOAPY_SDR_INFO, "TX start streaming on 1pps completed");
+    }
+    catch (...)
+    {
+        // Retrying a failed sink could recurse or throw again.
+    }
 }
 
 void SoapySidekiq::initializeTxBuffers()

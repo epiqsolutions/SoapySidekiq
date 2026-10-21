@@ -123,3 +123,10 @@ results and analysis output as artifacts. NumPy and clang-format are installed
 so the Python tooling regressions run as well. TSan, the full SDK build, and
 [hardware validation](tests/hardware/README.md) remain separate checks; rerun
 the relevant hardware cases when production behavior changes.
+
+## Legacy implementation proposals
+
+The [legacy prototype evaluation](docs/LEGACY_PROTOTYPES.md) compares the old
+channel mapper and asynchronous TX pool/writer with the production contracts.
+Consult its ownership requirements before adapting those prototypes, especially
+for callback-visible state, partial writes, and stream shutdown.

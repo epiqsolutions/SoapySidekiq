@@ -11,8 +11,8 @@ or configuration such as an external PPS source or an RF loopback path.
 
 The bounded validation programs return a nonzero exit status on a failed
 assertion and close streams on exit. Run them one at a time against a card with
-a supported sample rate. The interactive `test_api.py` program is still a
-legacy diagnostic pending comparison with the non-hardware API test suite.
+a supported sample rate. The `test_api.py` diagnostic checks capabilities and
+passive readbacks without starting streams or requiring RF equipment.
 
 ## Card and setup limits
 
@@ -29,8 +29,8 @@ short startup timeout. Those defaults do not fit every card. For example,
 NV100 uses a 1.92 MS/s nominal SDK profile, 32767 CS16 host full scale, and
 can take more than 6 seconds to initialize. Supply the relevant arguments
 explicitly and check the card's capabilities before treating a result as a
-driver assertion. `test_api.py` also contains fixed settings and is a manual
-diagnostic, not a model-independent pass/fail test.
+driver assertion. `test_api.py` is a noninteractive capability/readback
+diagnostic described below; it does not apply those fixed RF settings.
 
 Current programs:
 
@@ -49,7 +49,8 @@ Current programs:
   immediate cleanup after timed activation, and stream reuse. Its first timed
   TX write retries per-call timeouts for up to five seconds while PPS startup
   is pending.
-- `test_api.py` interactively exercises device-control APIs.
+- `test_api.py` reports API capabilities and passive RF readbacks with explicit
+  device selection, pass/fail/skip results, and an optional JSON report.
 
 The full-duplex detector searches actual spectral peaks within the larger of
 20 kHz or two FFT bins of the expected peer frequency. It requires the peak
@@ -60,6 +61,44 @@ strongest tone in that capture, rejecting weak spurs from unrelated tones.
 record any change with the run. This is a relative detection threshold, not
 an absolute RF power measurement. Synthetic regressions cover the wrong-tone
 quantization-spur failure and a weaker real peer alongside local leakage.
+
+## Automated API diagnostic
+
+Run without an RF generator, analyzer, or PPS source:
+
+```sh
+python3 tests/hardware/test_api.py --serial 47479 --json api-result.json
+python3 tests/hardware/test_api.py -c 0 --direction rx --channel 1 --json rx1-api.json
+```
+
+Choose exactly one card index (`-c`/`--cardno`) or `--serial`. By default, the
+diagnostic checks every advertised RX and TX channel. `--channel` (also accepted
+as `--handle`) is a repeatable **logical** channel index; an explicitly selected
+channel must exist in each selected direction. A direction with no channels is
+reported as skipped when checking the default channel set.
+
+The checks cover identification, stream format/full-scale metadata, RF ranges,
+current frequency/rate/bandwidth readbacks, sensor metadata, and clock/time-source
+enumeration. Failures are collected while other checks continue, and the exit
+status is nonzero if any check fails. `--json` records details and errors even
+when device construction fails. `--help` works without the SoapySDR bindings.
+
+This replaces the old interactive script and its fixed write settings. It does
+not prompt, call RF setters, or create/activate streams. Device construction
+still performs normal driver/SDK initialization. If `--topology ID` is supplied,
+that explicit topology is applied while constructing the device. The old
+`-r`, `-bw`, `-f`, `-g`, `-s`, and `-d` options for fixed write/capture settings
+are removed; use the dedicated streaming validators for those operations.
+
+Sensor values are read only with `--read-sensors`; accelerometer reads can
+enable/disable sampling. The driver's legacy `0`/`{}` sensor fallbacks are
+recorded as returned values and do not establish successful or calibrated
+physical measurements. Without that option only sensor metadata is queried.
+
+A successful API report establishes neither RF accuracy nor streaming/PPS
+behavior. Use the counter, partial-read, PPS, and paired-RF tests below for those
+checks and retain the report with the card/SDK/build evidence. The new diagnostic
+has software coverage using a fake device; a physical run remains required.
 
 ## Known integration limits
 

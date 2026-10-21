@@ -465,7 +465,7 @@ void SoapySidekiq::setFrequency(const int direction, const size_t channel, const
     else
     {
         SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
+        throw std::invalid_argument("setFrequency: invalid direction " + std::to_string(direction));
     }
 }
 
@@ -517,7 +517,7 @@ double SoapySidekiq::getFrequency(const int direction, const size_t channel) con
     else
     {
         SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
+        throw std::invalid_argument("getFrequency: invalid direction " + std::to_string(direction));
     }
 
     return 0;
@@ -567,7 +567,8 @@ SoapySDR::RangeList SoapySidekiq::getFrequencyRange(const int direction, const s
     else
     {
         SoapySDR_logf(SOAPY_SDR_ERROR, "invalid direction %d", direction);
-        throw std::runtime_error("");
+        throw std::invalid_argument("getFrequencyRange: invalid direction " +
+                                    std::to_string(direction));
     }
 
     return results;
@@ -583,10 +584,14 @@ void SoapySidekiq::setSampleRate(const int direction, const size_t channel, cons
     const auto requested = soapy_sidekiq::checkedUnsigned<uint32_t>(rate, "setSampleRate");
     if (requested == 0)
         throw std::invalid_argument("setSampleRate requires at least one sample per second");
-    const auto previous = readRateAndBandwidth(direction, channel);
-    // Preserve the current hardware bandwidth, clamped to the new sample rate.
-    applyRateAndBandwidth(direction, channel, requested,
-                          std::min(previous.actual_bandwidth, requested));
+    configureWhileRxInactive(
+        [&]
+        {
+            const auto previous = readRateAndBandwidth(direction, channel);
+            // TX/RX clocks may be coupled; protect the active RX timing snapshot.
+            applyRateAndBandwidth(direction, channel, requested,
+                                  std::min(previous.actual_bandwidth, requested));
+        });
 }
 
 double SoapySidekiq::getSampleRate(const int direction, const size_t channel) const
@@ -694,10 +699,13 @@ void SoapySidekiq::setBandwidth(const int direction, const size_t channel, const
 {
     validateChannel(direction, channel);
     const auto requested = soapy_sidekiq::checkedUnsigned<uint32_t>(bw, "setBandwidth");
-    // Read the hardware rate: RX/TX clocks can be coupled and a cached rate
-    // may have become stale after a change on another handle/direction.
-    const auto previous = readRateAndBandwidth(direction, channel);
-    applyRateAndBandwidth(direction, channel, previous.configured_rate, requested);
+    configureWhileRxInactive(
+        [&]
+        {
+            // Read the hardware rate while the same lock excludes RX activation.
+            const auto previous = readRateAndBandwidth(direction, channel);
+            applyRateAndBandwidth(direction, channel, previous.configured_rate, requested);
+        });
 }
 
 /***********************************************************
