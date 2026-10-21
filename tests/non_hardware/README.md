@@ -185,3 +185,14 @@ timestamp just below int64 nanosecond overflow. It consumes one sample, then
 checks that the next partial timestamp produces a stream error with cleared
 metadata and untouched output, even when diagnostics throw. CS16 and CF32 both
 recover after deactivation and reactivation with a representable epoch.
+
+Combined PPS lifecycle coverage runs the real TX startup worker alongside the
+RX activation method and real RX session/queue. A scripted SDK holds TX startup,
+then serializes RX PPS startup behind TX publication and a separate test edge.
+Cases verify publication makes progress while RX waits, mapped handles and RX
+samples/timestamps remain correct, failed RX startup can recover immediately,
+and RX stop/close leaves TX ownership intact until its own stop. Both RX stop
+modes are exercised. This fixture starts the production TX worker directly;
+TX activation-created-worker coverage remains in the TX fixture. Simulated
+edges/serialization do not establish real card timing or absent-edge SDK
+cancellation, and the edge waits are released before test state is destroyed.

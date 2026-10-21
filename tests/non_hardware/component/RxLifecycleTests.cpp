@@ -10,6 +10,7 @@
 #include <SoapySidekiq/TxBlockPool.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -53,7 +54,8 @@ struct FakeSdk
     bool streaming{};
     int stop_status{}, start_status{};
     unsigned starts{}, stops{};
-    bool stop_on_pps{}, provide_packet{}, delivered{};
+    bool stop_on_pps{}, start_on_pps{}, provide_packet{}, delivered{};
+    unsigned tx_starts{}, tx_stops{}, tx_handle{};
     double actual_rate{20000000};
     std::uint64_t system_frequency{1000000}, rf_timestamp{1}, system_timestamp{1};
     unsigned rate_reads{}, frequency_reads{};
@@ -62,6 +64,7 @@ struct FakeSdk
     bool omit_rate{};
     int rate_status{}, frequency_status{};
 } sdk;
+std::function<void()> tx_pps_start_hook, rx_pps_start_hook;
 }
 
 int skiq_read_rx_sample_rate_and_bandwidth(std::uint8_t, skiq_rx_hdl_t handle,
@@ -86,6 +89,7 @@ int skiq_read_sys_timestamp_freq(std::uint8_t, std::uint64_t *frequency)
 }
 int skiq_start_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
 {
+    sdk.start_on_pps = false;
     if (sdk.start_status != 0)
         return sdk.start_status;
     if (sdk.streaming) return -EBUSY;
@@ -103,15 +107,36 @@ int skiq_stop_rx_streaming(std::uint8_t, skiq_rx_hdl_t)
     return 0;
 }
 int skiq_start_rx_streaming_on_1pps(std::uint8_t card, skiq_rx_hdl_t handle, int)
-{ return skiq_start_rx_streaming(card, handle); }
+{
+    if (rx_pps_start_hook)
+        rx_pps_start_hook();
+    const int status = skiq_start_rx_streaming(card, handle);
+    sdk.start_on_pps = true;
+    return status;
+}
 int skiq_stop_rx_streaming_on_1pps(std::uint8_t card, skiq_rx_hdl_t handle, int)
 {
     const int status = skiq_stop_rx_streaming(card, handle);
     sdk.stop_on_pps = true;
     return status;
 }
-int skiq_stop_tx_streaming(std::uint8_t, skiq_tx_hdl_t) { return 0; }
-int skiq_stop_tx_streaming_on_1pps(std::uint8_t, skiq_tx_hdl_t, int) { return 0; }
+int skiq_start_tx_streaming_on_1pps(std::uint8_t, skiq_tx_hdl_t handle, int)
+{
+    ++sdk.tx_starts;
+    sdk.tx_handle = handle;
+    if (tx_pps_start_hook)
+        tx_pps_start_hook();
+    return 0;
+}
+int skiq_stop_tx_streaming(std::uint8_t, skiq_tx_hdl_t)
+{
+    ++sdk.tx_stops;
+    return 0;
+}
+int skiq_stop_tx_streaming_on_1pps(std::uint8_t card, skiq_tx_hdl_t handle, int)
+{
+    return skiq_stop_tx_streaming(card, handle);
+}
 
 /** Route the real session to the same fake hardware used by the device fixture. */
 class FixtureBackend final : public soapy_sidekiq::RxStreamBackend
@@ -150,6 +175,9 @@ public:
     };
     std::uint8_t card{};
     bool tx_start_finished{}, tx_stream_active{}, rfTimeSource{true};
+    int tx_start_status{};
+    std::uint32_t tx_underruns{};
+    std::timed_mutex tx_status_mutex;
     std::mutex tx_mutex;
     std::shared_ptr<soapy_sidekiq::TxCompletionState<>> tx_completion{
         std::make_shared<soapy_sidekiq::TxCompletionState<>>(3)};
@@ -158,6 +186,7 @@ public:
     std::size_t active_tx_writers{}, active_tx_status_readers{};
     void stopTxWrites();
     int stopTxStream(bool);
+    void tx_streaming_start(skiq_tx_hdl_t) noexcept;
     std::uint32_t rx_payload_size_in_words{2}, current_tx_block_size{252};
     bool rxUseShort{true};
     double maxValue{2048};
@@ -210,6 +239,7 @@ public:
 // Production close/deactivate and RX activation, using the real session worker.
 #include "RxLifecycleMethods.inc"
 #include "TxStopWritesMethod.inc"
+#include "TxStartMethod.inc"
 
 TEST_CASE("closing a failed RX worker stops hardware and permits reactivation")
 {
@@ -600,4 +630,117 @@ TEST_CASE("device configuration guard honors retained RX hardware after worker a
     device.configureWhileRxInactive([&] { changed = true; });
     REQUIRE(changed);
     device.closeStream(stream);
+}
+
+TEST_CASE("RX PPS activation and failure recovery preserve a concurrently started TX stream")
+{
+    using namespace std::chrono_literals;
+    for (const bool fail_rx_start : {false, true})
+        for (const int stop_flags : {0, SOAPY_SDR_HAS_TIME})
+        {
+            SoapySidekiq device;
+            auto *rx_stream = device.setupRx();
+            device.active_rx_stream->rx_handle = 7;
+            device.active_rx_stream->channel = 1;
+            device.active_tx_stream = std::make_unique<SoapySidekiq::StreamHandle>();
+            device.active_tx_stream->direction = SOAPY_SDR_TX;
+            device.active_tx_stream->tx_handle = 6;
+            auto *const tx_owner = device.active_tx_stream.get();
+            device.tx_stream_active = true;
+            device.tx_underruns = 99;
+            sdk.provide_packet = true;
+            sdk.start_status = fail_rx_start ? -EIO : 0;
+            std::promise<void> tx_entered, rx_entered, release_tx, release_rx, tx_completed,
+                rx_waiting_for_edge;
+            const auto tx_edge = release_tx.get_future().share();
+            const auto rx_edge = release_rx.get_future().share();
+            const auto tx_done = tx_completed.get_future().share();
+            bool tx_released = false, rx_released = false;
+            std::future<int> activation;
+            soapy_sidekiq::ScopeExit cleanup(
+                [&]() noexcept
+                {
+                    if (!tx_released)
+                        release_tx.set_value();
+                    if (!rx_released)
+                        release_rx.set_value();
+                    if (activation.valid())
+                        activation.wait();
+                    if (device._tx_streaming_thread.joinable())
+                        device._tx_streaming_thread.join();
+                    tx_pps_start_hook = {};
+                    rx_pps_start_hook = {};
+                });
+            tx_pps_start_hook = [&]
+            {
+                tx_entered.set_value();
+                tx_edge.wait();
+            };
+            rx_pps_start_hook = [&]
+            {
+                rx_entered.set_value();
+                // Model an SDK serializing the RX PPS operation behind TX.
+                // Bound this wait so a lock-order regression can unwind cleanly.
+                if (tx_done.wait_for(2s) != std::future_status::ready)
+                    throw std::runtime_error("TX worker could not publish while RX startup waited");
+                rx_waiting_for_edge.set_value();
+                rx_edge.wait();
+            };
+            device._tx_streaming_thread = std::thread(
+                [&]
+                {
+                    device.tx_streaming_start(6);
+                    tx_completed.set_value();
+                });
+            REQUIRE(tx_entered.get_future().wait_for(2s) == std::future_status::ready);
+            activation =
+                std::async(std::launch::async, [&]
+                           { return device.activateStream(rx_stream, SOAPY_SDR_HAS_TIME, 0, 0); });
+            REQUIRE(rx_entered.get_future().wait_for(2s) == std::future_status::ready);
+            REQUIRE(activation.wait_for(0ms) == std::future_status::timeout);
+            release_tx.set_value();
+            tx_released = true;
+            REQUIRE(rx_waiting_for_edge.get_future().wait_for(2s) == std::future_status::ready);
+            device._tx_streaming_thread.join();
+            REQUIRE(device.tx_start_finished);
+            REQUIRE_EQ(device.tx_start_status, 0);
+            REQUIRE_EQ(device.tx_underruns, 0u);
+            REQUIRE_EQ(sdk.tx_starts, 1u);
+            REQUIRE_EQ(sdk.tx_handle, 6u);
+            REQUIRE(activation.wait_for(0ms) == std::future_status::timeout);
+            release_rx.set_value();
+            rx_released = true;
+            REQUIRE_EQ(activation.get(), fail_rx_start ? SOAPY_SDR_STREAM_ERROR : 0);
+            REQUIRE(sdk.start_on_pps);
+            REQUIRE(device.tx_stream_active);
+            REQUIRE(device.active_tx_stream.get() == tx_owner);
+            REQUIRE_EQ(sdk.tx_stops, 0u);
+            if (fail_rx_start)
+            {
+                REQUIRE(!sdk.streaming);
+                sdk.start_status = 0;
+                REQUIRE_EQ(device.activateStream(rx_stream, 0, 0, 0), 0);
+                REQUIRE(!sdk.start_on_pps);
+            }
+            std::int16_t output[2]{};
+            void *buffers[]{output};
+            int flags = 0;
+            long long timestamp = 0;
+            REQUIRE_EQ(device.readStream(rx_stream, buffers, 1, flags, timestamp, 1000000), 1);
+            REQUIRE_EQ(output[0], 1);
+            REQUIRE_EQ(output[1], 2);
+            REQUIRE_EQ(timestamp, 50LL);
+            REQUIRE_EQ(flags, SOAPY_SDR_HAS_TIME);
+            REQUIRE_EQ(sdk.rate_handle, 7u);
+            REQUIRE_EQ(device.deactivateStream(rx_stream, stop_flags, 0), 0);
+            REQUIRE_EQ(sdk.stop_on_pps, stop_flags == SOAPY_SDR_HAS_TIME);
+            device.closeStream(rx_stream);
+            REQUIRE(device.active_rx_stream == nullptr);
+            REQUIRE(device.tx_stream_active);
+            REQUIRE(device.active_tx_stream.get() == tx_owner);
+            REQUIRE_EQ(sdk.tx_stops, 0u);
+            REQUIRE_EQ(device.stopTxStream(false), 0);
+            REQUIRE(!device.tx_stream_active);
+            REQUIRE_EQ(sdk.tx_stops, 1u);
+        }
 }
