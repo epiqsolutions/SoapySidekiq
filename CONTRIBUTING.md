@@ -113,6 +113,35 @@ when available. Use `reportDiagnostic` only around synchronous diagnostics in a
 status-returning path; backend operations and their errors must stay outside it.
 A failing user log sink must not replace the operation's result or accepted prefix.
 
+## Local artifacts and JSON source files
+
+Keep build outputs under `build/` and captured logs/JSON results under `logs/`.
+Those directories are ignored, while `logs/README.md` remains tracked. The root
+`compile_commands.json` and `CMakeUserPresets.json` are machine-specific and
+ignored; the shared `CMakePresets.json` is source-controlled.
+
+JSON source fixtures and configuration files are visible to Git. Do not add a
+blanket extension ignore for them; put generated results in the artifact
+directories instead.
+
+## API documentation
+
+Generate the production API and reusable-component reference from the repository
+root with Doxygen 1.9.1 or later:
+
+```sh
+mkdir -p build/api-docs
+doxygen docs/Doxyfile
+```
+
+Open `build/api-docs/html/index.html`; diagnostics are written to
+`build/api-docs/warnings.log`. The configuration treats undocumented public
+members and invalid documentation commands as errors. It excludes private
+members and static file-local helpers. Generated files stay under the ignored
+build directory; SDK/SoapySDR development headers are not required for this
+documentation-only command. Update the declaration's contract when changing
+behavior instead of copying the same prose into its implementation.
+
 ## Tests and CI
 
 Run the [non-hardware suite](tests/non_hardware/README.md) before pushing:

@@ -26,6 +26,7 @@ constexpr char SOURCE_1PPS_EXTERNAL[] = "1pps_source_external";
 constexpr char SOURCE_1PPS_INTERNAL[] = "1pps_source_internal";
 } // namespace
 
+/** Try kernel PPS source readback; return false when unavailable or unrecognized. */
 bool readKernel1PpsSource(skiq_1pps_source_t &source)
 {
     std::ifstream input(KERNEL_1PPS_SOURCE_PATH);
@@ -83,6 +84,7 @@ bool readKernel1PpsSource(skiq_1pps_source_t &source)
     return false;
 }
 
+/** Write and flush a supported kernel PPS source; return false on unavailable/rejected IO. */
 bool writeKernel1PpsSource(const skiq_1pps_source_t source)
 {
     const char *value = nullptr;
@@ -218,28 +220,33 @@ void SoapySidekiq::setTimeSource(const std::string &source)
         throw std::invalid_argument("Unknown time source: " + source);
     }
 
-    status = skiq_write_1pps_source(card, pps_source);
-    if (status != 0)
-    {
-        if (writeKernel1PpsSource(pps_source))
+    configureWhileRxInactive(
+        [&]
         {
-            SoapySDR_logf(SOAPY_SDR_INFO,
-                          "using kernel 1pps source write fallback value %d for card %u",
-                          pps_source, card);
-        }
-        else
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_write_1pps_source %d failed, (card %u), status %d",
-                          pps_source, card, status);
-            throw std::runtime_error(
-                "skiq_write_1pps_source failed and kernel fallback unavailable: " +
-                std::to_string(status));
-        }
-    }
+            status = skiq_write_1pps_source(card, pps_source);
+            if (status != 0)
+            {
+                if (writeKernel1PpsSource(pps_source))
+                {
+                    SoapySDR_logf(SOAPY_SDR_INFO,
+                                  "using kernel 1pps source write fallback value %d for card %u",
+                                  pps_source, card);
+                }
+                else
+                {
+                    SoapySDR_logf(SOAPY_SDR_ERROR,
+                                  "skiq_write_1pps_source %d failed, (card %u), status %d",
+                                  pps_source, card, status);
+                    throw std::runtime_error(
+                        "skiq_write_1pps_source failed and kernel fallback unavailable: " +
+                        std::to_string(status));
+                }
+            }
 
-    SoapySDR_logf(SOAPY_SDR_INFO, "1pps source set to %s", source.c_str());
+            SoapySDR_logf(SOAPY_SDR_INFO, "1pps source set to %s", source.c_str());
 
-    check_1pps(card, pps_source);
+            check_1pps(card, pps_source);
+        });
 
     return;
 }
@@ -309,20 +316,24 @@ void SoapySidekiq::setHardwareTime(const long long timeNs, const std::string &wh
         throw std::invalid_argument("Unknown hardware-time update: " + what);
     if (timeNs < 0)
         throw std::invalid_argument("Hardware time cannot be negative");
-    uint64_t frequency = 0;
-    const int read_status = skiq_read_sys_timestamp_freq(card, &frequency);
-    if (read_status != 0)
-        throw std::runtime_error("skiq_read_sys_timestamp_freq failed: " +
-                                 std::to_string(read_status));
-    const auto timestamp = soapy_sidekiq::nanosecondsToTicks(timeNs, frequency);
-    // Preserve SDK semantics: immediate updates set both counters to the same
-    // raw ticks; PPS updates set RF to zero and system to the requested ticks.
-    const int status = now ? skiq_update_timestamps(card, timestamp)
-                           : skiq_write_timestamp_update_on_1pps(card, 0, timestamp);
-    if (status != 0)
-        throw std::runtime_error(
-            std::string(now ? "skiq_update_timestamps" : "skiq_write_timestamp_update_on_1pps") +
-            " failed: " + std::to_string(status));
+    configureWhileRxInactive(
+        [&]
+        {
+            uint64_t frequency = 0;
+            const int read_status = skiq_read_sys_timestamp_freq(card, &frequency);
+            if (read_status != 0)
+                throw std::runtime_error("skiq_read_sys_timestamp_freq failed: " +
+                                         std::to_string(read_status));
+            const auto timestamp = soapy_sidekiq::nanosecondsToTicks(timeNs, frequency);
+            // Preserve SDK semantics: immediate updates set both counters to the same
+            // raw ticks; PPS updates set RF to zero and system to the requested ticks.
+            const int status = now ? skiq_update_timestamps(card, timestamp)
+                                   : skiq_write_timestamp_update_on_1pps(card, 0, timestamp);
+            if (status != 0)
+                throw std::runtime_error(std::string(now ? "skiq_update_timestamps"
+                                                         : "skiq_write_timestamp_update_on_1pps") +
+                                         " failed: " + std::to_string(status));
+        });
 }
 
 /*******************************************************************
@@ -363,9 +374,14 @@ void SoapySidekiq::setClockSource(const std::string &source)
         selected = skiq_ref_clock_external;
     else
         throw std::invalid_argument("Unknown clock source: " + source);
-    const int status = skiq_write_ref_clock_select(card, selected);
-    if (status != 0)
-        throw std::runtime_error("skiq_write_ref_clock_select failed: " + std::to_string(status));
+    configureWhileRxInactive(
+        [&]
+        {
+            const int status = skiq_write_ref_clock_select(card, selected);
+            if (status != 0)
+                throw std::runtime_error("skiq_write_ref_clock_select failed: " +
+                                         std::to_string(status));
+        });
 }
 
 double SoapySidekiq::getReferenceClockRate(void) const

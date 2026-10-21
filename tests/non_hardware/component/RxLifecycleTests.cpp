@@ -6,6 +6,8 @@
 #include "TestHarness.hpp"
 #include <SoapySidekiq/Diagnostic.hpp>
 #include <SoapySidekiq/RxStreamSession.hpp>
+#include <SoapySidekiq/TxCompletionState.hpp>
+#include <SoapySidekiq/TxBlockPool.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <functional>
 #include <limits>
@@ -149,21 +151,23 @@ public:
     std::uint8_t card{};
     bool tx_start_finished{}, tx_stream_active{}, rfTimeSource{true};
     std::mutex tx_mutex;
-    std::mutex tx_buf_mutex;
-    std::condition_variable tx_cv, tx_buf_cv;
+    std::shared_ptr<soapy_sidekiq::TxCompletionState<>> tx_completion{
+        std::make_shared<soapy_sidekiq::TxCompletionState<>>(3)};
+    std::condition_variable tx_cv;
     bool tx_writes_stopping{true};
     std::size_t active_tx_writers{}, active_tx_status_readers{};
     void stopTxWrites();
+    int stopTxStream(bool);
     std::uint32_t rx_payload_size_in_words{2}, current_tx_block_size{252};
     bool rxUseShort{true};
     double maxValue{2048};
     std::uint64_t sys_freq{1000000};
     std::vector<std::uint32_t> rx_sample_rates{20000000};
-    StreamHandle *active_rx_stream{}, *active_tx_stream{};
+    std::unique_ptr<StreamHandle> active_rx_stream, active_tx_stream;
     FixtureBackend backend;
     std::unique_ptr<soapy_sidekiq::RxStreamSession> rx_session;
     std::thread _tx_streaming_thread;
-    skiq_tx_block_t *p_tx_block[DEFAULT_NUM_BUFFERS]{};
+    std::unique_ptr<soapy_sidekiq::TxBlockPool<skiq_tx_block_t>> tx_blocks;
 
     SoapySidekiq()
     {
@@ -173,13 +177,13 @@ public:
     ~SoapySidekiq()
     {
         rx_session.reset();
-        delete active_rx_stream;
+        active_rx_stream.reset();
     }
     SoapySDR::Stream *setupRx()
     {
         REQUIRE(active_rx_stream == nullptr);
-        active_rx_stream = new StreamHandle;
-        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream);
+        active_rx_stream = std::make_unique<StreamHandle>();
+        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get());
     }
     void awaitWorkerFailure()
     {
@@ -191,6 +195,8 @@ public:
     StreamHandle *findStreamHandle(SoapySDR::Stream *) const noexcept;
     std::size_t getStreamMTU(SoapySDR::Stream *) const;
     int readStream(SoapySDR::Stream *, void *const *, std::size_t, int &, long long &, long);
+    int readStreamImpl(SoapySDR::Stream *, void *const *, std::size_t, int &, long long &, long);
+    void configureWhileRxInactive(const std::function<void()> &);
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
     int activateStreamImpl(SoapySDR::Stream *, int, long long, std::size_t);
     int deactivateStream(SoapySDR::Stream *, int, long long);
@@ -491,14 +497,14 @@ TEST_CASE("failed RX deactivation returns a stream error and preserves hardware 
         auto *stream = device.setupRx();
         REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
         device.awaitWorkerFailure();
-        auto *const owner = device.active_rx_stream;
+        auto *const owner = device.active_rx_stream.get();
         sdk.stop_status = -EIO;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), SOAPY_SDR_STREAM_ERROR);
-        REQUIRE(device.active_rx_stream == owner);
+        REQUIRE(device.active_rx_stream.get() == owner);
         REQUIRE(sdk.streaming);
         REQUIRE_EQ(sdk.stop_on_pps, flags == SOAPY_SDR_HAS_TIME);
         REQUIRE_THROWS_AS(device.closeStream(stream), std::runtime_error);
-        REQUIRE(device.active_rx_stream == owner);
+        REQUIRE(device.active_rx_stream.get() == owner);
         REQUIRE(sdk.streaming);
         sdk.stop_status = 0;
         REQUIRE_EQ(device.deactivateStream(stream, flags, 0), 0);
@@ -523,5 +529,75 @@ TEST_CASE("RX activation preserves error status and successful retry when diagno
     REQUIRE_EQ(sdk.starts, 1u);
     REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
     rx_log_hook = {};
+    device.closeStream(stream);
+}
+
+TEST_CASE("RX partial timestamp overflow returns stream error even when diagnostics throw")
+{
+    for (const bool native : {true, false})
+    {
+        SoapySidekiq device;
+        device.rxUseShort = native;
+        auto *stream = device.setupRx();
+        sdk.provide_packet = true;
+        sdk.actual_rate = 1;
+        // First sample fits int64 nanoseconds; the next sample advances beyond it.
+        sdk.rf_timestamp = 9223372036ULL;
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+        std::int16_t shorts[2]{};
+        float floats[2]{};
+        void *buffers[]{native ? static_cast<void *>(shorts) : static_cast<void *>(floats)};
+        int flags = 0;
+        long long timestamp = 0;
+        REQUIRE_EQ(device.readStream(stream, buffers, 1, flags, timestamp, 1000000), 1);
+        REQUIRE_EQ(timestamp, 9223372036000000000LL);
+        shorts[0] = 97;
+        floats[0] = 97;
+        unsigned diagnostics = 0;
+        rx_log_hook = [&]
+        {
+            ++diagnostics;
+            throw std::runtime_error("injected diagnostic failure");
+        };
+        soapy_sidekiq::ScopeExit reset([]() noexcept { rx_log_hook = {}; });
+        REQUIRE_EQ(device.readStream(stream, buffers, 1, flags, timestamp, 0),
+                   SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_EQ(flags, 0);
+        REQUIRE_EQ(timestamp, 0LL);
+        REQUIRE_EQ(diagnostics, 1u);
+        REQUIRE_EQ(shorts[0], 97);
+        REQUIRE_EQ(floats[0], 97.0f);
+        rx_log_hook = {};
+        REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+        sdk.rf_timestamp = 1;
+        sdk.delivered = false;
+        REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+        REQUIRE_EQ(device.readStream(stream, buffers, 1, flags, timestamp, 1000000), 1);
+        REQUIRE_EQ(timestamp, 1000000000LL);
+        REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+        device.closeStream(stream);
+    }
+}
+
+TEST_CASE("device configuration guard honors retained RX hardware after worker and stop failures")
+{
+    SoapySidekiq device;
+    bool changed = false;
+    device.configureWhileRxInactive([&] { changed = true; });
+    REQUIRE(changed);
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    device.awaitWorkerFailure();
+    changed = false;
+    REQUIRE_THROWS_AS(device.configureWhileRxInactive([&] { changed = true; }), std::logic_error);
+    REQUIRE(!changed);
+    sdk.stop_status = -EIO;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_THROWS_AS(device.configureWhileRxInactive([&] { changed = true; }), std::logic_error);
+    REQUIRE(!changed);
+    sdk.stop_status = 0;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    device.configureWhileRxInactive([&] { changed = true; });
+    REQUIRE(changed);
     device.closeStream(stream);
 }
