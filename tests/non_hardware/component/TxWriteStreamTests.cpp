@@ -1370,3 +1370,57 @@ TEST_CASE("already stopped TX hardware deactivates successfully for immediate an
     }
     stop_status = 0;
 }
+
+TEST_CASE("writes before first activation reject admission without waiting or submitting")
+{
+    SoapySidekiq device;
+    // Match the device's constructed/setup state: a token exists, but the
+    // activation path has not opened admission or completed a startup gate.
+    device.tx_stream_active = false;
+    device.tx_writes_stopping = true;
+    device.first_transmit = true;
+    device.tx_start_finished = false;
+    auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+    std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+    const void *buffers[]{input.data()};
+    int flags = 0;
+    for (const std::size_t count : {std::size_t{0}, std::size_t{device.current_tx_block_size}})
+        REQUIRE_EQ(device.writeStream(stream, buffers, count, flags, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+    REQUIRE_EQ(device.attempts, std::size_t{0});
+    REQUIRE(device.transmitted.empty());
+    REQUIRE(device.tx_cv.deadlines.empty());
+    REQUIRE(device.tx_buf_cv.deadlines.empty());
+    REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
+    REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+}
+
+TEST_CASE("immediate and PPS deactivation keep empty and nonempty writes outside admission")
+{
+    for (const int stop_flags : {0, SOAPY_SDR_HAS_TIME})
+    {
+        SoapySidekiq device;
+        auto *stream = reinterpret_cast<SoapySDR::Stream *>(&device.handle);
+        stop_status = 0;
+        stop_calls = 0;
+        REQUIRE_EQ(device.deactivateStream(stream, stop_flags, 0), 0);
+        REQUIRE_EQ(stop_calls, 1);
+        REQUIRE(!device.tx_stream_active);
+        REQUIRE(device.tx_writes_stopping);
+        REQUIRE(device.active_tx_stream == &device.handle);
+        const auto prior_waits = device.tx_buf_cv.deadlines.size();
+        std::vector<float> input(2 * device.current_tx_block_size, 0.25f);
+        const void *buffers[]{input.data()};
+        int flags = 0;
+        for (const std::size_t count : {std::size_t{0}, std::size_t{device.current_tx_block_size}})
+            REQUIRE_EQ(device.writeStream(stream, buffers, count, flags, 0, 0),
+                       SOAPY_SDR_STREAM_ERROR);
+        REQUIRE_EQ(device.tx_buf_cv.deadlines.size(), prior_waits);
+        REQUIRE(device.tx_cv.deadlines.empty());
+        REQUIRE_EQ(device.active_tx_writers, std::size_t{0});
+        REQUIRE_EQ(device.attempts, std::size_t{0});
+        REQUIRE(device.transmitted.empty());
+        REQUIRE_EQ(device.currTXBuffIndex, std::uint32_t{0});
+        REQUIRE_EQ(passedStruct::live.load(), std::size_t{0});
+    }
+}

@@ -148,8 +148,15 @@ TX accepts CS16 or normalized CF32 and requires each nonempty `writeStream`
 request to contain a whole number of `getStreamMTU()` samples, with at most
 `INT_MAX` samples per call. It does not stage partial hardware blocks. Invalid
 counts or null nonempty buffers return `SOAPY_SDR_STREAM_ERROR`; a zero-length
-write returns zero without reading buffers. If back-pressure accepts only a
-prefix, advance the input by that many complex samples and retry the suffix.
+write on an admitted TX stream returns zero without reading buffers. If
+back-pressure accepts only a prefix, advance the input by that many complex
+samples and retry the suffix.
+
+TX write admission opens after activation and closes when deactivation begins.
+Writes before activation or after deactivation return `SOAPY_SDR_STREAM_ERROR`,
+including zero-length requests. A configured stream token alone does not open
+write admission.
+
 CF32 components clip to [-1, 1], infinities clip to the corresponding endpoint,
 and NaN converts to zero before scaling to the card's TX full scale.
 
