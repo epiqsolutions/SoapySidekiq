@@ -207,11 +207,7 @@ SoapySidekiq::SoapySidekiq(const SoapySDR::Kwargs &args)
 
     // A throwing constructor never runs the device destructor. Only arm this
     // rollback after this call successfully acquires SDK initialization.
-    soapy_sidekiq::ScopeExit rollback(
-        [this]() noexcept
-        {
-            skiq_exit();
-        });
+    soapy_sidekiq::ScopeExit rollback([]() noexcept { skiq_exit(); });
     // The backend owns no hardware resource; the session owns its worker.
     rx_backend = std::make_unique<soapy_sidekiq::SidekiqRxBackend>(card);
     rx_session = std::make_unique<soapy_sidekiq::RxStreamSession>(*rx_backend);

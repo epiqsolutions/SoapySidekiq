@@ -363,18 +363,13 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             }
             if (tx_start_pending)
             {
-                /* if skiq_start_tx_streaming_on_1pps is called, then skiq_start_rx_streaming_on_1pps
-                 * is called the second one called will block until the first one finishes.
-                 * So the second one called will unblock 2 seconds later.
-                 * So warn the user */
+                // RX PPS startup may wait behind the outstanding TX start;
+                // the delay depends on observed edges, not a fixed duration.
                 soapy_sidekiq::reportDiagnostic(
                     [&]
                     {
-                        SoapySDR_logf(SOAPY_SDR_WARNING,
-                                      "The skiq_start_tx_streaming_on_1pps is"
-                                      " still blocked waiting for 1pps to occur"
-                                      " so calling activating a RX stream will be"
-                                      " delayed 2 seconds");
+                        SoapySDR_logf(SOAPY_SDR_WARNING, "RX PPS activation may wait for pending "
+                                                         "TX PPS startup and a later edge");
                     });
             }
         }
@@ -493,7 +488,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             return SOAPY_SDR_STREAM_ERROR;
         }
 
-        // running in aync mode
+        // Use asynchronous transfers with completion callbacks.
         status = skiq_write_tx_transfer_mode(card, tx_handle,
                                              skiq_tx_transfer_mode_async);
         if (status != 0)
