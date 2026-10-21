@@ -39,6 +39,7 @@ target_include_directories(scripted_driver_objects SYSTEM PRIVATE
     ${Sidekiq_INCLUDE_DIRS} ${SoapySDR_INCLUDE_DIRS})
 soapy_sidekiq_enable_warnings(scripted_driver_objects PRIVATE)
 target_sources(scripted_driver_objects PRIVATE StreamTokenTests.cpp)
+target_sources(scripted_driver_objects PRIVATE LifecycleFailureTests.cpp)
 
 set(fallback_source "${CMAKE_CURRENT_BINARY_DIR}/UnexpectedSdkCalls.cpp")
 add_custom_command(OUTPUT "${fallback_source}"
