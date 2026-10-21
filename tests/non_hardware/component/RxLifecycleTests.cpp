@@ -8,6 +8,7 @@
 #include <SoapySidekiq/TxCompletionState.hpp>
 #include <SoapySidekiq/TxBlockPool.hpp>
 #include <memory>
+#include <functional>
 #include <vector>
 #include <atomic>
 #include <cerrno>
@@ -185,6 +186,7 @@ public:
     StreamHandle *findStreamHandle(SoapySDR::Stream *) const noexcept;
     std::size_t getStreamMTU(SoapySDR::Stream *) const;
     int readStream(SoapySDR::Stream *, void *const *, std::size_t, int &, long long &, long);
+    void configureWhileRxInactive(const std::function<void()> &);
     int activateStream(SoapySDR::Stream *, int, long long, std::size_t);
     int activateStreamImpl(SoapySDR::Stream *, int, long long, std::size_t);
     int deactivateStream(SoapySDR::Stream *, int, long long);
@@ -500,4 +502,27 @@ TEST_CASE("failed RX deactivation returns a stream error and preserves hardware 
         device.closeStream(stream);
         REQUIRE(device.active_rx_stream == nullptr);
     }
+}
+
+TEST_CASE("device configuration guard honors retained RX hardware after worker and stop failures")
+{
+    SoapySidekiq device;
+    bool changed = false;
+    device.configureWhileRxInactive([&] { changed = true; });
+    REQUIRE(changed);
+    auto *stream = device.setupRx();
+    REQUIRE_EQ(device.activateStream(stream, 0, 0, 0), 0);
+    device.awaitWorkerFailure();
+    changed = false;
+    REQUIRE_THROWS_AS(device.configureWhileRxInactive([&] { changed = true; }), std::logic_error);
+    REQUIRE(!changed);
+    sdk.stop_status = -EIO;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), SOAPY_SDR_STREAM_ERROR);
+    REQUIRE_THROWS_AS(device.configureWhileRxInactive([&] { changed = true; }), std::logic_error);
+    REQUIRE(!changed);
+    sdk.stop_status = 0;
+    REQUIRE_EQ(device.deactivateStream(stream, 0, 0), 0);
+    device.configureWhileRxInactive([&] { changed = true; });
+    REQUIRE(changed);
+    device.closeStream(stream);
 }

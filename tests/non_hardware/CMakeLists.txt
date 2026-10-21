@@ -246,7 +246,7 @@ set_tests_properties(tx-callback-initialization.all PROPERTIES LABELS "component
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ../../Streaming.cpp)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../Streaming.cpp" streaming_source)
 string(FIND "${streaming_source}" "void SoapySidekiq::tx_complete_callback(" tx_callback_start)
-string(FIND "${streaming_source}" "long long SoapySidekiq::convert_timestamp_to_nanos(" tx_callback_end)
+string(FIND "${streaming_source}" "std::vector<std::string> SoapySidekiq::getStreamFormats(" tx_callback_end)
 if(tx_callback_start LESS 0 OR tx_callback_end LESS tx_callback_start)
     message(FATAL_ERROR "Could not locate the production TX completion callback")
 endif()
@@ -395,6 +395,16 @@ target_include_directories(antenna_tests PRIVATE
 target_link_libraries(antenna_tests PRIVATE non_hardware_test_options)
 add_test(NAME antenna.all COMMAND antenna_tests)
 set_tests_properties(antenna.all PROPERTIES LABELS "component;non-hardware")
+
+extract_settings_method(constructor_counts "    status = skiq_read_num_rx_chans("
+    "    uint8_t tmp_resolution")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ConstructorChannelCounts.inc" "${constructor_counts}")
+add_executable(constructor_channel_count_tests support/TestMain.cpp component/ConstructorChannelCountTests.cpp)
+target_include_directories(constructor_channel_count_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/support" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(constructor_channel_count_tests PRIVATE non_hardware_test_options)
+add_test(NAME constructor-channel-counts.all COMMAND constructor_channel_count_tests)
+set_tests_properties(constructor-channel-counts.all PROPERTIES LABELS "component;non-hardware")
 
 extract_settings_method(topology_configuration "    if (options.topology.has_value())"
     "    status = skiq_read_parameters(")
@@ -568,8 +578,10 @@ math(EXPR tx_if_start "${tx_branch} + 9")
 string(SUBSTRING "${activate_method}" ${tx_if_start} -1 tx_activate_body)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxActivationMethods.inc"
     "${tx_activate_prefix}    ${tx_activate_body}")
+extract_settings_method(rx_configuration_guard "void SoapySidekiq::configureWhileRxInactive(" "\n}\n")
+string(APPEND rx_configuration_guard "\n}\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RxLifecycleMethods.inc"
-    "${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
+    "${rx_configuration_guard}\n${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
 add_executable(rx_lifecycle_tests
     support/TestMain.cpp component/RxLifecycleTests.cpp ../../RxSampleQueue.cpp ../../RxStreamSession.cpp)
 target_include_directories(rx_lifecycle_tests PRIVATE
@@ -594,7 +606,7 @@ endif()
 add_custom_target(non_hardware_tests
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS discovery_tests device_option_tests sensor_tests sdk_logging_tests
-            topology_configuration_tests channel_metadata_tests
+            constructor_channel_count_tests topology_configuration_tests channel_metadata_tests
             identification_tests sensor_metadata_tests
             sample_rate_capability_tests frequency_tests
             rate_bandwidth_tests gain_mode_tests gain_tests antenna_tests dc_offset_tests

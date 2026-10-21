@@ -20,7 +20,7 @@
 #include <SoapySidekiq/SampleConversion.hpp>
 #include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySidekiq/StreamConfiguration.hpp>
-#include <SoapySidekiq/TimestampConversion.hpp>
+#include <SoapySidekiq/TimestampRate.hpp>
 #include <sidekiq_types.h>
 
 namespace
@@ -77,14 +77,6 @@ void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
         // A failing log sink must not escape or be retried from this callback.
     }
 }
-
-long long SoapySidekiq::convert_timestamp_to_nanos(
-        const uint64_t timestamp, const uint64_t timestamp_freq) const
-{
-    // Central helper provides exact arithmetic plus zero/overflow validation.
-    return soapy_sidekiq::ticksToNanoseconds(timestamp, timestamp_freq);
-}
-
 
 std::vector<std::string> SoapySidekiq::getStreamFormats(
     const int direction, const size_t channel) const
@@ -174,19 +166,16 @@ void SoapySidekiq::shutdownTx() noexcept
     tx_blocks.reset();
 }
 
-void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
+void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle) noexcept
 {
-    SoapySDR_log(SOAPY_SDR_TRACE, "entering tx_streaming_start");
-    const int status = skiq_start_tx_streaming_on_1pps(card, tx_handle, 0);
-    if (status != 0)
+    int status = SOAPY_SDR_STREAM_ERROR;
+    try
     {
-        SoapySDR_logf(SOAPY_SDR_ERROR,
-                "skiq_start_tx_streaming_on_1pps failed, (card %u) status %d",
-                card, status);
+        status = skiq_start_tx_streaming_on_1pps(card, tx_handle, 0);
     }
-    else
+    catch (...)
     {
-        SoapySDR_logf(SOAPY_SDR_INFO, "TX start streaming on 1pps completed");
+        // Treat an unexpected backend exception like a failed asynchronous start.
     }
 
     {
@@ -197,6 +186,22 @@ void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle)
         tx_start_finished = true;
     }
     tx_cv.notify_all();
+
+    // User log sinks can throw, block, or re-enter. Publish and wake waiters
+    // first, release all startup/status locks, and never unwind out of a worker.
+    try
+    {
+        if (status != 0)
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                          "skiq_start_tx_streaming_on_1pps failed (card %u, handle %u), status %d",
+                          card, tx_handle, status);
+        else
+            SoapySDR_logf(SOAPY_SDR_INFO, "TX start streaming on 1pps completed");
+    }
+    catch (...)
+    {
+        // Retrying a failed sink could recurse or throw again.
+    }
 }
 /*******************************************************************
  * Stream API
@@ -287,7 +292,10 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_read_sys_timestamp_freq failed: (card %d), status %d",
                            card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_sys_timestamp_freq failed during RX setup (card " +
+                                     std::to_string(card) + ", channel " + std::to_string(channel) +
+                                     ", handle " + std::to_string(rx_handle) + ", status " +
+                                     std::to_string(status) + ")");
         }
         SoapySDR_logf(SOAPY_SDR_INFO, "System Timestamp Freq: %llu", this->sys_freq);
 
@@ -298,9 +306,12 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             if (status != 0)
             {
                 SoapySDR_logf(SOAPY_SDR_ERROR,
-                             "skiq_write_rx_data_src failed (card %u) status %d",
-                              card, status);
-                throw std::runtime_error("");
+                              "skiq_write_iq_order_mode failed (card %u) status %d", card, status);
+                throw std::runtime_error(
+                    "skiq_write_iq_order_mode failed during RX setup (card " +
+                    std::to_string(card) + ", channel " + std::to_string(channel) + ", handle " +
+                    std::to_string(rx_handle) + ", IQ order I then Q, status " +
+                    std::to_string(status) + ")");
             }
             SoapySDR_logf(SOAPY_SDR_INFO, "RX is set to I then Q order");
         }
@@ -312,7 +323,10 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_set_rx_transfer_timeout failed, (card %u) status %d",
                           card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_set_rx_transfer_timeout failed during RX setup (card " +
+                                     std::to_string(card) + ", channel " + std::to_string(channel) +
+                                     ", handle " + std::to_string(rx_handle) +
+                                     ", timeout 100000 us, status " + std::to_string(status) + ")");
         }
 
         // Keep the handle locally owned until RX setup is ready to publish it.
@@ -363,7 +377,10 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
             SoapySDR_logf(SOAPY_SDR_ERROR,
                           "skiq_read_sys_timestamp_freq failed: (card %d), status %d",
                            card, status);
-            throw std::runtime_error("");
+            throw std::runtime_error("skiq_read_sys_timestamp_freq failed during TX setup (card " +
+                                     std::to_string(card) + ", channel " + std::to_string(channel) +
+                                     ", handle " + std::to_string(tx_handle) + ", status " +
+                                     std::to_string(status) + ")");
         }
 
         // Timestamp setup must succeed before committing TX memory ownership.
@@ -533,30 +550,38 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             }
         }
 
-        // Coupled clocks may have changed since the last RX setter. Timestamp
-        // setup needs only the actual rate, not configured rate or bandwidth.
-        uint32_t configured_rate{}, configured_bandwidth{}, actual_bandwidth{};
-        double actual_rate = std::numeric_limits<double>::quiet_NaN();
-        const int rate_status =
-            skiq_read_rx_sample_rate_and_bandwidth(card, rx_handle, &configured_rate, &actual_rate,
-                                                   &configured_bandwidth, &actual_bandwidth);
-        if (rate_status != 0)
-            throw std::runtime_error(
-                "RX activation rate read failed (card " + std::to_string(card) + ", handle " +
-                std::to_string(rx_handle) + "): " + std::to_string(rate_status));
-        const auto sample_rate = soapy_sidekiq::TimestampRate::fromActualRate(actual_rate);
-        uint64_t system_frequency = rfTimeSource ? sys_freq : 0;
-        if (!rfTimeSource)
-        {
-            const int read_status = skiq_read_sys_timestamp_freq(card, &system_frequency);
-            if (read_status != 0)
-                throw std::runtime_error("skiq_read_sys_timestamp_freq failed at RX activation: " +
-                                         std::to_string(read_status));
-        }
-        // The session starts hardware before publishing or creating a worker.
-        status = rx_session->activate({static_cast<uint32_t>(rx_handle), rx_payload_size_in_words,
-                                       sample_rate, system_frequency, rfTimeSource,
-                                       (flags & SOAPY_SDR_HAS_TIME) != 0});
+        // Capture timing and start under the same lock used by coupled rate
+        // setters, so configuration cannot change between readback and start.
+        status = rx_session->activateConfigured(
+            [&]
+            {
+                uint32_t configured_rate{}, configured_bandwidth{}, actual_bandwidth{};
+                double actual_rate = std::numeric_limits<double>::quiet_NaN();
+                const int rate_status = skiq_read_rx_sample_rate_and_bandwidth(
+                    card, rx_handle, &configured_rate, &actual_rate, &configured_bandwidth,
+                    &actual_bandwidth);
+                if (rate_status != 0)
+                    throw std::runtime_error("RX activation rate read failed (card " +
+                                             std::to_string(card) + ", handle " +
+                                             std::to_string(rx_handle) +
+                                             "): " + std::to_string(rate_status));
+                const auto sample_rate = soapy_sidekiq::TimestampRate::fromActualRate(actual_rate);
+                uint64_t system_frequency = rfTimeSource ? sys_freq : 0;
+                if (!rfTimeSource)
+                {
+                    const int read_status = skiq_read_sys_timestamp_freq(card, &system_frequency);
+                    if (read_status != 0)
+                        throw std::runtime_error(
+                            "skiq_read_sys_timestamp_freq failed at RX activation: " +
+                            std::to_string(read_status));
+                }
+                return soapy_sidekiq::RxSessionConfiguration{static_cast<uint32_t>(rx_handle),
+                                                             rx_payload_size_in_words,
+                                                             sample_rate,
+                                                             system_frequency,
+                                                             rfTimeSource,
+                                                             (flags & SOAPY_SDR_HAS_TIME) != 0};
+            });
         if (status != 0)
         {
             SoapySDR_logf(SOAPY_SDR_ERROR,
@@ -596,8 +621,6 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             }
             SoapySDR_logf(SOAPY_SDR_INFO, "TX is set to I then Q order");
         }
-
-        p_tx_block_index = 0;
 
         //  tx block size
         status =
