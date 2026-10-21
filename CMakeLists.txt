@@ -69,6 +69,8 @@ SOAPY_SDR_MODULE_UTIL(
         TimeClock.cpp
         RFControls.cpp
         Streaming.cpp
+        RxStreaming.cpp
+        TxStreaming.cpp
         Sensor.cpp
     LIBRARIES
         Sidekiq::sidekiq

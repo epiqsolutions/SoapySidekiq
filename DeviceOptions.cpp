@@ -98,6 +98,15 @@ DeviceOptions parseDeviceOptions(const std::map<std::string, std::string> &argum
         }
     }
 
+    const auto tx_buffer_count = arguments.find("tx_buffer_count");
+    if (tx_buffer_count != arguments.end())
+    {
+        options.tx_buffer_count =
+            parseUnsigned(tx_buffer_count->second, "tx_buffer_count", maxTxBufferCount);
+        if (options.tx_buffer_count == 0)
+            throw std::invalid_argument("tx_buffer_count must be greater than zero");
+    }
+
     options.clock_source = optionalString(arguments, "clock_source");
     options.time_source = optionalString(arguments, "time_source");
     return options;

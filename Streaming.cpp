@@ -1,24 +1,18 @@
 /**
  * @file Streaming.cpp
- * @brief Implements SoapySDR stream setup, lifecycle, receive, and transmit I/O.
+ * @brief Implements shared stream metadata, setup, activation, and deactivation.
  */
 
-#include <cstring>
-#include <unistd.h>
-#include <iostream>
 #include <vector>
+#include <utility>
 #include <string>
 #include <thread>
 #include <mutex>
-#include <new>
-#include <chrono>
 #include <limits>
 
 #include "SoapySidekiq.hpp"
 #include <exception>
 #include <SoapySDR/Formats.hpp>
-#include <SoapySidekiq/SampleConversion.hpp>
-#include <SoapySidekiq/ScopeExit.hpp>
 #include <SoapySidekiq/StreamConfiguration.hpp>
 #include <SoapySidekiq/TimestampRate.hpp>
 #include <sidekiq_types.h>
@@ -47,33 +41,11 @@ SoapySidekiq::StreamHandle *SoapySidekiq::findStreamHandle(SoapySDR::Stream *str
     // handles need not point to accessible memory.
     if (stream == nullptr)
         return nullptr;
-    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_rx_stream))
-        return active_rx_stream;
-    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_tx_stream))
-        return active_tx_stream;
+    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get()))
+        return active_rx_stream.get();
+    if (stream == reinterpret_cast<SoapySDR::Stream *>(active_tx_stream.get()))
+        return active_tx_stream.get();
     return nullptr;
-}
-
-void SoapySidekiq::tx_complete_callback(int32_t status, skiq_tx_block_t *p_data,
-                                        void *p_user) noexcept
-{
-    // Completion owns the accepted submission's context, including on every
-    // diagnostic/exception path. Never unwind through the SDK's C boundary.
-    std::unique_ptr<passedStruct> instance(static_cast<passedStruct *>(p_user));
-    try
-    {
-        if (instance == nullptr || instance->classAddr == nullptr)
-        {
-            SoapySDR_log(SOAPY_SDR_ERROR, "tx_complete callback received invalid user data");
-            return;
-        }
-
-        instance->classAddr->tx_complete(status, p_data, instance->txIndex);
-    }
-    catch (...)
-    {
-        // A failing log sink must not escape or be retried from this callback.
-    }
 }
 
 std::vector<std::string> SoapySidekiq::getStreamFormats(
@@ -114,56 +86,6 @@ SoapySDR::ArgInfoList SoapySidekiq::getStreamArgsInfo(const int direction,
     return {};
 }
 
-void SoapySidekiq::stopTxWrites()
-{
-    {
-        std::scoped_lock lock(tx_mutex, tx_buf_mutex);
-        tx_writes_stopping = true;
-    }
-    tx_cv.notify_all();
-    tx_buf_cv.notify_all();
-    std::unique_lock<std::mutex> lock(tx_buf_mutex);
-    tx_buf_cv.wait(lock,
-                   [this] { return active_tx_writers == 0 && active_tx_status_readers == 0; });
-}
-
-void SoapySidekiq::tx_streaming_start(skiq_tx_hdl_t tx_handle) noexcept
-{
-    int status = SOAPY_SDR_STREAM_ERROR;
-    try
-    {
-        status = skiq_start_tx_streaming_on_1pps(card, tx_handle, 0);
-    }
-    catch (...)
-    {
-        // Treat an unexpected backend exception like a failed asynchronous start.
-    }
-
-    {
-        std::scoped_lock lock(tx_mutex, tx_status_mutex);
-        if (status == 0)
-            tx_underruns = 0; // SDK resets its counter on start.
-        tx_start_status = status;
-        tx_start_finished = true;
-    }
-    tx_cv.notify_all();
-
-    // User log sinks can throw, block, or re-enter. Publish and wake waiters
-    // first, release all startup/status locks, and never unwind out of a worker.
-    try
-    {
-        if (status != 0)
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "skiq_start_tx_streaming_on_1pps failed (card %u, handle %u), status %d",
-                          card, tx_handle, status);
-        else
-            SoapySDR_logf(SOAPY_SDR_INFO, "TX start streaming on 1pps completed");
-    }
-    catch (...)
-    {
-        // Retrying a failed sink could recurse or throw again.
-    }
-}
 /*******************************************************************
  * Stream API
  ******************************************************************/
@@ -174,6 +96,7 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
                                             const SoapySDR::Kwargs &args)
 {
     int status = 0;
+    (void)args; // No per-stream options are implemented.
     SoapySDR_logf(SOAPY_SDR_TRACE, "setupStream");
 
     const auto stream_direction = streamDirection(direction);
@@ -223,7 +146,8 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         // Validate before subtracting the header or publishing MTU-related sizes.
         rx_block_size_in_bytes = block_bytes;
         rx_block_size_in_words = block_bytes / word_bytes;
-        rx_payload_size_in_bytes = block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES;
+        rx_payload_size_in_bytes =
+            static_cast<uint32_t>(block_bytes - SKIQ_RX_HEADER_SIZE_IN_BYTES);
         rx_payload_size_in_words = rx_payload_size_in_bytes / word_bytes;
 
         SoapySDR_logf(SOAPY_SDR_INFO, "RX payload size in words: %u",
@@ -246,7 +170,6 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         }
 
         // this has to be called after setting sample rate
-        int status = 0;
         status = skiq_read_sys_timestamp_freq(this->card, &this->sys_freq);
         if (status != 0)
         {
@@ -296,8 +219,8 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         stream_handle->channel = channel;
         stream_handle->rx_handle = rx_handle;
         stream_handle->tx_handle = skiq_tx_hdl_end;
-        active_rx_stream = stream_handle.release();
-        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream);
+        active_rx_stream = std::move(stream_handle);
+        return reinterpret_cast<SoapySDR::Stream *>(active_rx_stream.get());
     }
     else if (direction == SOAPY_SDR_TX)
     {
@@ -350,24 +273,10 @@ SoapySDR::Stream *SoapySidekiq::setupStream(const int direction,
         stream_handle->channel = channel;
         stream_handle->rx_handle = skiq_rx_hdl_end;
         stream_handle->tx_handle = tx_handle;
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; ++i)
-        {
-            p_tx_block[i] = skiq_tx_block_allocate(current_tx_block_size);
-            if (p_tx_block[i] == nullptr)
-            {
-                // Free only the successfully allocated prefix on partial failure.
-                for (int allocated = 0; allocated < i; ++allocated)
-                {
-                    skiq_tx_block_free(p_tx_block[allocated]);
-                    p_tx_block[allocated] = nullptr;
-                }
-                throw std::bad_alloc();
-            }
-        }
-        currTXBuffIndex = 0;
+        initializeTxBuffers();
 
-        active_tx_stream = stream_handle.release();
-        return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream);
+        active_tx_stream = std::move(stream_handle);
+        return reinterpret_cast<SoapySDR::Stream *>(active_tx_stream.get());
     }
     else
     {
@@ -402,9 +311,9 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
             }
         }
 
-        if (active_rx_stream == stream_handle)
+        if (active_rx_stream.get() == stream_handle)
         {
-            active_rx_stream = nullptr;
+            active_rx_stream.reset();
         }
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
@@ -414,19 +323,15 @@ void SoapySidekiq::closeStream(SoapySDR::Stream *stream)
             throw std::runtime_error("deactivate the TX stream before closing it");
         }
 
-        if (active_tx_stream == stream_handle)
-        {
-            active_tx_stream = nullptr;
-        }
+        const int status = stopTxStream(false);
+        if (status != 0)
+            throw std::runtime_error("Cannot close TX stream after failed deactivation: " +
+                                     std::to_string(status));
+        active_tx_stream.reset();
 
-        for (int i = 0; i < DEFAULT_NUM_BUFFERS; i++)
-        {
-            skiq_tx_block_free(p_tx_block[i]);
-            p_tx_block[i] = nullptr;
-        }
+        // An accepted SDK submission retains its own block through completion.
+        tx_blocks.reset();
     }
-
-    delete stream_handle;
 }
 
 size_t SoapySidekiq::getStreamMTU(SoapySDR::Stream *stream) const
@@ -485,7 +390,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
 
     if (stream_handle->direction == SOAPY_SDR_RX)
     {
-        if (active_rx_stream != stream_handle)
+        if (active_rx_stream.get() != stream_handle)
         {
             throw std::runtime_error("RX stream is not the active device RX stream");
         }
@@ -564,7 +469,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
     {
-        if (active_tx_stream != stream_handle)
+        if (active_tx_stream.get() != stream_handle)
         {
             throw std::runtime_error("TX stream is not the active device TX stream");
         }
@@ -589,9 +494,9 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
             SoapySDR_logf(SOAPY_SDR_INFO, "TX is set to I then Q order");
         }
 
-        //  tx block size
+        // Constructor validation bounds this payload to the SDK's uint16_t range.
         status =
-            skiq_write_tx_block_size(card, tx_handle, current_tx_block_size);
+            skiq_write_tx_block_size(card, tx_handle, static_cast<uint16_t>(current_tx_block_size));
         if (status != 0)
         {
             SoapySDR_logf(SOAPY_SDR_ERROR,
@@ -662,6 +567,7 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
                               card, status);
                 return SOAPY_SDR_STREAM_ERROR;
             }
+            tx_stream_active = true;
             {
                 std::lock_guard<std::timed_mutex> lock(tx_status_mutex);
                 tx_underruns = 0;
@@ -673,11 +579,10 @@ int SoapySidekiq::activateStreamImpl(SoapySDR::Stream *stream, const int flags,
 
         tx_stream_active = true;
         {
-            std::scoped_lock lock(tx_mutex, tx_buf_mutex);
+            std::scoped_lock lock(tx_mutex, tx_completion->mutex);
             tx_writes_stopping = false;
         }
     }
-
 
     return 0;
 }
@@ -695,7 +600,7 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
 
     if (stream_handle->direction == SOAPY_SDR_RX)
     {
-        if (active_rx_stream != stream_handle)
+        if (active_rx_stream.get() != stream_handle)
         {
             return SOAPY_SDR_STREAM_ERROR;
         }
@@ -721,471 +626,20 @@ int SoapySidekiq::deactivateStream(SoapySDR::Stream *stream, const int flags,
     }
     else if (stream_handle->direction == SOAPY_SDR_TX)
     {
-        if (active_tx_stream != stream_handle)
+        if (active_tx_stream.get() != stream_handle)
         {
             return SOAPY_SDR_STREAM_ERROR;
         }
 
-        const skiq_tx_hdl_t tx_handle = stream_handle->tx_handle;
-        // Wake blocked writers and wait for their reservations/contexts to
-        // unwind before stopping hardware or allowing stream storage to close.
-        stopTxWrites();
-        // A timed start may still be finishing when the caller stops the
-        // stream. Join it before stopping and before destroying the device.
-        if (_tx_streaming_thread.joinable())
+        status = stopTxStream((flags & SOAPY_SDR_HAS_TIME) != 0);
+        if (status != 0)
         {
-            _tx_streaming_thread.join();
+            SoapySDR_logf(SOAPY_SDR_ERROR,
+                          "stopping TX streaming failed (card %u, handle %u), status %d", card,
+                          stream_handle->tx_handle, status);
+            return SOAPY_SDR_STREAM_ERROR;
         }
-        if (flags == SOAPY_SDR_HAS_TIME)
-        {
-            /* stop tx streaming */
-            status = skiq_stop_tx_streaming_on_1pps(card, tx_handle, 0);
-            if (status != 0)
-            {
-                if (status == -ENODEV)
-                {
-                    SoapySDR_logf(SOAPY_SDR_WARNING,
-                        "skiq_stop_tx_streaming_on_1pps: handle not streaming (card %u, handle %d), ignoring",
-                        card, tx_handle);
-                }
-                else
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                        "skiq_stop_tx_streaming_on_1pps failed (card %u), status %d",
-                        card, status);
-                    return SOAPY_SDR_STREAM_ERROR;
-                }
-            }
-
-        }
-        else
-        {
-            /* stop tx streaming */
-            status = skiq_stop_tx_streaming(card, tx_handle);
-            if (status != 0)
-            {
-                if (status == -ENODEV)
-                {
-                    SoapySDR_logf(SOAPY_SDR_WARNING,
-                        "skiq_stop_tx_streaming: handle not streaming (card %u, handle %d), ignoring",
-                        card, tx_handle);
-                }
-                else
-                {
-                    SoapySDR_logf(SOAPY_SDR_ERROR,
-                        "skiq_stop_tx_streaming failed (card %u), status %d",
-                        card, status);
-                    return SOAPY_SDR_STREAM_ERROR;
-                }
-            }
-        }
-
-        tx_stream_active = false;
     }
 
     return 0;
-}
-
-int SoapySidekiq::readStream(SoapySDR::Stream *stream, void *const *buffs, const size_t numElems,
-                             int &flags, long long &timeNs, const long timeoutUs)
-{
-    try
-    {
-        return readStreamImpl(stream, buffs, numElems, flags, timeNs, timeoutUs);
-    }
-    catch (const std::exception &error)
-    {
-        flags = 0;
-        timeNs = 0;
-        try
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "RX read failed (card %u): %s", card, error.what());
-        }
-        catch (...)
-        {
-            // A failing diagnostic cannot replace the streaming error result.
-        }
-        return SOAPY_SDR_STREAM_ERROR;
-    }
-}
-
-int SoapySidekiq::readStreamImpl(SoapySDR::Stream *stream, void *const *buffs,
-                                 const size_t numElems, int &flags, long long &timeNs,
-                                 const long timeoutUs)
-{
-    const StreamHandle *stream_handle = findStreamHandle(stream);
-    if (stream_handle == nullptr)
-        return SOAPY_SDR_STREAM_ERROR;
-    if (stream_handle->direction != SOAPY_SDR_RX) return SOAPY_SDR_NOT_SUPPORTED;
-    if (active_rx_stream != stream_handle) return SOAPY_SDR_STREAM_ERROR;
-    if (rx_session == nullptr) return SOAPY_SDR_STREAM_ERROR;
-    flags = 0;
-    timeNs = 0;
-    if (numElems > static_cast<size_t>(std::numeric_limits<int>::max()))
-    {
-        return SOAPY_SDR_OVERFLOW;
-    }
-    if (timeoutUs < 0 ||
-        (numElems != 0 && (buffs == nullptr || buffs[0] == nullptr)))
-    {
-        return SOAPY_SDR_STREAM_ERROR;
-    }
-
-    // The queue stores native CS16; CF32 requests use a temporary conversion buffer.
-    std::vector<int16_t> converted_samples;
-    int16_t *queue_output = nullptr;
-    if (numElems != 0)
-    {
-        if (rxUseShort)
-        {
-            queue_output = static_cast<int16_t *>(buffs[0]);
-        }
-        else
-        {
-            converted_samples.resize(numElems * 2);
-            queue_output = converted_samples.data();
-        }
-    }
-
-    // Session read honors the requested timeout and translates worker lifecycle
-    // transitions into stable queue statuses for the SoapySDR API.
-    const auto result = rx_session->read(
-        queue_output,
-        numElems,
-        std::chrono::microseconds(timeoutUs));
-    if (result.status == soapy_sidekiq::RxReadStatus::timeout)
-    {
-        return SOAPY_SDR_TIMEOUT;
-    }
-    if (result.status != soapy_sidekiq::RxReadStatus::samples)
-    {
-        return SOAPY_SDR_STREAM_ERROR;
-    }
-
-    if (!rxUseShort && result.samples != 0)
-    {
-        float *output = static_cast<float *>(buffs[0]);
-        for (size_t index = 0; index < result.samples * 2; ++index)
-        {
-            output[index] = static_cast<float>(converted_samples[index]) /
-                static_cast<float>(maxValue);
-        }
-    }
-    if (result.has_time)
-    {
-        flags |= SOAPY_SDR_HAS_TIME;
-        timeNs = result.time_ns;
-    }
-    return static_cast<int>(result.samples);
-}
-
-int SoapySidekiq::writeStream(SoapySDR::Stream * stream,
-                              const void *const *buffs, const size_t numElems,
-                              int &flags, const long long timeNs,
-                              const long timeoutUs)
-{
-    int      status = 0;
-    const StreamHandle *stream_handle = findStreamHandle(stream);
-    if (stream_handle == nullptr)
-        return SOAPY_SDR_STREAM_ERROR;
-
-    if (stream_handle->direction != SOAPY_SDR_TX)
-    {
-        return SOAPY_SDR_NOT_SUPPORTED;
-    }
-    if (active_tx_stream != stream_handle)
-    {
-        return SOAPY_SDR_STREAM_ERROR;
-    }
-
-    // TX is continuous/immediate. Timed writes and burst/fragment flags
-    // cannot be honored by the current SDK data-flow configuration.
-    if (flags != 0)
-        return SOAPY_SDR_NOT_SUPPORTED;
-
-    if (timeoutUs < 0)
-    {
-        return SOAPY_SDR_STREAM_ERROR;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(tx_buf_mutex);
-        if (tx_writes_stopping)
-            return SOAPY_SDR_STREAM_ERROR;
-        ++active_tx_writers;
-    }
-    soapy_sidekiq::ScopeExit writer(
-        [this]() noexcept
-        {
-            {
-                std::lock_guard<std::mutex> lock(tx_buf_mutex);
-                --active_tx_writers;
-            }
-            tx_buf_cv.notify_all();
-        });
-
-    // TX has no partial-block staging. Reject malformed requests before PPS
-    // waits, pointer access, reservations, or submission. The API return type
-    // must be able to represent every accepted sample count.
-    if (current_tx_block_size == 0 ||
-        numElems > static_cast<size_t>(std::numeric_limits<int>::max()) ||
-        numElems % current_tx_block_size != 0)
-    {
-        return SOAPY_SDR_STREAM_ERROR;
-    }
-    if (numElems == 0)
-        return 0;
-    if (buffs == nullptr || buffs[0] == nullptr)
-        return SOAPY_SDR_STREAM_ERROR;
-
-    // Clamp the deadline so even LONG_MAX microseconds cannot overflow
-    // the clock's (typically nanosecond) representation.
-    using Clock = std::chrono::steady_clock;
-    const auto now = Clock::now();
-    const auto budget = std::chrono::microseconds(timeoutUs);
-    const auto remaining =
-        std::chrono::duration_cast<std::chrono::microseconds>(Clock::time_point::max() - now);
-    const auto deadline = budget >= remaining ? Clock::time_point::max() : now + budget;
-
-    if (first_transmit)
-    {
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream waiting for PPS TX start");
-        std::unique_lock<std::mutex> lock(tx_mutex);
-        if (!tx_cv.wait_until(lock, deadline,
-                              [this] { return tx_start_finished || tx_writes_stopping; }))
-        {
-            // The asynchronous PPS start is still pending. A later write may
-            // wait again; no packet or callback context has been submitted.
-            return SOAPY_SDR_TIMEOUT;
-        }
-        if (tx_writes_stopping || tx_start_status != 0)
-        {
-            // Keep the gate set so retries cannot transmit after a failed start.
-            return SOAPY_SDR_STREAM_ERROR;
-        }
-        first_transmit = false;
-    }
-
-    // Pointer to the location in the input buffer to transmit from
-    const char *inbuff_ptr = static_cast<const char *>(buffs[0]);
-
-    uint32_t num_blocks = numElems / current_tx_block_size;
-
-    uint32_t curr_block = 0;
-
-    // total number of bytes that need to be transmitted in this call
-    uint32_t tx_block_bytes = current_tx_block_size * 4;
-    // Hardware payloads are CS16, but the caller's CF32 buffer uses wider samples.
-    const size_t input_block_bytes = current_tx_block_size * 2 *
-        (txUseShort ? sizeof(int16_t) : sizeof(float));
-
-    while (curr_block < num_blocks)
-    {
-        uint64_t observed_completions = 0;
-        {
-            // The predicate and completion updates share a mutex, so completion
-            // cannot disappear between testing the slot and sleeping.
-            std::unique_lock<std::mutex> lock(tx_buf_mutex);
-            if (!tx_buf_cv.wait_until(
-                    lock, deadline,
-                    [this] { return tx_writes_stopping || p_tx_status[currTXBuffIndex] == 0; }))
-            {
-                return curr_block == 0 ? SOAPY_SDR_TIMEOUT
-                                       : static_cast<int>(curr_block * current_tx_block_size);
-            }
-            if (tx_writes_stopping)
-                return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
-                                       : static_cast<int>(curr_block * current_tx_block_size);
-            p_tx_status[currTXBuffIndex] = 1;
-            observed_completions = complete_count;
-        }
-
-        try
-        {
-            // Until the SDK accepts this block, unwind its reservation on any
-            // allocation, conversion, or submission failure.
-            const auto block_index = currTXBuffIndex;
-            soapy_sidekiq::ScopeExit reservation(
-                [this, block_index]() noexcept
-                {
-                    std::lock_guard<std::mutex> lock(tx_buf_mutex);
-                    p_tx_status[block_index] = 0;
-                });
-            auto context = std::make_unique<passedStruct>();
-            context->classAddr = this;
-            context->txIndex = block_index;
-
-            // Pointer to the location in the output buffer to copy to.
-            char *outbuff_ptr = reinterpret_cast<char *>(p_tx_block[currTXBuffIndex]->data);
-
-            // determine if we received short or float
-            if (txUseShort)
-            {
-                // CS16
-                memcpy(outbuff_ptr, inbuff_ptr, tx_block_bytes);
-            }
-            else
-            {
-                // Clip and normalize exceptional CF32 values before integer storage.
-                soapy_sidekiq::convertCf32ToCs16(reinterpret_cast<const float *>(inbuff_ptr),
-                                                 reinterpret_cast<std::int16_t *>(outbuff_ptr),
-                                                 current_tx_block_size,
-                                                 static_cast<float>(this->txMaxValue));
-            }
-
-            status = skiq_transmit(this->card, stream_handle->tx_handle,
-                                   this->p_tx_block[block_index], context.get());
-            if (status == 0)
-            {
-                // The SDK completion callback now owns context. It may already
-                // have run synchronously; do not inspect context after submit.
-                context.release();
-                reservation.release();
-            }
-        }
-        catch (const std::exception &error)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR,
-                          "TX packet preparation/submission failed (card %u, handle %u): %s", card,
-                          stream_handle->tx_handle, error.what());
-            return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
-                                   : static_cast<int>(curr_block * current_tx_block_size);
-        }
-        if (status == SKIQ_TX_ASYNC_SEND_QUEUE_FULL)
-        {
-            // A completion during skiq_transmit must satisfy this predicate
-            // immediately; wait only when no completion has made progress.
-            std::unique_lock<std::mutex> lock(tx_buf_mutex);
-            const bool progressed =
-                tx_writes_stopping ||
-                (Clock::now() < deadline &&
-                 tx_buf_cv.wait_until(lock, deadline,
-                                      [this, observed_completions] {
-                                          return tx_writes_stopping ||
-                                                 complete_count != observed_completions;
-                                      }));
-            if (tx_writes_stopping)
-                return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
-                                       : static_cast<int>(curr_block * current_tx_block_size);
-            if (!progressed)
-            {
-                return curr_block == 0 ? SOAPY_SDR_TIMEOUT
-                                       : static_cast<int>(curr_block * current_tx_block_size);
-            }
-        }
-        else if (status != 0)
-        {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "skiq_transmit failed (card %u, handle %u), status %d",
-                          card, stream_handle->tx_handle, status);
-            // Accepted packets cannot be rolled back. Report their prefix so
-            // the caller retries only the unsent suffix after a hard SDK error.
-            return curr_block == 0 ? SOAPY_SDR_STREAM_ERROR
-                                   : static_cast<int>(curr_block * current_tx_block_size);
-        }
-        else
-        {
-            curr_block++;
-
-            // move the index into the transmit block array
-            currTXBuffIndex = (currTXBuffIndex + 1) % DEFAULT_NUM_BUFFERS;
-
-            // move the pointer to the next block in the writeStream buffer
-            inbuff_ptr += input_block_bytes;
-
-        }
-
-    }
-
-    return static_cast<int>(numElems);
-}
-
-int SoapySidekiq::readStreamStatus(SoapySDR::Stream *stream, size_t &chanMask, int &flags,
-                                   long long &timeNs, const long timeoutUs)
-{
-    const StreamHandle *stream_handle = findStreamHandle(stream);
-    if (stream_handle == nullptr)
-        return SOAPY_SDR_STREAM_ERROR;
-    if (stream_handle->direction != SOAPY_SDR_TX)
-        return SOAPY_SDR_NOT_SUPPORTED;
-    if (active_tx_stream != stream_handle)
-        return SOAPY_SDR_STREAM_ERROR;
-    chanMask = 0;
-    flags = 0;
-    timeNs = 0;
-    if (timeoutUs < 0)
-        return SOAPY_SDR_STREAM_ERROR;
-
-    {
-        std::lock_guard<std::mutex> lock(tx_buf_mutex);
-        if (tx_writes_stopping)
-            return SOAPY_SDR_STREAM_ERROR;
-        ++active_tx_status_readers;
-    }
-    soapy_sidekiq::ScopeExit reader(
-        [this]() noexcept
-        {
-            {
-                std::lock_guard<std::mutex> lock(tx_buf_mutex);
-                --active_tx_status_readers;
-            }
-            tx_buf_cv.notify_all();
-        });
-
-    using Clock = std::chrono::steady_clock;
-    const auto start = Clock::now();
-    const auto budget = std::chrono::microseconds(timeoutUs);
-    const auto maximum =
-        std::chrono::duration_cast<std::chrono::microseconds>(Clock::time_point::max() - start);
-    const auto deadline = budget >= maximum ? Clock::time_point::max() : start + budget;
-    for (;;)
-    {
-        {
-            // One poller consumes each counter increase. Completion callbacks
-            // do not acquire this mutex; never hold their TX locks across SDK IO.
-            std::unique_lock<std::timed_mutex> status_lock(tx_status_mutex, std::defer_lock);
-            if (!status_lock.try_lock_until(deadline))
-                return SOAPY_SDR_TIMEOUT;
-            bool pending = false;
-            {
-                std::scoped_lock lock(tx_mutex, tx_buf_mutex);
-                if (tx_writes_stopping)
-                    return SOAPY_SDR_STREAM_ERROR;
-                pending = first_transmit && !tx_start_finished;
-                if (first_transmit && tx_start_finished && tx_start_status != 0)
-                    return SOAPY_SDR_STREAM_ERROR;
-            }
-            if (!pending)
-            {
-                uint32_t errors = 0;
-                const int status =
-                    skiq_read_tx_num_underruns(card, stream_handle->tx_handle, &errors);
-                if (status != 0)
-                {
-                    status_lock.unlock();
-                    SoapySDR_logf(
-                        SOAPY_SDR_ERROR,
-                        "skiq_read_tx_num_underruns failed (card %u, handle %u), status %d", card,
-                        stream_handle->tx_handle, status);
-                    return SOAPY_SDR_STREAM_ERROR;
-                }
-                const bool increased = errors > tx_underruns;
-                // Rebase after resets/decreases so future increments remain visible.
-                tx_underruns = errors;
-                if (increased)
-                {
-                    chanMask = 1; // Only stream channel zero exists, regardless of SDK handle.
-                    return SOAPY_SDR_UNDERFLOW;
-                }
-            }
-        }
-        const auto now = Clock::now();
-        if (now >= deadline)
-            return SOAPY_SDR_TIMEOUT;
-        // The SDK exposes a counter, not an event wait. Bound polling and let
-        // stopTxWrites wake this call promptly without consuming the timeout.
-        std::unique_lock<std::mutex> lock(tx_buf_mutex);
-        const auto wake = std::min(deadline, now + std::chrono::milliseconds(1));
-        if (tx_buf_cv.wait_until(lock, wake, [this] { return tx_writes_stopping; }))
-            return SOAPY_SDR_STREAM_ERROR;
-    }
 }

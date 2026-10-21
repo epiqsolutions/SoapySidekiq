@@ -178,6 +178,20 @@ write admission.
 CF32 components clip to [-1, 1], infinities clip to the corresponding endpoint,
 and NaN converts to zero before scaling to the card's TX full scale.
 
+The constructor argument `tx_buffer_count` selects 1–30000 preallocated host TX
+blocks; the compatibility default remains 30000. It is independent of
+`tx_block_size`, which defaults to 16380 complex samples. For example,
+`driver=sidekiq,card=0,tx_buffer_count=1024` uses 1024 blocks. Smaller pools reduce
+host memory and the number of outstanding sends, and may reach back-pressure
+sooner; writes retain their timeout and accepted-prefix contract.
+
+Payload plus SDK header storage is `4 * (tx_block_size + 4) * tx_buffer_count`
+bytes, excluding allocator, shared-owner, and status overhead. At the default
+block size this is 64 MiB for 1024 blocks and about 1.83 GiB for 30000 blocks.
+The limit bounds the count, rather than the total bytes; a larger block size
+also increases memory use. A lower default awaits throughput/latency measurements
+on supported cards.
+
 `listSampleRates()` retains a compatibility list spaced at 250 kHz within the
 SDK's reported bounds. It does not enumerate the exact profiles of cards with
 discrete rate support; the SDK validates each requested rate.
@@ -281,6 +295,13 @@ retain stream ownership so the caller can retry. TX stops keep new writes
 blocked after failure. `closeStream()` raises an exception if RX hardware
 cannot be stopped and retains the stream for recovery; active TX must be
 deactivated successfully before it can be closed.
+
+Device destruction closes TX write/status admission, drains admitted calls, and
+joins TX PPS startup before stopping TX, releasing stream storage, and removing
+callbacks. A pending SDK PPS start can still keep shutdown waiting for its edge;
+this cleanup does not cancel that SDK call. Accepted contexts retain their
+individual blocks and completion state; callbacks that never arrive remain an
+unresolved SDK shutdown lifetime issue.
 
 ## Sensors
 
