@@ -63,22 +63,31 @@ also keeps a per-run log in `logs/`. The suite writes its CTest output to
 `build/non_hardware/suite.log`. The final line reports the number of
 individual cases, rather than only the number of aggregate CTest executables.
 
-The TX write regression executable compiles the `writeStream` method body
-directly from `Streaming.cpp` against a minimal device and synchronous SDK
-fixture. CMake regenerates that body when the production source changes and
-fails configuration if the method boundaries cannot be found. These tests
-compare every sample in three CF32 and CS16 packets. They exercise successful
-input advancement, not hardware setup, allocation rollback, asynchronous
-callbacks, queue-full handling, or conversion clipping policy. CF32 coverage
-includes negative normalized components, zero, and both signed full-scale
-endpoints. The ASan/UBSan configuration also enables `float-cast-overflow` and
-stops on sanitizer errors.
+The TX write regression executable compiles production TX methods against a
+minimal device and scripted SDK boundary. CMake regenerates the extracted
+bodies when production sources change and fails configuration if their
+boundaries cannot be found. Cases compare every sample across multi-block
+CF32/CS16 writes and cover clipping, shared deadlines, queue-full and busy-block
+back-pressure, accepted prefixes and suffix retries, allocation/conversion
+rollback, synchronous and deferred/out-of-order completion, cancellation, and
+status polling. These fixtures do not construct a real SDK device or establish
+physical RF behavior. The ASan/UBSan configuration also enables
+`float-cast-overflow` and stops on sanitizer errors.
 
-The PPS write-gate regressions inject completed successful and failed startup
-results. They verify that a failed start rejects repeated writes without SDK
-submissions, while a successful start permits subsequent packets. They do not
-exercise the blocking SDK startup call, activation/reset behavior, or real PPS
-edges.
+PPS cases cover both injected completed results and the actual production
+activation/worker path. A controlled fake SDK call waits for an explicit test
+edge: writes time out while pending, wake on success/failure publication, and
+restart through an immediate activation without inheriting the old gate.
+Deactivation cancels a waiting writer, retains the configured token/pool, and
+joins startup before calling the hardware stop for either stop mode. Active
+close is rejected without freeing the pool. The fake edge is always released
+during test cleanup, including assertion failures.
+
+These tests deliberately observe that deactivation remains blocked until the
+pending SDK start returns. They do not establish cancellation of that SDK call,
+real PPS timing, RX/TX start synchronization on a card, or full device teardown
+while a real PPS edge is absent. The separate shutdown fixture checks device
+cleanup ordering with an injected worker, rather than this SDK startup call.
 
 The TX fixture also extracts the production native-format method to check
 separate RX/TX host scales. The SDK unpacked-sample table specifies X2/X4/X40
