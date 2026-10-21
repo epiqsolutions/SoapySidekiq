@@ -324,7 +324,7 @@ TEST_CASE("concrete device teardown permits callbacks on another thread")
 
 TEST_CASE("all concrete scalar-channel APIs reject invalid requests before SDK access")
 {
-    for (const auto counts : {std::pair<unsigned, unsigned>{2, 2}, {0, 2}, {2, 0}, {0, 0}})
+    for (const auto &counts : {std::pair<unsigned, unsigned>{2, 2}, {0, 2}, {2, 0}, {0, 0}})
     {
         scripted_sdk::reset();
         {
