@@ -505,6 +505,16 @@ if(tx_branch LESS 0)
     message(FATAL_ERROR "Could not locate RX activation branch")
 endif()
 string(SUBSTRING "${activate_method}" 0 ${tx_branch} rx_activate)
+# Keep the production status boundary and complete TX branch; RX is tested above.
+string(FIND "${activate_method}" "    if (stream_handle->direction == SOAPY_SDR_RX)" rx_branch)
+if(rx_branch LESS 0 OR tx_branch LESS rx_branch)
+    message(FATAL_ERROR "Could not locate TX activation boundaries")
+endif()
+string(SUBSTRING "${activate_method}" 0 ${rx_branch} tx_activate_prefix)
+math(EXPR tx_if_start "${tx_branch} + 9")
+string(SUBSTRING "${activate_method}" ${tx_if_start} -1 tx_activate_body)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/TxActivationMethods.inc"
+    "${tx_activate_prefix}    ${tx_activate_body}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/RxLifecycleMethods.inc"
     "${rx_close}\n${rx_deactivate}\n${rx_activate}\n    return 0;\n}\n")
 add_executable(rx_lifecycle_tests
