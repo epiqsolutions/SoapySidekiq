@@ -152,4 +152,6 @@ the measurement interval. Immediate starts and LO retuning are covered; PPS
 combinations and sample-rate/bandwidth transactions require separate runs/tests.
 An outer timeout or killed DUT is a failure requiring inspection, never successful
 cleanup. Synthetic detector and scripted-DUT regressions run in the non-hardware
-suite; no new physical pass is claimed until this program is run on hardware.
+suite. The [first physical observation](../../docs/validation/2026-10-22-continuity-results.md)
+failed the configured criterion with four approximately 0.5 ms drops on M.2
+TX while its RX was retuned. No continuity pass is claimed for that run.
