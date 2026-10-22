@@ -47,3 +47,37 @@ explicit applicable SDK contract or other sufficient evidence for:
 The [hardware follow-up](../tests/hardware/POST_UPDATE_VALIDATION.md) records
 observable outcomes. A finite test without a late callback is not proof of a
 quiescence barrier; killing a timed-out process is not successful cleanup.
+
+## Clarification request for Epiq
+
+The following questions are ready to send with the SDK version, card/transport,
+and hardware run evidence. No vendor request has been sent by this repository
+update. Please ask for a documented contract, including error returns and any
+version/card/transport restrictions, rather than inferring a barrier from one
+successful run.
+
+1. After `skiq_stop_tx_streaming` or `skiq_stop_tx_streaming_on_1pps` returns,
+   can the SDK still read a previously accepted application's TX block or invoke
+   its completion callback? Distinguish success, already-stopped, and other errors.
+2. Does `skiq_register_tx_complete_callback(card, nullptr)` wait for callbacks
+   already executing or queued? Can a captured callback still run afterward?
+3. After successful `skiq_exit`, are all reads of application TX blocks and
+   uses of their `p_user` contexts finished? If it is a barrier, does it also
+   guarantee callback delivery for every accepted send? If sends can be dropped
+   without a callback, what operation establishes safe reclamation of those
+   blocks/contexts? What is safe after a failed exit?
+4. If stop/unregister/exit are not the required barrier, which supported API
+   sequence establishes it? The driver must distinguish safe block reuse from
+   callback delivery and from completion of callbacks already running.
+5. For SDK 4.26 and supported successors, what controls the return deadline and
+   status of `skiq_start_tx_streaming_on_1pps` when the selected PPS source is
+   absent? The release history mentions timeout handling; state the applicable
+   bound and conditions. Is there a supported way for another thread to cancel
+   a pending start, and is calling stop during that pending start valid?
+
+Current host policy is conservative: successful submission transfers context
+ownership to completion; accepted contexts retain their blocks and bookkeeping;
+device cleanup joins the startup worker after the SDK call returns. Scripts test
+late delivery and controlled startup release, but do not prove answers to these
+questions. Until the applicable contract is established, do not reclaim a
+possibly SDK-visible accepted block merely because a driver timeout expired.

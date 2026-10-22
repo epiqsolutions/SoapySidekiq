@@ -153,9 +153,10 @@ It compiles against installed SDK headers while linking scripted/fail-fast SDK
 definitions, so its cases require no cards. Keep its cross-component scenarios
 small; detailed behavior matrices belong in the focused portable fixtures.
 
-The [software closeout record](docs/validation/2026-10-21-software-closeout.md)
-pins the combined-tree builds, tests, analysis, and documentation checks. The
-earlier [integration checkpoint](docs/validation/2026-10-21-integration.md) also
+The [software follow-up](docs/validation/2026-10-21-software-followup.md) pins
+the newer fixes, builds, tests, analysis, and documentation checks. The earlier
+[checkpoint](docs/validation/2026-10-21-software-closeout.md) retains its
+historical source pin. The earlier [integration checkpoint](docs/validation/2026-10-21-integration.md) also
 records install-layout exercises. Repeat affected checks after later changes;
 neither record is hardware qualification or a final release sign-off.
 

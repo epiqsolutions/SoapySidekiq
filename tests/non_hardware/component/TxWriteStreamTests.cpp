@@ -269,7 +269,6 @@ public:
   std::size_t active_tx_writers{}, active_tx_status_readers{};
   std::thread _tx_streaming_thread;
   bool first_transmit{false}, txUseShort{false}, iq_swap{true};
-  std::uint32_t p_tx_block_index{};
   std::uint32_t tx_buffer_count{fixture_tx_buffer_count};
   std::uint32_t current_tx_block_size{252}, tx_block_index{};
   std::uint8_t card{};

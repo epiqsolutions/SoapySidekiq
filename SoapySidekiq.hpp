@@ -205,7 +205,7 @@ class SoapySidekiq : public SoapySDR::Device
      * Sample Rate API
      ******************************************************************/
 
-    /** Write rate/bandwidth together and commit cached values only after checked readback. */
+    /** Write rate/bandwidth together and validate fresh SDK readback before returning. */
     void setSampleRate(const int direction, const size_t channel, const double rate) override;
 
     /** Read the current actual SDK sample rate, including fractional Hz. */
