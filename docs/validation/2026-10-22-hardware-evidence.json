@@ -1,0 +1,590 @@
+{
+  "evidence_host": "dave@192.168.2.151",
+  "repository": "/home/dave/SoapySidekiq",
+  "production_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+  "diagnostic_source_commit": "e52796e624b3b40d3ffb7a7be35300d89ffe6050",
+  "note": "Diagnostic reruns used modified Python source subsequently committed at diagnostic_source_commit; logged Git HEAD and installed production module remained production_commit. Raw files remain on the evidence host; hashes identify the files inspected on 2026-10-22.",
+  "summary": {
+    "path": "logs/master_20261022_hardware_validation_summary.md",
+    "sha256": "15e61bfb5973fe67f0fc9fe93d56644a8e670d3b9004538959aaf37d56341c66"
+  },
+  "logs": [
+    {
+      "group": "build_and_module",
+      "path": "logs/20261022T151855Z_master_20261022_driver_build_DT9xm1.log",
+      "sha256": "c98662fab064008547d7cc1077d636d0ca1c08322d03d6355f7568018e05a92d",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 300s env SIDEKIQ_SDK_DIR=/home/dave/sidekiq_sdk_v4.26.0 SOAPYSIDEKIQ_BUILD_DIR=/home/dave/SoapySidekiq/build/master-20261022-driver CMAKE_BUILD_PARALLEL_LEVEL=4 ./install.sh CMAKE_INSTALL_PREFIX:PATH=/home/dave/SoapySidekiq/build/master-20261022-install",
+      "exit_status": 0
+    },
+    {
+      "group": "build_and_module",
+      "path": "logs/20261022T151903Z_master_20261022_module_info_CDmOy2.log",
+      "sha256": "316c1116c7bdc952a84ccf0edc54f3cafc674d663cf31200b538a7ead50e7226",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 20s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install SoapySDRUtil --info",
+      "exit_status": 0
+    },
+    {
+      "group": "build_and_module",
+      "path": "logs/20261022T151929Z_master_20261022_module_check_eGufZp.log",
+      "sha256": "ebe19d40c702d32f28e31ba11812790f28bf4e62529bc5e0630488b36547cbde",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 20s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install SoapySDRUtil --check=sidekiq",
+      "exit_status": 0
+    },
+    {
+      "group": "initial_diagnostic_failure",
+      "path": "logs/20261022T151935Z_master_20261022_api_8n55_d29r23.log",
+      "sha256": "95e67ca8d35fde086043767fe4e5fd507bc29f165a78ff28e659103ba445c655",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/test_api.py --serial 8N55 --json build/integration-evidence/master_20261022/api_8n55.json",
+      "exit_status": 1
+    },
+    {
+      "group": "initial_diagnostic_failure",
+      "path": "logs/20261022T152000Z_master_20261022_api_47479_eTH5ts.log",
+      "sha256": "8df904591c9dee51fb494b5b05a292320d0d100d7d12122e1ef5924bcb397752",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/test_api.py --serial 47479 --json build/integration-evidence/master_20261022/api_47479.json",
+      "exit_status": 1
+    },
+    {
+      "group": "initial_diagnostic_failure",
+      "path": "logs/20261022T152006Z_master_20261022_api_nv100_hHscjU.log",
+      "sha256": "0d0a9a0919ea840582a13ded429c7547e620242ee4475a0f1c9b66705a5e231c",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 90s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/test_api.py --serial 9YAA --json build/integration-evidence/master_20261022/api_nv100.json",
+      "exit_status": 1
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152016Z_master_20261022_discovery_a5fLPV.log",
+      "sha256": "b49cfc8c6effdb3272fd7afdc0543286e0792edfa8ffa192c7de81fdfa017935",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 20s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install SoapySDRUtil --find=driver=sidekiq",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152016Z_master_20261022_probe_8n55_WO2MZr.log",
+      "sha256": "c855c54ed4c78615783b22aa90d840f6dbf1fe434541aea57c82c2cac906ffa2",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install SoapySDRUtil --probe=driver=sidekiq\\,serial=8N55",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152017Z_master_20261022_probe_pcie_LuZFHZ.log",
+      "sha256": "02c62f450d688b163e647a466793253c9e56c97eef3024ce06bdb414a2a59ffc",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install SoapySDRUtil --probe=driver=sidekiq\\,serial=47479",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152018Z_master_20261022_probe_nv100_QrfQ28.log",
+      "sha256": "f080f6b6eb841c8e4b16eed8a6c914506aa8de1b0b1e554c52e34ccacc809792",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install SoapySDRUtil --probe=driver=sidekiq\\,serial=9YAA",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152026Z_master_20261022_rx_cs16_8n55_QJTqbW.log",
+      "sha256": "4b325a63ab2968950c38211584a19d0d61cb264ef7314390cdd58d2311ddcee7",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 8N55 --rate 2e6 --bandwidth 1.6e6 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152027Z_master_20261022_rx_cf32_8n55_S6O4vX.log",
+      "sha256": "82730f06076bebd5e0a788bbff4c7139d4b215aabf8560922c5ac807548dccd5",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cf32_validate.py --serial 8N55 --rate 2e6 --bandwidth 1.6e6 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152027Z_master_20261022_rx_cs16_47479_SfczKT.log",
+      "sha256": "ca322296bac842c2145c902d5ca4836f3e44e4e38758fe918b0759f846402658",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 47479 --rate 2e6 --bandwidth 1.6e6 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152028Z_master_20261022_rx_cf32_47479_0Xff0P.log",
+      "sha256": "bffdd8d7c1877de6a0c0cdc8d1baa7636eb36a704f8ecfeaebe95f09b190c2a4",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cf32_validate.py --serial 47479 --rate 2e6 --bandwidth 1.6e6 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152029Z_master_20261022_rx_cs16_nv100_ch0_TvKmCz.log",
+      "sha256": "e27650fb260e98f904856fe248d507969a7dd066ec1b1544763b0dbc75b2bbb2",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 9YAA --channel 0 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152052Z_master_20261022_rx_cf32_nv100_ch0_lQx0KI.log",
+      "sha256": "10f5506819cd57f0ff3d4c9b92222f0b86f7e4cbad365c6723a9257bb054bdc4",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cf32_validate.py --serial 9YAA --channel 0 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152115Z_master_20261022_rx_cs16_nv100_ch2_inJQmJ.log",
+      "sha256": "f7ea575aeccbf269babfec0898da40087bbce1d342df65d3260d374b0261983d",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 9YAA --channel 2 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152139Z_master_20261022_rx_cf32_nv100_ch2_DLm77f.log",
+      "sha256": "a6b41caee2f0947735cecc5f0ea5c5b7435457f9441ec9b07727b0787ca1d7b0",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cf32_validate.py --serial 9YAA --channel 2 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152202Z_master_20261022_loop_8n55_w7Sem4.log",
+      "sha256": "fac6b82c2e84c8fc0cae8996a03d81d36e9ec78b2444bdbddac3aea70c91bec7",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/run_loop.py --serial 8N55 --rate 2e6 --bandwidth 1.6e6 --frequency 1e9 --cycles 3 --blocks-per-cycle 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152203Z_master_20261022_loop_47479_X3VPVY.log",
+      "sha256": "93c4b36a8daa46e0a5502d60c4271d8823af189b2d633726a33d66b8f03ef56b",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/run_loop.py --serial 47479 --rate 2e6 --bandwidth 1.6e6 --frequency 1e9 --cycles 3 --blocks-per-cycle 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152203Z_master_20261022_partial_8n55_N8JuAV.log",
+      "sha256": "d00e68f625f6bf68d023b416d432929f267df29f013bc248c9095f18c97948a4",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/partial_read_validate.py --serial 8N55 --rate 2e6 --frequency 1e9 --request 257 --reads 20 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152204Z_master_20261022_partial_47479_bT5GDJ.log",
+      "sha256": "1b62a1448f72c069e171af619491f1d27ffb6ce3a23072bd813e83ac9e987d5c",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/partial_read_validate.py --serial 47479 --rate 2e6 --frequency 1e9 --request 257 --reads 20 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152205Z_master_20261022_loop_nv100_ch2_HpjgSj.log",
+      "sha256": "9064721b19b4fb020277f3b5a58baa87d79ee4a9ae50bf10bcb80c16f2ac39e3",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/run_loop.py --serial 9YAA --channel 2 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --cycles 3 --blocks-per-cycle 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152228Z_master_20261022_partial_nv100_ch2_GXwkvw.log",
+      "sha256": "10234784c4d2dd0f5a7226da0b8c11b77fd862e01d58962b5e32bb93a05b9ed3",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/partial_read_validate.py --serial 9YAA --channel 2 --rate 1920000 --frequency 1e9 --request 257 --reads 20 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152256Z_master_20261022_rx_cs16_nv100_ch1_ljVTTm.log",
+      "sha256": "8f381a025861d87db9627f3aba14d4cd0f0c1b4565c668aa3399511cc3951777",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 9YAA --channel 1 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152319Z_master_20261022_rx_cf32_nv100_ch1_9uX6q9.log",
+      "sha256": "5c925b73a51b078ef14a26de2a6a7a24b05768950e1d624810cc28eaaf58a958",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cf32_validate.py --serial 9YAA --channel 1 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152342Z_master_20261022_loop_nv100_ch0_pgwLgj.log",
+      "sha256": "289d3a30e289d3bd34e11c9885b0c8505065a28a01eabe6fbdc23b7a4ea1dea9",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/run_loop.py --serial 9YAA --channel 0 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --cycles 3 --blocks-per-cycle 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152406Z_master_20261022_partial_nv100_ch0_0s5uDp.log",
+      "sha256": "02381d025e0f4edef926164bbcda27343bda6adcda78c31a36e786d0ed61c3f4",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/partial_read_validate.py --serial 9YAA --channel 0 --rate 1920000 --frequency 1e9 --request 257 --reads 20 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152429Z_master_20261022_finite_8n55_cs16_ANrt5H.log",
+      "sha256": "b3c33ea08f5cef2e08621546f3bae58427ce1646b8893258ea2b1ebeb91305ee",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u examples/python/rx_to_file.py build/integration-evidence/master_20261022/finite_8n55_cs16.bin --serial 8N55 --channel 0 --rate 2e6 --bandwidth 1.6e6 --frequency 1e9 --format CS16 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152430Z_master_20261022_finite_8n55_cf32_OWVOcY.log",
+      "sha256": "dd8c52e254261c210b48baae876f076e7c78de15714264b512e9b021c73dcca3",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u examples/python/rx_to_file.py build/integration-evidence/master_20261022/finite_8n55_cf32.bin --serial 8N55 --channel 0 --rate 2e6 --bandwidth 1.6e6 --frequency 1e9 --format CF32 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152430Z_master_20261022_finite_nv100_b1_cs16_xVE1yz.log",
+      "sha256": "54c7660db1415cf3364a36ad82f53996f7dddc9c961f2baceed0cedbc30e4979",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u examples/python/rx_to_file.py build/integration-evidence/master_20261022/finite_nv100_b1_cs16.bin --serial 9YAA --channel 2 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --format CS16 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152453Z_master_20261022_finite_nv100_b1_cf32_kxfUhR.log",
+      "sha256": "950066815b53d53363603ba1c4e3030d270ef63179767c9693d297e6be3d9c10",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u examples/python/rx_to_file.py build/integration-evidence/master_20261022/finite_nv100_b1_cf32.bin --serial 9YAA --channel 2 --rate 1920000 --bandwidth 1536000 --frequency 1e9 --format CF32 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152517Z_master_20261022_rx_cs16_47479_1msps_MrZI2O.log",
+      "sha256": "9f21243b71f83ddd028861c1b2b1f35c4c7b7c4a3c591e59602d038ab3ae9a96",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 47479 --channel 0 --rate 1000000 --bandwidth 800000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152517Z_master_20261022_rx_cs16_8n55_1msps_oXk84u.log",
+      "sha256": "b5123498322224a0789af65b746784fc11699058e9c8b81d97ec5016295bfc53",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 8N55 --channel 0 --rate 1000000 --bandwidth 800000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152518Z_master_20261022_rx_cs16_8n55_10msps_hvzngO.log",
+      "sha256": "a0f7f568bca86848e577e0044af45eedbe7884be09e16f704e7475c8830de1f6",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 8N55 --channel 0 --rate 10000000 --bandwidth 8000000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152519Z_master_20261022_rx_cs16_47479_10msps_4NyMqI.log",
+      "sha256": "0e4ef2b1d45bd676b754eb2838924d99bab8cce305aaef2a5742ffeaa5b0028a",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 47479 --channel 0 --rate 10000000 --bandwidth 8000000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152520Z_master_20261022_rx_cs16_nv100_b1_1msps_2EVmoE.log",
+      "sha256": "3c5b2972c5ff98b4de833ac143cbd2520ba0e64299697f61c2111c2087091eaa",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 9YAA --channel 2 --rate 1000000 --bandwidth 800000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152546Z_master_20261022_rx_cs16_nv100_b1_10msps_YTf0Gi.log",
+      "sha256": "728a60308ae5f9e784df0b1ba333373394e692c7d2198a2543fe5152b296bec7",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 60s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/cs16_validate.py --serial 9YAA --channel 2 --rate 10000000 --bandwidth 8000000 --frequency 1e9 --blocks 10 --timeout-us 200000",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152619Z_master_20261022_rf_8n55_to_pcie_cs16_du7w4B.log",
+      "sha256": "5c719d2031e33f70746c04e5df7dbc8d5221b638ba5d9c5f7fab74c31db26e91",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 8N55 --rx-serial 47479 --tx-format CS16 --rate 2e6 --frequency 1e9 --offset 250e3 --tx-gain 70 --rx-gain 0 --start-order tx-first --tx-duration 3 --rx-duration 2 --output build/integration-evidence/master_20261022/rf_8n55_to_pcie_cs16.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152624Z_master_20261022_rf_8n55_to_pcie_cf32_El2u3U.log",
+      "sha256": "ac37c7229152e9037ed49d2611007f024dcfa592bb48d040462547f0d1ea58c2",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 8N55 --rx-serial 47479 --tx-format CF32 --rate 2e6 --frequency 1e9 --offset 250e3 --tx-gain 70 --rx-gain 0 --start-order tx-first --tx-duration 3 --rx-duration 2 --output build/integration-evidence/master_20261022/master_20261022_rf_8n55_to_pcie_cf32.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152629Z_master_20261022_rf_pcie_to_8n55_cs16_prDVhR.log",
+      "sha256": "0aa8d60a3878a7232e7745abc82317ce123dd698ed957de770777e3d513e90e8",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --rx-serial 8N55 --tx-format CS16 --rate 2e6 --frequency 1e9 --offset 250e3 --tx-gain 70 --rx-gain 0 --start-order rx-first --tx-duration 3 --rx-duration 2 --output build/integration-evidence/master_20261022/master_20261022_rf_pcie_to_8n55_cs16.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152634Z_master_20261022_rf_pcie_to_8n55_cf32_6lKmFB.log",
+      "sha256": "85401de38ab1834e3582444d9c828e22b5395597b5bbd3345c5f97e00324ee7e",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --rx-serial 8N55 --tx-format CF32 --rate 2e6 --frequency 1e9 --offset 250e3 --tx-gain 70 --rx-gain 0 --start-order rx-first --tx-duration 3 --rx-duration 2 --output build/integration-evidence/master_20261022/master_20261022_rf_pcie_to_8n55_cf32.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152640Z_master_20261022_full_duplex_8n55_pcie_lVUAng.log",
+      "sha256": "c8f3fce39a92b395048893b17d8ab867185bc92da734eddef68462d051176eb9",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/full_duplex_pair_validate.py --dut-serial 8N55 --peer-serial 47479 --rate 2e6 --frequency 1e9 --dut-offset 250e3 --peer-offset=-300e3 --dut-tx-gain 70 --peer-tx-gain 70 --dut-rx-gain 0 --peer-rx-gain 0 --dut-duration 6 --peer-duration 4 --output-dir build/integration-evidence/master_20261022/full_duplex_8n55_pcie",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152648Z_master_20261022_retune_8n55_to_pcie_42W3jH.log",
+      "sha256": "0de29552bef84e8662e52d6639cd33c04d7161d5d5fb7527346f3395a309bed9",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 30s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_retune_validate.py --tx-serial 8N55 --tx-channel 0 --rate 2e6 --frequency 1e9 --tone-offset 250e3 --tx-gain 70 --rx-gain 0 --output-dir build/integration-evidence/master_20261022/retune_8n55_to_pcie",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152704Z_master_20261022_rf_pcie_to_nv100_b1_cs16_tiiiSl.log",
+      "sha256": "d9a05cc210ed9223673f5206fa6b9e0b1e70c522785025d06cf4f3c8cb6a776a",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 90s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --tx-channel 0 --rx-serial 9YAA --rx-channel 2 --tx-format CS16 --rate 1920000 --frequency 1000000000 --offset 256000 --tx-gain 60 --rx-gain 0 --rx-full-scale 32767 --start-order rx-first --startup-timeout 50 --tx-duration 3 --rx-duration 10 --output build/integration-evidence/master_20261022/rf_pcie_to_nv100_b1_cs16.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152737Z_master_20261022_rf_pcie_to_nv100_b1_cf32_vE5CgM.log",
+      "sha256": "b074c57bb92de934791a71de8ea0d9be2a3a9402f408f215c531b801c57c7cbe",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 90s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --tx-channel 0 --rx-serial 9YAA --rx-channel 2 --tx-format CF32 --rate 1920000 --frequency 1000000000 --offset 256000 --tx-gain 60 --rx-gain 0 --rx-full-scale 32767 --start-order rx-first --startup-timeout 50 --tx-duration 3 --rx-duration 10 --output build/integration-evidence/master_20261022/rf_pcie_to_nv100_b1_cf32.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152810Z_master_20261022_rf_nv100_a1_to_pcie_cs16_EkWBZ2.log",
+      "sha256": "e01a203194fc1d0853dbf29c95e6569d8d147ad3fe4490ddb368af8d6719a0c0",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 90s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 9YAA --tx-channel 0 --rx-serial 47479 --rx-channel 0 --tx-format CS16 --rate 1920000 --frequency 1000000000 --offset 256000 --tx-gain 20 --rx-gain 0 --rx-full-scale 2047 --start-order tx-first --startup-timeout 50 --tx-duration 10 --rx-duration 3 --output build/integration-evidence/master_20261022/rf_nv100_a1_to_pcie_cs16.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152844Z_master_20261022_rf_nv100_a1_to_pcie_cf32_XfYUGT.log",
+      "sha256": "bfa85590d6520c52efa7627c441b64386c32e84bc0a880c1c14c75ae6f5646df",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 90s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 9YAA --tx-channel 0 --rx-serial 47479 --rx-channel 0 --tx-format CF32 --rate 1920000 --frequency 1000000000 --offset 256000 --tx-gain 20 --rx-gain 0 --rx-full-scale 2047 --start-order tx-first --startup-timeout 50 --tx-duration 10 --rx-duration 3 --output build/integration-evidence/master_20261022/rf_nv100_a1_to_pcie_cf32.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T152918Z_master_20261022_full_duplex_nv100_pcie_erg36L.log",
+      "sha256": "0fb654912225d010a88240967c1f9de4d8677f169a543b56c96e7159b6e6066e",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 150s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/full_duplex_pair_validate.py --dut-serial 9YAA --peer-serial 47479 --dut-rx-channel 2 --dut-tx-channel 0 --dut-rx-full-scale 32767 --peer-rx-full-scale 2047 --rate 1920000 --frequency 1000000000 --dut-offset 256000 --peer-offset -320000 --dut-tx-gain 0 --peer-tx-gain 60 --dut-rx-gain 0 --peer-rx-gain 0 --dut-duration 12 --peer-duration 5 --startup-timeout 70 --output-dir build/integration-evidence/master_20261022/full_duplex_nv100_pcie",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153012Z_master_20261022_retune_nv100_a1_to_pcie_w1ypvS.log",
+      "sha256": "e29920e02afb55911d8b6256cbdd3b1acdab0cfc99196b577a7523df450938f2",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 120s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_retune_validate.py --tx-serial 9YAA --tx-channel 0 --startup-timeout 70 --tx-duration 8 --rate 1920000 --frequency 1000000000 --tone-offset 256000 --tx-gain 0 --rx-gain 0 --output-dir build/integration-evidence/master_20261022/retune_nv100_a1_to_pcie",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153051Z_master_20261022_rf_pcie_to_nv100_a1_cs16_Lm1n6s.log",
+      "sha256": "c3c242943315354fd3603c5e0f4cb64d5903828e16c66093e41633b545991a0b",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 90s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --tx-channel 0 --rx-serial 9YAA --rx-channel 0 --tx-format CS16 --rate 1920000 --frequency 1000000000 --offset 256000 --tx-gain 60 --rx-gain 0 --rx-full-scale 32767 --start-order rx-first --startup-timeout 50 --tx-duration 3 --rx-duration 10 --output build/integration-evidence/master_20261022/master_20261022_rf_pcie_to_nv100_a1_cs16.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153124Z_master_20261022_rf_pcie_to_nv100_a2_cs16_R084QP.log",
+      "sha256": "aee1289a18f70dbc7370ae63835551b1a8c2ff342549e1df75929effe94fd136",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 90s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --tx-channel 0 --rx-serial 9YAA --rx-channel 1 --tx-format CS16 --rate 1920000 --frequency 1000000000 --offset 256000 --tx-gain 60 --rx-gain 0 --rx-full-scale 32767 --start-order rx-first --startup-timeout 50 --tx-duration 3 --rx-duration 10 --output build/integration-evidence/master_20261022/rf_pcie_to_nv100_a2_cs16.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153201Z_master_20261022_rf_8n55_to_47479_1msps_YByUqc.log",
+      "sha256": "6efec71bada8cad380672142114ced395a6c6efe5b2504f17dd30589f078d28b",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 35s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 8N55 --rx-serial 47479 --tx-format CS16 --rate 1000000 --frequency 1e9 --offset 250e3 --tx-gain 70 --rx-gain 0 --start-order tx-first --tx-duration 3 --rx-duration 2 --output build/integration-evidence/master_20261022/master_20261022_rf_8n55_to_47479_1msps.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153206Z_master_20261022_rf_47479_to_8n55_1msps_YxW77J.log",
+      "sha256": "24c2ea8fd6373c62f2d9e071f3e06ddb2c5cf83c62b71f61b8705e4ae2922ace",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 35s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --rx-serial 8N55 --tx-format CS16 --rate 1000000 --frequency 1e9 --offset 250e3 --tx-gain 70 --rx-gain 0 --start-order rx-first --tx-duration 3 --rx-duration 2 --output build/integration-evidence/master_20261022/master_20261022_rf_47479_to_8n55_1msps.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153212Z_master_20261022_rf_8n55_to_47479_10msps_uxSi3L.log",
+      "sha256": "9d031a78a137b507bd7f5a95c5a8b95e89ce888de0995d04a225efbfd788b40d",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 35s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 8N55 --rx-serial 47479 --tx-format CS16 --rate 10000000 --frequency 1e9 --offset 250e3 --tx-gain 70 --rx-gain 0 --start-order tx-first --tx-duration 3 --rx-duration 2 --output build/integration-evidence/master_20261022/master_20261022_rf_8n55_to_47479_10msps.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153217Z_master_20261022_rf_47479_to_8n55_10msps_ntt82T.log",
+      "sha256": "ab7a6d9c4c0fdd617ba6f25a557ce1d1182b0e6b8b3ee6bdc1c8bc9ac82074a8",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 35s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --rx-serial 8N55 --tx-format CS16 --rate 10000000 --frequency 1e9 --offset 250e3 --tx-gain 70 --rx-gain 0 --start-order rx-first --tx-duration 3 --rx-duration 4 --output build/integration-evidence/master_20261022/master_20261022_rf_47479_to_8n55_10msps.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153223Z_master_20261022_rf_pcie_to_nv100_b1_1msps_jHjkfc.log",
+      "sha256": "15396604ed000300f26fcfe6f90dcfbb838dadd6a332f83c315b812ccc9c89b8",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 100s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --tx-channel 0 --rx-serial 9YAA --rx-channel 2 --tx-format CS16 --rate 1000000 --frequency 1000000000 --offset 250000 --tx-gain 60 --rx-gain 0 --rx-full-scale 32767 --start-order rx-first --startup-timeout 50 --tx-duration 3 --rx-duration 10 --output build/integration-evidence/master_20261022/master_20261022_rf_pcie_to_nv100_b1_1msps.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153259Z_master_20261022_rf_nv100_a1_to_pcie_1msps_mAgRDN.log",
+      "sha256": "60c5e884bdd5d2ee3aff644f6f34e790f9ed463f81ed920fa0a7e612a36b32b1",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 100s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 9YAA --tx-channel 0 --rx-serial 47479 --rx-channel 0 --tx-format CS16 --rate 1000000 --frequency 1000000000 --offset 250000 --tx-gain 20 --rx-gain 0 --rx-full-scale 2047 --start-order tx-first --startup-timeout 50 --tx-duration 10 --rx-duration 3 --output build/integration-evidence/master_20261022/master_20261022_rf_nv100_a1_to_pcie_1msps.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153336Z_master_20261022_rf_pcie_to_nv100_b1_10msps_ZDbZhA.log",
+      "sha256": "b8e67a06bf046f3af17ec7884abbc7dbf2b2da3e71b7ddbcf1b2e0c1df55f531",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 100s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 47479 --tx-channel 0 --rx-serial 9YAA --rx-channel 2 --tx-format CS16 --rate 10000000 --frequency 1000000000 --offset 500000 --tx-gain 60 --rx-gain 0 --rx-full-scale 32767 --start-order rx-first --startup-timeout 50 --tx-duration 3 --rx-duration 10 --output build/integration-evidence/master_20261022/master_20261022_rf_pcie_to_nv100_b1_10msps.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153413Z_master_20261022_rf_nv100_a1_to_pcie_10msps_MF1GH5.log",
+      "sha256": "3318f545a403bf5c00b3cad70362dd62d21ddf88a2951c43d1824543244eeae8",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 100s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/paired_tone_validate.py --tx-serial 9YAA --tx-channel 0 --rx-serial 47479 --rx-channel 0 --tx-format CS16 --rate 10000000 --frequency 1000000000 --offset 500000 --tx-gain 20 --rx-gain 0 --rx-full-scale 2047 --start-order tx-first --startup-timeout 50 --tx-duration 10 --rx-duration 3 --output build/integration-evidence/master_20261022/master_20261022_rf_nv100_a1_to_pcie_10msps.cs16",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153456Z_master_20261022_pps_8n55_qBA7id.log",
+      "sha256": "6faf114d379f72937b79900ce3492193553aa04218b054336cde323a1b8831d2",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/pps_lifecycle_validate.py --serial 8N55 --rate 2e6 --rx-channel 0 --tx-channel 0",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153504Z_master_20261022_pps_47479_ps0pJd.log",
+      "sha256": "52513f32a4fe9233a10e277136fd49a974e76080ae925c3b2fb1cd49c5f04f66",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/pps_lifecycle_validate.py --serial 47479 --rate 2e6 --rx-channel 0 --tx-channel 0",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153512Z_master_20261022_pps_nv100_a1_CfzYVb.log",
+      "sha256": "8de984c1a062d5790862bfb80abf8e434479669fe618826c372402e1d986b679",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 120s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/pps_lifecycle_validate.py --serial 9YAA --rate 1920000 --rx-channel 0 --tx-channel 0",
+      "exit_status": 0
+    },
+    {
+      "group": "hardware_matrix",
+      "path": "logs/20261022T153600Z_master_20261022_pps_nv100_b1_a1_Uq65z7.log",
+      "sha256": "d833e407588e24bcc8b4c51d22e427900f895f399262abca1c582ca4d6ccb64d",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 120s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/pps_lifecycle_validate.py --serial 9YAA --rate 1920000 --rx-channel 2 --tx-channel 0",
+      "exit_status": 0
+    },
+    {
+      "group": "diagnostic_rerun",
+      "path": "logs/20261022T154724Z_api_no_lo_read_20261022_8N55_lVV255.log",
+      "sha256": "428aa116d407feb1a2710a364b5acb01ce280acf6e3cbab99317109bd37e4821",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/test_api.py --serial 8N55 --json build/integration-evidence/master_20261022/api_8N55_no_lo_read.json",
+      "exit_status": 0
+    },
+    {
+      "group": "diagnostic_rerun",
+      "path": "logs/20261022T154725Z_api_no_lo_read_20261022_47479_thIhPu.log",
+      "sha256": "d2c725397a7a7d43e21b8a0ac294e601a299a770eed4e492e2ea60dbeddc0a3c",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/test_api.py --serial 47479 --json build/integration-evidence/master_20261022/api_47479_no_lo_read.json",
+      "exit_status": 0
+    },
+    {
+      "group": "diagnostic_rerun",
+      "path": "logs/20261022T154726Z_api_no_lo_read_20261022_9YAA_SbPSVJ.log",
+      "sha256": "db4afca7f1af74068fbe92768630f172d902110c2b18b3b4c68c77c4fc1d97be",
+      "logged_commit": "7d295b4551004ea411fab550017e9b93d6cac6d8",
+      "command": "timeout 45s env SOAPY_SDR_ROOT=/home/dave/SoapySidekiq/build/master-20261022-install PYTHONDONTWRITEBYTECODE=1 python3 -u tests/hardware/test_api.py --serial 9YAA --json build/integration-evidence/master_20261022/api_9YAA_no_lo_read.json",
+      "exit_status": 0
+    }
+  ],
+  "diagnostic_reports": [
+    {
+      "path": "build/integration-evidence/master_20261022/api_47479_no_lo_read.json",
+      "sha256": "708260948fa9a69d30af9f38c65c2a8646f07c62f8741a3fde51be242c4ce302",
+      "device_args": {
+        "driver": "sidekiq",
+        "serial": "47479"
+      },
+      "summary": {
+        "fail": 0,
+        "pass": 16,
+        "skip": 0
+      }
+    },
+    {
+      "path": "build/integration-evidence/master_20261022/api_8N55_no_lo_read.json",
+      "sha256": "d0e72c71f95c8cef555927ca46de5cdaa3d3d9112291b769d444adf0ad5836f2",
+      "device_args": {
+        "driver": "sidekiq",
+        "serial": "8N55"
+      },
+      "summary": {
+        "fail": 0,
+        "pass": 16,
+        "skip": 0
+      }
+    },
+    {
+      "path": "build/integration-evidence/master_20261022/api_9YAA_no_lo_read.json",
+      "sha256": "b74520017b48f1a78a4b7e3c60a923a67403a30179a0c394f300162ac915ecf9",
+      "device_args": {
+        "driver": "sidekiq",
+        "serial": "9YAA"
+      },
+      "summary": {
+        "fail": 0,
+        "pass": 32,
+        "skip": 0
+      }
+    }
+  ]
+}

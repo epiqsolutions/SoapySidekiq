@@ -1,6 +1,8 @@
 # Hardware follow-up for the update series
 
-Status: procedure prepared; no new hardware run is claimed here. The
+Status: procedure, not a result record. The [2026-10-22 hardware results](../../docs/validation/2026-10-22-hardware-results.md)
+record 58 matrix commands on the driver through #145 and distinguish remaining
+follow-up gaps. The
 [original campaign](INTEGRATION_TEST_PLAN.md) used its pinned historical
 candidate. This follow-up covers later ownership, configuration, buffering, and
 PPS changes after their reviews and integration are complete.

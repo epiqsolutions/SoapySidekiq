@@ -11,8 +11,9 @@ Draft card/API contributions #80–#86 are excluded from the current software
 completion pass. They remain pending and are not included in these capability
 claims. See the [software follow-up](validation/2026-10-21-software-followup.md)
 for the exact checked source and remaining gates. Pin the final release commit
-and refresh its validation matrix before publishing a release. No new hardware
-run is claimed here.
+and refresh its validation matrix before publishing a release. The
+[2026-10-22 hardware results](validation/2026-10-22-hardware-results.md) record
+the matrix run on `7d295b4`, with remaining qualification gaps explicit.
 
 ## Behavior changes and fixes
 
@@ -125,3 +126,8 @@ Before release, record the final commit, complete review/integration, rerun
 normal/sanitizer and native/ARM checks, attach hardware evidence, audit the
 final documentation, and account for useful code/tests before retiring old
 branches. Keep unsupported or skipped combinations explicit.
+
+The [2026-10-22 hardware record](validation/2026-10-22-hardware-results.md)
+adds source-pinned results for 58 matrix commands and three corrected passive
+diagnostic reruns (64 checks). It does not supersede the remaining SDK contract,
+pool-measurement, same-process, or target qualification requirements.
