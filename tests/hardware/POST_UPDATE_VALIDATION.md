@@ -97,3 +97,57 @@ List each check as pass, failure, capability skip, or setup skip with its exact
 command and evidence location. Attach the summary to the reviewed candidate or
 release record. Record remaining SDK callback/PPS limits and untested hardware
 separately. The earlier campaign's completion does not complete this follow-up.
+
+## Same-card TX envelope continuity during RX retuning
+
+`tx_continuity_validate.py` adds a separate measurement for this case. One DUT
+instance transmits continuously from a writer thread while its RX is stopped,
+retuned between two LOs, and restarted. A different card, in a separate process,
+continuously receives the DUT's TX signal through a known attenuated RF path.
+The DUT RX only needs sample progress; it does not require a second RF source.
+
+For example, with the previously used M.2 TX → PCIe RX path and confirmed levels:
+
+```sh
+tests/run_logged.sh same_card_continuity timeout 60s env \
+  SOAPY_SDR_ROOT="$PWD/build/master-20261022-install" \
+  PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -u \
+  tests/hardware/tx_continuity_validate.py \
+  --dut-serial 8N55 --observer-serial 47479 \
+  --rate 2000000 --frequency 1000000000 --offset 250000 \
+  --retune-hz 100000 --attenuation 80 --observer-gain 0 \
+  --max-gap-us 100 --drop-db 12 \
+  --output-dir build/integration-evidence/same-card-continuity-001
+```
+
+Choose supported card/rate/channels, approved levels, and a fresh output
+directory for each run. NV100 needs an accepted profile (for example 1.92 MS/s)
+and explicit RX/TX handles mapped to logical channels as appropriate. Record
+`SoapySDRUtil --info`, the module commit, SDK version, wiring, and exact command.
+The isolated module must contain the reviewed production candidate; adding this
+Python test does not by itself change that module. The observer is initialized first, then starts a fresh RX session after DUT TX
+warmup. No card is initialized while the DUT already transmits.
+
+The default criterion rejects envelope drops greater than 12 dB below the
+initial 0.2-second median lasting **more than 100 microseconds**, with checks at
+every sample (including analysis-window boundaries). It also requires adequate
+baseline level, an expected tone in every successive 16384-sample FFT window,
+nonclipped levels, contiguous timestamped observer reads, successful RX lifecycle
+calls and frequency readback, TX submission progress in every retune cycle, and
+successful cleanup. Adjust limits to a stated acceptance requirement and retain
+them in the run record; smaller gaps need a smaller configured duration.
+
+Evidence includes `observer.cs16`, per-read `blocks.jsonl`, and `result.json`
+with arguments, phase events, accepted counts, thresholds, and measurements.
+The tone is quantized to an integer number of cycles per TX MTU so repeating
+whole buffers does not itself introduce phase resets. The result records its
+actual offset and uses actual SDK readback rates for analysis/timestamps.
+
+This is an **RF envelope continuity** test at its reported sensitivity, not proof
+of identical transmitted sample sequences or arbitrary phase continuity. Observer
+errors/timeouts/overruns fail the run rather than being silently discarded during
+the measurement interval. Immediate starts and LO retuning are covered; PPS
+combinations and sample-rate/bandwidth transactions require separate runs/tests.
+An outer timeout or killed DUT is a failure requiring inspection, never successful
+cleanup. Synthetic detector and scripted-DUT regressions run in the non-hardware
+suite; no new physical pass is claimed until this program is run on hardware.
