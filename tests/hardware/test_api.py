@@ -76,15 +76,11 @@ def collect_checks(device, directions, channels=None, read_sensors=False):
                                    for value in device.getSampleRateRange(direction, channel)],
         }
 
-    def rf_readback(direction, channel):
-        values = {"frequency": float(device.getFrequency(direction, channel)),
-                  "sample_rate": float(device.getSampleRate(direction, channel)),
-                  "bandwidth": float(device.getBandwidth(direction, channel))}
-        if not all(math.isfinite(value) and value >= 0 for value in values.values()):
-            raise ValueError("RF readback contains a negative or non-finite value")
-        if values["sample_rate"] == 0 or values["bandwidth"] == 0:
-            raise ValueError("actual sample rate/bandwidth is zero")
-        return values
+    def numeric_readback(value, name, positive=False):
+        number = float(value)
+        if not math.isfinite(number) or number < 0 or (positive and number == 0):
+            raise ValueError(f"{name} readback is invalid: {number}")
+        return number
 
     check("identification", identity)
     for name, direction in directions:
@@ -109,7 +105,12 @@ def collect_checks(device, directions, channels=None, read_sensors=False):
                 continue
             check(f"{prefix} stream metadata", lambda: stream_metadata(direction, channel))
             check(f"{prefix} RF metadata", lambda: rf_metadata(direction, channel))
-            check(f"{prefix} RF readback", lambda: rf_readback(direction, channel))
+            check(f"{prefix} sample rate readback",
+                  lambda: numeric_readback(device.getSampleRate(direction, channel),
+                                           "sample rate", positive=True))
+            check(f"{prefix} bandwidth readback",
+                  lambda: numeric_readback(device.getBandwidth(direction, channel),
+                                           "bandwidth", positive=True))
 
     sensors = check("sensor enumeration", lambda: list(device.listSensors()))
     if sensors is not None:
