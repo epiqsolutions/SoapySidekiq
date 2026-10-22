@@ -198,9 +198,14 @@ class ScriptedDutTests(unittest.TestCase):
                 calls.append(("close", stream))
 
         events = []
-        messages = iter(("capture", "stop"))
+        messages = iter(("observer_initialized", "capture", "stop"))
+        def receive():
+            command = next(messages)
+            calls.append(("handshake", command))
+            return command
+
         pipe = SimpleNamespace(send=events.append, poll=lambda seconds: True,
-                               recv=lambda: next(messages))
+                               recv=receive)
         fake = SimpleNamespace(Device=Device, SOAPY_SDR_RX=0, SOAPY_SDR_TX=1,
                                SOAPY_SDR_CS16="CS16")
         args = validator.parse_args(["--dut-serial", "dut", "--observer-serial", "peer",
@@ -212,11 +217,13 @@ class ScriptedDutTests(unittest.TestCase):
                     validator.dut_worker(args, pipe)
             else:
                 validator.dut_worker(args, pipe)
-        return calls, events
+        return calls, [event for event in events if event["phase"] != "configured"]
 
     def test_same_device_tx_survives_rx_lifecycle_and_submissions_progress(self):
         calls, events = self.run_dut()
         self.assertEqual(sum(c[0] == "construct" for c in calls), 1)
+        self.assertLess(calls.index(("handshake", "observer_initialized")),
+                        calls.index(("activate", 1)))
         self.assertEqual(calls.count(("activate", 1)), 1)
         self.assertEqual(calls.count(("stop", 1)), 1)
         self.assertEqual(calls.count(("activate", 0)), 3)
@@ -279,17 +286,21 @@ class ScriptedObserverTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         output = Path(directory.name) / "run"
         state = {"blocks": 0, "now": 0.0, "stopped": False}
-        events = [(0, {"phase": "ready", "offset": 250000}),
+        events = [(0, {"phase": "configured"}),
+                  (0, {"phase": "ready", "offset": 250000}),
                   (4, {"phase": "retune_begin", "cycle": 0, "accepted": 100}),
                   (8, {"phase": "retune_end", "cycle": 0, "accepted": 200}),
                   (12, {"phase": "done", "accepted": 300})]
 
         class Pipe:
-            def poll(self):
+            def poll(self, timeout=None):
                 return bool(events and state["blocks"] >= events[0][0])
 
             def recv(self):
-                return events.pop(0)[1]
+                event = events.pop(0)[1]
+                if event["phase"] == "configured":
+                    state["dut_configured"] = True
+                return event
 
             def send(self, command):
                 if command == "stop":
@@ -311,6 +322,10 @@ class ScriptedObserverTests(unittest.TestCase):
                 state["stopped"] = True
 
         class Device:
+            def __init__(self):
+                if not state.get("dut_configured"):
+                    raise AssertionError("observer initialized before DUT")
+
             def __getattr__(self, name):
                 if name.startswith("set") or name in ("writeSetting", "closeStream"):
                     return lambda *args: None
@@ -380,3 +395,13 @@ class ScriptedObserverTests(unittest.TestCase):
         report = self.run_observer(fail_cleanup=True)
         self.assertEqual(report["status"], "FAIL")
         self.assertIn("cleanup_error", report)
+
+
+    def test_crashed_worker_reports_exit_code(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        pipe = SimpleNamespace(recv=Mock(side_effect=EOFError))
+        process = SimpleNamespace(exitcode=-11, join=Mock())
+        with self.assertRaisesRegex(RuntimeError, "exit code -11"):
+            validator.receive_worker(pipe, process)
+        process.join.assert_called_once_with(timeout=1)

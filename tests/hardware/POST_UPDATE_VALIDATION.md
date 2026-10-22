@@ -125,8 +125,10 @@ directory for each run. NV100 needs an accepted profile (for example 1.92 MS/s)
 and explicit RX/TX handles mapped to logical channels as appropriate. Record
 `SoapySDRUtil --info`, the module commit, SDK version, wiring, and exact command.
 The isolated module must contain the reviewed production candidate; adding this
-Python test does not by itself change that module. The observer is initialized first, then starts a fresh RX session after DUT TX
-warmup. No card is initialized while the DUT already transmits.
+Python test does not by itself change that module. The DUT is initialized first (M.2 before PCIe for this pair), then the observer
+is initialized before DUT TX is permitted to start. The observer starts a fresh
+RX session after TX warmup. No card is initialized while the DUT already
+transmits.
 
 The default criterion rejects envelope drops greater than 12 dB below the
 initial 0.2-second median lasting **more than 100 microseconds**, with checks at

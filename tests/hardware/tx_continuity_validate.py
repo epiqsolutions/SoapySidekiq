@@ -108,6 +108,15 @@ def validate_events(events, cycles):
             raise AssertionError("missing TX progress in retune cycle")
 
 
+def receive_worker(connection, process):
+    """Turn a crashed/aborted worker's EOF into an actionable test failure."""
+    try:
+        return connection.recv()
+    except EOFError as error:
+        process.join(timeout=1)
+        raise RuntimeError(f"DUT worker disconnected; exit code {process.exitcode}") from error
+
+
 def dut_worker(args, connection):
     """One device instance owns concurrent TX writes and the RX lifecycle."""
     import SoapySDR as S
@@ -140,6 +149,11 @@ def dut_worker(args, connection):
         scale = device.getNativeStreamFormat(S.SOAPY_SDR_TX, args.dut_tx_channel).fullScale
         tone = 0.25 * scale * np.exp(2j * np.pi * offset * np.arange(mtu) / rate)
         buffer = np.column_stack((tone.real, tone.imag)).astype(np.int16).ravel()
+        # The known M.2/PCIe pair needs M.2 initialized before PCIe. Construct
+        # this DUT first, but do not transmit until the observer is initialized.
+        connection.send({"phase": "configured"})
+        if not connection.poll(args.deadline) or connection.recv() != "observer_initialized":
+            raise TimeoutError("observer did not finish initialization")
         require_ok("TX activate", device.activateStream(tx))
         tx_active = True
 
@@ -237,6 +251,16 @@ def validate(args):
     stream = process = None
     active = False
     try:
+        deadline = time.monotonic() + args.deadline
+        context = mp.get_context("spawn")
+        parent, child = context.Pipe()
+        process = context.Process(target=dut_worker, args=(args, child))
+        process.start()
+        child.close()
+        if not parent.poll(args.deadline):
+            raise TimeoutError("DUT did not initialize")
+        if receive_worker(parent, process).get("phase") != "configured":
+            raise RuntimeError("DUT did not report completed configuration")
         device = S.Device({"driver": "sidekiq", "serial": args.observer_serial,
                            "tx_buffer_count": "1"})
         device.writeSetting("counter", "false")
@@ -255,24 +279,19 @@ def validate(args):
                                     [args.observer_channel])
         mtu = device.getStreamMTU(stream)
         buffer = np.empty(mtu * 2, dtype="<i2")
-        context = mp.get_context("spawn")
-        parent, child = context.Pipe()
-        process = context.Process(target=dut_worker, args=(args, child))
-        process.start()
-        child.close()
+        parent.send("observer_initialized")
         capturing = False
         previous = None
         done_target = None
         acknowledge_capture = False
         samples = 0
-        deadline = time.monotonic() + args.deadline
         with (directory / "observer.cs16").open("wb") as output, \
                 (directory / "blocks.jsonl").open("w") as blocks:
             while True:
                 if time.monotonic() > deadline:
                     raise TimeoutError("continuity run deadline expired")
                 if parent.poll():
-                    event = parent.recv()
+                    event = receive_worker(parent, process)
                     event["observer_samples"] = samples
                     report["events"].append(event)
                     if event["phase"] == "ready":
