@@ -48,7 +48,6 @@ class FakeDevice:
             "hasGainMode": lambda direction, _: direction == 1,
             "getFrequencyRange": lambda *_: [span(70000000, 6000000000)],
             "getSampleRateRange": lambda *_: [span(625000, 61440000)],
-            "getFrequency": lambda *_: 100000000,
             "getSampleRate": lambda *_: 5000000,
             "getBandwidth": lambda *_: 4000000,
             "listSensors": lambda: ["temperature", "accelerometer"],
@@ -76,6 +75,7 @@ class ApiDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["summary"]["fail"], 0)
         self.assertEqual([args for name, args in device.calls if name == "getSampleRate"],
                          [(1, 0), (1, 1), (0, 0)])
+        self.assertFalse(any(name == "getFrequency" for name, _ in device.calls))
         self.assertFalse(any(name == "readSensor" for name, _ in device.calls))
         # FakeDevice rejects every setter and stream operation, so an unexpected
         # side effect becomes a reported failure rather than silently passing.
@@ -90,13 +90,15 @@ class ApiDiagnosticTests(unittest.TestCase):
 
     def test_failure_does_not_hide_other_channel_or_sensor_checks(self):
         device = FakeDevice()
-        device.failures.add("getFrequency")
+        device.failures.add("getSampleRate")
         result = api.collect_checks(device, [("RX", 1)])
         self.assertEqual(result["summary"]["fail"], 2)
         self.assertTrue(any(item["name"] == "sensor temperature metadata" and
                             item["status"] == "PASS" for item in result["checks"]))
         errors = [item["error"] for item in result["checks"] if item["status"] == "FAIL"]
-        self.assertTrue(all("getFrequency" in error for error in errors))
+        self.assertTrue(all("getSampleRate" in error for error in errors))
+        self.assertTrue(any(item["name"] == "RX channel 0 bandwidth readback" and
+                            item["status"] == "PASS" for item in result["checks"]))
 
     def test_absent_direction_is_skipped_but_explicit_missing_channel_fails(self):
         device = FakeDevice()
@@ -113,7 +115,7 @@ class ApiDiagnosticTests(unittest.TestCase):
         device.gain_range = span(10, 0)
         result = api.collect_checks(device, [("TX", 0)])
         self.assertEqual(result["summary"]["fail"], 2)
-        self.assertTrue(any(item["name"] == "TX channel 0 RF readback" and
+        self.assertTrue(any(item["name"] == "TX channel 0 sample rate readback" and
                             item["status"] == "PASS" for item in result["checks"]))
 
     def test_sensor_reads_are_explicit_and_keep_raw_optional_sensor_values(self):

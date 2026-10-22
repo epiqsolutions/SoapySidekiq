@@ -78,10 +78,12 @@ channel must exist in each selected direction. A direction with no channels is
 reported as skipped when checking the default channel set.
 
 The checks cover identification, stream format/full-scale metadata, RF ranges,
-current frequency/rate/bandwidth readbacks, sensor metadata, and clock/time-source
-enumeration. Failures are collected while other checks continue, and the exit
-status is nonzero if any check fails. `--json` records details and errors even
-when device construction fails. `--help` works without the SoapySDR bindings.
+current sample rate and bandwidth readbacks, sensor metadata, and clock/time-source
+enumeration. The diagnostic does not read an LO frequency because it does not
+configure one. Readback errors fail. Failures are collected while other checks
+continue, and the exit status is nonzero if any check fails.
+`--json` records details and errors even when device construction fails.
+`--help` works without the SoapySDR bindings.
 
 This replaces the old interactive script and its fixed write settings. It does
 not prompt, call RF setters, or create/activate streams. Device construction
